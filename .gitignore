@@ -1,0 +1,8 @@
+*.db
+__pycache__
+logs/
+build/
+dist/
+*.spec
+sample*/
+env/
