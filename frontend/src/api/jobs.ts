@@ -1,0 +1,92 @@
+import { apiRequest } from "./client";
+
+export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+
+export type Job = {
+  id: string;
+  type: string;
+  status: JobStatus;
+  artist_id: string | null;
+  input_user_id: string | null;
+  input_artwork_id: string | null;
+  total_files: number;
+  completed_files: number;
+  skipped_files: number;
+  failed_files: number;
+  cancel_requested: boolean;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error_message: string | null;
+};
+
+export type JobEvent = {
+  id: number | null;
+  job_id: string;
+  level: "debug" | "info" | "warning" | "error" | string;
+  message: string;
+  payload: Record<string, unknown> | null;
+  created_at: string | null;
+};
+
+export type JobDetail = Job & {
+  events: JobEvent[];
+};
+
+export type JobListResponse = {
+  items: Job[];
+  total: number;
+};
+
+export type JobCancelResponse = {
+  job_id: string;
+  status: JobStatus;
+  cancel_requested: boolean;
+};
+
+export type JobStreamMessage = {
+  type: "job_progress" | "job_event" | "job_completed" | "job_failed" | "job_cancelled" | string;
+  job_id: string;
+  status: JobStatus;
+  total_files: number;
+  completed_files: number;
+  skipped_files: number;
+  failed_files: number;
+  message: string;
+  created_at: string | null;
+};
+
+export type ListJobsParams = {
+  status?: JobStatus | "";
+  limit?: number;
+  offset?: number;
+};
+
+export function listJobs(params: ListJobsParams = {}): Promise<JobListResponse> {
+  const search = new URLSearchParams();
+  if (params.status) {
+    search.set("status", params.status);
+  }
+  if (params.limit) {
+    search.set("limit", String(params.limit));
+  }
+  if (params.offset) {
+    search.set("offset", String(params.offset));
+  }
+  const query = search.toString();
+  return apiRequest<JobListResponse>(`/jobs${query ? `?${query}` : ""}`);
+}
+
+export function getJob(jobId: string): Promise<JobDetail> {
+  return apiRequest<JobDetail>(`/jobs/${jobId}`);
+}
+
+export function cancelJob(jobId: string): Promise<JobCancelResponse> {
+  return apiRequest<JobCancelResponse>(`/jobs/${jobId}/cancel`, {
+    method: "POST"
+  });
+}
+
+export function listJobEvents(jobId: string): Promise<JobEvent[]> {
+  return apiRequest<JobEvent[]>(`/jobs/${jobId}/events`);
+}

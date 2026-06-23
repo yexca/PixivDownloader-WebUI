@@ -6,9 +6,9 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from backend.api import (
     routes_artists,
@@ -20,6 +20,7 @@ from backend.api import (
     routes_settings,
 )
 from backend.core.errors import ConfigError, DatabaseError, PixivApiError, PixivAuthError
+from backend.core.paths import project_root
 from backend.db.migrate import migrate_database
 from backend.workers.job_queue import JobQueue
 
@@ -59,6 +60,7 @@ def create_app(
     app.include_router(routes_artwork_files.router)
     app.include_router(routes_logs.router)
     register_exception_handlers(app)
+    register_frontend_routes(app)
     return app
 
 
@@ -114,6 +116,26 @@ def error_response(
             }
         },
     )
+
+
+def register_frontend_routes(app: FastAPI) -> None:
+    frontend_dist = project_root() / "frontend" / "dist"
+    index_file = frontend_dist / "index.html"
+    if not index_file.is_file():
+        return
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def serve_frontend(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="api route not found")
+        requested_path = (frontend_dist / full_path).resolve()
+        if (
+            full_path
+            and requested_path.is_file()
+            and frontend_dist.resolve() in requested_path.parents
+        ):
+            return FileResponse(requested_path)
+        return FileResponse(index_file)
 
 
 def main() -> None:
