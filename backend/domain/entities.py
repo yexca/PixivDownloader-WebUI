@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from backend.domain.types import ArtworkFileStatus
+from backend.domain.types import ArtworkFileStatus, JobEventLevel, JobStatus, JobType
 
 
 @dataclass(frozen=True)
@@ -11,7 +11,11 @@ class Artist:
     id: str
     name: str
     profile_url: str = ""
+    account: str | None = None
+    avatar_url: str | None = None
+    comment: str | None = None
     last_download_id: str | None = None
+    last_checked_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -22,6 +26,9 @@ class ArtworkFile:
     file_name: str
     status: ArtworkFileStatus = "pending"
     local_path: Path | None = None
+    id: int | None = None
+    size_bytes: int | None = None
+    downloaded_at: str | None = None
     error_message: str | None = None
 
 
@@ -30,6 +37,15 @@ class Artwork:
     id: str
     artist_id: str
     title: str = ""
+    type: str | None = None
+    caption: str | None = None
+    page_count: int = 0
+    width: int | None = None
+    height: int | None = None
+    sanity_level: int | None = None
+    restrict_value: int | None = None
+    tags: tuple[str, ...] = ()
+    pixiv_created_at: str | None = None
     files: tuple[ArtworkFile, ...] = field(default_factory=tuple)
 
 
@@ -40,3 +56,32 @@ class DownloadProgress:
     completed_files: int = 0
     skipped_files: int = 0
     failed_files: int = 0
+
+
+@dataclass(frozen=True)
+class Job:
+    id: str
+    type: JobType
+    status: JobStatus
+    input_user_id: str | None = None
+    input_artwork_id: str | None = None
+    artist_id: str | None = None
+    total_files: int = 0
+    completed_files: int = 0
+    skipped_files: int = 0
+    failed_files: int = 0
+    cancel_requested: bool = False
+    error_message: str | None = None
+    created_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+@dataclass(frozen=True)
+class JobEvent:
+    job_id: str
+    level: JobEventLevel
+    message: str
+    payload: dict[str, object] | None = None
+    id: int | None = None
+    created_at: str | None = None

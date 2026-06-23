@@ -4,7 +4,9 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, DownloadProgress
+from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.legacy_artist_repository import LegacyArtistRepository
 from backend.services.file_downloader import FileDownloader
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
@@ -32,12 +34,16 @@ class DownloadService:
         pixiv_client: PixivClientProtocol | None = None,
         file_downloader: FileDownloader | None = None,
         artist_repository: LegacyArtistRepository | None = None,
+        webui_artist_repository: ArtistRepository | None = None,
         sleeper: Callable[[], None] | None = None,
     ) -> None:
         resolved_sleeper = sleeper or RandomSleep()
         self.pixiv_client = pixiv_client or PixivClient(sleeper=resolved_sleeper)
         self.file_downloader = file_downloader or FileDownloader()
         self.artist_repository = artist_repository or LegacyArtistRepository()
+        self.webui_artist_repository = (
+            webui_artist_repository or self._create_webui_artist_repository()
+        )
         self.sleeper = resolved_sleeper
 
     def download(
@@ -86,6 +92,7 @@ class DownloadService:
 
         self._report(progress_callback, "Download completed, Inserting database...")
         self.artist_repository.upsert(artist, str(last_download_id))
+        self._upsert_webui_artist(artist, str(last_download_id))
         self._report(progress_callback, "Inserted database")
 
         return DownloadSummary(
@@ -111,6 +118,30 @@ class DownloadService:
         if existing_artist is not None:
             return existing_artist
         return artwork_artist
+
+    def _upsert_webui_artist(self, artist: Artist, last_download_id: str) -> None:
+        repository = self.webui_artist_repository
+        if repository is None:
+            return
+        repository.upsert(
+            Artist(
+                id=artist.id,
+                name=artist.name,
+                profile_url=artist.profile_url,
+                account=artist.account,
+                avatar_url=artist.avatar_url,
+                comment=artist.comment,
+                last_download_id=last_download_id,
+            )
+        )
+
+    def _create_webui_artist_repository(self) -> ArtistRepository | None:
+        try:
+            migrate_database(self.artist_repository.db_path)
+            return ArtistRepository(self.artist_repository.db_path)
+        except Exception:
+            logger.exception("failed to initialize WebUI artist repository")
+            return None
 
     def _report(self, progress_callback: ProgressCallback | None, message: str) -> None:
         if progress_callback is not None:

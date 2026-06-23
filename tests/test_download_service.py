@@ -1,4 +1,6 @@
+from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile
+from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.legacy_artist_repository import LegacyArtistRepository
 from backend.services.download_service import DownloadService
 from backend.services.file_downloader import FileDownloadResult
@@ -66,6 +68,8 @@ class FakeFileDownloader:
 
 def test_download_user_id_path_downloads_and_updates_legacy_artist(tmp_path):
     repository = LegacyArtistRepository(db_path=tmp_path / "pixiv.db")
+    migrate_database(tmp_path / "pixiv.db", settings_json_path=tmp_path / "missing.json")
+    webui_repository = ArtistRepository(tmp_path / "pixiv.db")
     pixiv_client = FakePixivClient()
     file_downloader = FakeFileDownloader(tmp_path)
     progress_messages = []
@@ -73,6 +77,7 @@ def test_download_user_id_path_downloads_and_updates_legacy_artist(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
+        webui_artist_repository=webui_repository,
         sleeper=lambda: None,
     )
 
@@ -84,6 +89,7 @@ def test_download_user_id_path_downloads_and_updates_legacy_artist(tmp_path):
     assert pixiv_client.artist_artworks_requests == ["123"]
     assert len(file_downloader.calls) == 2
     assert repository.get_by_id("123").last_download_id == "101"
+    assert webui_repository.get_by_id("123").last_download_id == "101"
     assert progress_messages[0] == "Getting user info..."
 
 
