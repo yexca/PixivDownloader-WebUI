@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 title PixivDownloader Installer
 
-echo Welcome to the PixivDownloader installer.
+echo Welcome to the PixivDownloader WebUI installer.
 echo.
 
 set "INSTALL_DIR=%~dp0"
@@ -12,6 +12,7 @@ set "ENV_DIR=%INSTALL_DIR%\env"
 set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-py312_25.11.1-1-Windows-x86_64.exe"
 set "CONDA_EXE=%MINICONDA_DIR%\Scripts\conda.exe"
 set "CONDA_BAT=%MINICONDA_DIR%\condabin\conda.bat"
+set "ENV_PYTHON=%ENV_DIR%\python.exe"
 
 set "startTime=%TIME%"
 set "startHour=%TIME:~0,2%"
@@ -22,9 +23,12 @@ set /a startMin=1%startMin% - 100
 set /a startSec=1%startSec% - 100
 set /a startTotal=startHour*3600 + startMin*60 + startSec
 
+cd /d "%INSTALL_DIR%"
 call :install_miniconda || goto :error
 call :create_conda_env || goto :error
-call :install_dependencies || goto :error
+call :install_backend_dependencies || goto :error
+call :install_frontend_dependencies || goto :error
+call :build_frontend || goto :error
 
 set "endTime=%TIME%"
 set "endHour=%TIME:~0,2%"
@@ -42,8 +46,8 @@ set /a seconds=elapsed %% 60
 
 echo Installation time: %hours% hours, %minutes% minutes, %seconds% seconds.
 echo.
-echo PixivDownloader has been installed successfully.
-echo To start the GUI, run 'run-gui.bat'.
+echo PixivDownloader WebUI has been installed successfully.
+echo To start the app, run run-gui.bat.
 echo.
 pause
 exit /b 0
@@ -75,14 +79,18 @@ echo.
 exit /b 0
 
 :create_conda_env
-if exist "%ENV_DIR%\python.exe" (
+if exist "%ENV_PYTHON%" (
     echo Local environment already exists at "%ENV_DIR%".
     echo.
     exit /b 0
 )
 
 echo Creating local Conda environment...
-call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=3.12
+if exist "%MINICONDA_DIR%\_conda.exe" (
+    call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=3.12
+) else (
+    call "%CONDA_EXE%" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=3.12
+)
 if errorlevel 1 (
     echo Failed to create the local Conda environment.
     exit /b 1
@@ -92,22 +100,66 @@ echo Local Conda environment created successfully.
 echo.
 exit /b 0
 
-:install_dependencies
-echo Installing dependencies into the local env folder...
-call "%CONDA_BAT%" activate "%ENV_DIR%"
-if errorlevel 1 (
-    echo Failed to activate the local environment.
+:install_backend_dependencies
+if not exist "%ENV_PYTHON%" (
+    echo Local Python was not found at "%ENV_PYTHON%".
+    echo The installer will not use a global Python installation.
     exit /b 1
 )
 
-python -m pip install --upgrade pip
+echo Installing backend dependencies into the local env folder...
+"%ENV_PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 exit /b 1
 
-python -m pip install PyQt6 pixivpy3 requests PyYAML fastapi uvicorn pydantic httpx websockets ruff pytest
+"%ENV_PYTHON%" -m pip install -e ".[dev]"
 if errorlevel 1 exit /b 1
 
-call "%CONDA_BAT%" deactivate
-echo Dependencies installation complete.
+echo Backend dependencies installation complete.
+echo.
+exit /b 0
+
+:install_frontend_dependencies
+where npm >nul 2>nul
+if errorlevel 1 (
+    echo npm was not found.
+    echo Please install the current Windows LTS version of Node.js from https://nodejs.org/
+    echo Then run this installer again.
+    echo.
+    exit /b 1
+)
+
+if not exist "%INSTALL_DIR%\frontend\package.json" (
+    echo Frontend package.json was not found.
+    exit /b 1
+)
+
+echo Installing frontend dependencies...
+cd /d "%INSTALL_DIR%\frontend"
+if exist "package-lock.json" (
+    call npm ci
+) else (
+    call npm install
+)
+if errorlevel 1 exit /b 1
+
+cd /d "%INSTALL_DIR%"
+echo Frontend dependencies installation complete.
+echo.
+exit /b 0
+
+:build_frontend
+echo Building frontend assets...
+cd /d "%INSTALL_DIR%\frontend"
+call npm run build
+if errorlevel 1 exit /b 1
+
+cd /d "%INSTALL_DIR%"
+if not exist "%INSTALL_DIR%\frontend\dist\index.html" (
+    echo Frontend build did not produce frontend\dist\index.html.
+    exit /b 1
+)
+
+echo Frontend build complete.
 echo.
 exit /b 0
 

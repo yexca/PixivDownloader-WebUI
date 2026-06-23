@@ -1,56 +1,109 @@
-# PyQt6 Pixiv Downloader & Manager
+# PixivDownloader-SQLite
 
-> 语言 / 言語: [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+> Languages: [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-A Windows desktop application built with **PyQt6** and **Python** for automatically collecting image data from specific Pixiv artists and managing it in a local **SQLite** database.
+PixivDownloader-SQLite is a Windows-first, local WebUI downloader for Pixiv artwork backup and management. It runs a FastAPI backend from the local `env` folder, serves a React + TypeScript frontend, and stores metadata in a local SQLite database.
 
-This project was originally developed using MySQL but was refactored to use SQLite for a more lightweight, portable, and serverless experience.
-
-MySQL Repo: <https://github.com/yexca/PixivDownloader-MySQL>
-
-## Overview
-
-Home
-
-![main](https://github.com/yexca/picx-images-hosting/raw/master/2026/01-pixiv-downloader-readme/image.73ufnw4wqo.webp)
-
-Setting
-
-![setting](https://github.com/yexca/picx-images-hosting/raw/master/2026/01-pixiv-downloader-readme/settings.32ig9i2nxz.webp)
-
-> Background image: <https://www.pixiv.net/artworks/83273073>
+The project was originally a PyQt6 desktop application and is being refactored into a local-first WebUI while preserving the existing SQLite data.
 
 ## Features
 
-* **User-Friendly GUI:** A simple and clean interface built with PyQt6.
-* **Automatic Data Collection:** Automatically downloads works (images) from the specified artists.
-* **Local Database Management:** All collected metadata (ID, URLs) is stored and organized in a local SQLite database.
-* **Lightweight & Portable:** By using SQLite, the application runs without needing a separate database server, making it easy to use and back up.
+- Start downloads by Pixiv user ID or artwork ID.
+- Manage download settings, including download path and Pixiv refresh token.
+- Track jobs, progress, history, artists, artworks, and file status in SQLite.
+- Migrate legacy `resources/pixiv.db` data from the old `pic` table.
+- Run locally through `run-gui.bat`; no separate database server is required.
 
-## Technology Stack
+## Runtime Architecture
 
-* **Python 3**
-* **PyQt6:** For the desktop application GUI.
-* **SQLite3:** For lightweight, local database storage.
+```text
+run-gui.bat
+  -> env\python.exe -m backend.app
+  -> FastAPI on http://127.0.0.1:7653
+  -> serves frontend\dist
+  -> opens the WebUI in the browser
+```
 
-## How to Run
+Main components:
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/yexca/PixivDownloader-SQLite.git
-    cd PixivDownloader-SQLite
-    ```
+- `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
+- `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
+- `resources/`: local configuration and SQLite database.
+- `app/`: legacy PyQt code kept during the transition.
 
-2.  **Install dependencies:**
-    ```bash
-    pip install PyQt6
-    ```
+## Install
 
-3.  **Run the application:**
-    ```bash
-    python main.py
-    ```
+Run from the project folder:
+
+```bat
+run-install.bat
+```
+
+The installer:
+
+1. Installs Miniconda to `%UserProfile%\Miniconda3` if it is missing.
+2. Creates the local `env` folder.
+3. Installs Python dependencies into `env`.
+4. Installs frontend dependencies with `npm`.
+5. Builds frontend assets into `frontend\dist`.
+
+The installer does not rely on global Python. Node.js is currently detected from the system PATH; install the Windows LTS version from <https://nodejs.org/> if `npm` is missing.
+
+## Run
+
+```bat
+run-gui.bat
+```
+
+The script checks that `env\python.exe` and `frontend\dist\index.html` exist, starts the backend, and opens <http://127.0.0.1:7653>.
+
+Set `PIXIVDOWNLOADER_PORT` before running the scripts if you need a different local port.
+
+## Development
+
+Backend dev server:
+
+```bat
+run-backend-dev.bat
+```
+
+Frontend dev server:
+
+```bat
+run-frontend-dev.bat
+```
+
+Manual checks:
+
+```bat
+env\python.exe -m ruff format --check .
+env\python.exe -m ruff check .
+env\python.exe -m pytest
+```
+
+```bat
+cd frontend
+npm run lint
+npm run typecheck
+npm run build
+```
+
+## Documentation
+
+- [Project overview](docs/project-overview.md)
+- [WebUI architecture](docs/webui-architecture.md)
+- [Database migrations](docs/database-migrations.md)
+
+## Packaging Notes
+
+In source checkout mode, the backend resolves resources from the repository root:
+
+- `resources\conf\settings.json`
+- `resources\pixiv.db`
+- `frontend\dist`
+
+For a packaged executable, resources should be placed beside the executable with the same relative layout. The backend path resolver uses the executable directory when running from a frozen build.
 
 ## Disclaimer
 
-This tool is intended for **personal, academic, or backup purposes only**. Please be responsible and respect Pixiv's Terms of Service. The developer is not responsible for any misuse of this application or for any violations of Pixiv's policies. Do not use this tool for mass-downloading or distribution of content.
+This tool is intended for personal learning, research, or backup purposes only. Use it responsibly and follow Pixiv's Terms of Service. Do not use it for mass downloading or redistribution of content.

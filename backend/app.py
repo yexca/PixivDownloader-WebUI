@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -139,7 +140,8 @@ def register_frontend_routes(app: FastAPI) -> None:
 
 
 def main() -> None:
-    uvicorn.run("backend.app:create_app", factory=True, host="127.0.0.1", port=8765)
+    port = int(os.environ.get("PIXIVDOWNLOADER_PORT", "7653"))
+    uvicorn.run("backend.app:create_app", factory=True, host="127.0.0.1", port=port)
 
 
 if __name__ == "__main__":

@@ -1,44 +1,107 @@
-# PyQt6 图像数据收集与管理系统 (Pixiv下载器)
+# PixivDownloader-SQLite
 
-> Language / 言語: [English](README.md) | [日本語](README.ja.md)
+> Languages: [English](README.md) | [日本語](README.ja.md)
 
-这是一个使用 **PyQt6** 和 **Python** 开发的 Windows 桌面应用程序。它能自动收集特定 Pixiv 画师的图像数据，并使用本地 **SQLite** 数据库进行管理
+PixivDownloader-SQLite 是一个面向 Windows 本地使用的 Pixiv 下载与管理工具。当前版本正在从旧的 PyQt6 桌面应用重构为本地 WebUI：使用 FastAPI 作为后端，React + TypeScript 作为前端，并继续使用本地 SQLite 保存数据。
 
-本项目最初使用 MySQL 开发，后为了实现更轻量化、便携性以及无服务器（Serverless）的体验，重构为使用 SQLite
+## 功能
 
-MySQL 版本仓库: <https://github.com/yexca/PixivDownloader-MySQL>
+- 通过 Pixiv 用户 ID 或作品 ID 创建下载任务。
+- 在 WebUI 中管理下载目录和 Pixiv `refresh_token`。
+- 使用 SQLite 记录任务、画师、作品和文件状态。
+- 自动迁移旧版 `resources/pixiv.db` 中的 `pic` 表数据。
+- 通过 `run-gui.bat` 本地启动，不需要独立数据库服务器。
 
-## 主要功能
+## 运行架构
 
-* **友好的用户界面(GUI):** 基于 PyQt6 构建的简洁明了的操作界面
-* **自动数据收集:** 自动下载指定画师的作品
-* **本地数据库管理:** 所有收集到的元数据（如 ID、URL 等）都存储在本地 SQLite 数据库中，易于管理和查询
-* **轻量与便携:** 采用 SQLite，无需安装独立的数据库服务器，使应用更易于使用和备份
+```text
+run-gui.bat
+  -> env\python.exe -m backend.app
+  -> 在 http://127.0.0.1:7653 启动 FastAPI
+  -> 托管 frontend\dist
+  -> 自动打开浏览器中的 WebUI
+```
 
-## 技术栈
+主要目录：
 
-* **Python 3**
-* **PyQt6:** 用于构建桌面应用 GUI
-* **SQLite3:** 用于轻量级的本地数据存储
+- `backend/`: FastAPI 接口、服务、仓储、SQLite 迁移和后台下载队列。
+- `frontend/`: React、TypeScript、Vite、Tailwind CSS 前端。
+- `resources/`: 本地配置与 SQLite 数据库。
+- `app/`: 迁移期间保留的旧 PyQt 代码。
 
-## 如何运行
+## 安装
 
-1.  **克隆仓库:**
-    ```bash
-    git clone https://github.com/yexca/PixivDownloader-SQLite.git
-    cd PixivDownloader-SQLite
-    ```
+在项目目录运行：
 
-2.  **安装依赖:**
-    ```bash
-    pip install PyQt6
-    ```
+```bat
+run-install.bat
+```
 
-3.  **运行程序:**
-    ```bash
-    python main.py
-    ```
+安装脚本会：
+
+1. 如果缺少 Miniconda，则安装到 `%UserProfile%\Miniconda3`。
+2. 创建本地 `env` 环境。
+3. 将 Python 依赖安装到 `env`。
+4. 使用 `npm` 安装前端依赖。
+5. 构建前端资源到 `frontend\dist`。
+
+安装脚本不会使用全局 Python。当前 Node.js 策略是检测系统 PATH 中的 `npm`；如果缺失，请先从 <https://nodejs.org/> 安装 Windows LTS 版 Node.js。
+
+## 启动
+
+```bat
+run-gui.bat
+```
+
+脚本会检查 `env\python.exe` 和 `frontend\dist\index.html` 是否存在，然后启动后端并打开 <http://127.0.0.1:7653>。
+
+如果需要使用其他本地端口，可以在运行脚本前设置 `PIXIVDOWNLOADER_PORT`。
+
+## 开发
+
+后端开发服务：
+
+```bat
+run-backend-dev.bat
+```
+
+前端开发服务：
+
+```bat
+run-frontend-dev.bat
+```
+
+检查命令：
+
+```bat
+env\python.exe -m ruff format --check .
+env\python.exe -m ruff check .
+env\python.exe -m pytest
+```
+
+```bat
+cd frontend
+npm run lint
+npm run typecheck
+npm run build
+```
+
+## 文档
+
+- [项目概览](docs/project-overview.md)
+- [WebUI 架构](docs/webui-architecture.md)
+- [数据库迁移](docs/database-migrations.md)
+
+## 打包说明
+
+源码运行模式下，后端从仓库根目录解析资源：
+
+- `resources\conf\settings.json`
+- `resources\pixiv.db`
+- `frontend\dist`
+
+如果以后制作冻结可执行文件，应将这些资源按相同相对结构放在可执行文件旁边。后端路径解析器在冻结运行时会使用可执行文件所在目录。
 
 ## 重要声明
 
-本工具仅供**个人学习、研究或数据备份**使用。请务必遵守 Pixiv 的服务条款 (Terms of Service)。开发者不对任何对本应用的滥用行为或任何违反 Pixiv 政策的行为负责。请勿使用此工具进行批量下载或分发内容。
+本工具仅供个人学习、研究或数据备份使用。请遵守 Pixiv 的服务条款，不要将本工具用于批量下载或内容再分发。
