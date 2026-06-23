@@ -3,7 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from backend.api.dependencies import DbPath, SettingsJsonPath
-from backend.schemas.settings import SettingsResponse, SettingsUpdateRequest
+from backend.schemas.settings import (
+    AuthValidationResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
+)
 from backend.services.settings_service import AppSettingsService, masked_settings
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -30,3 +34,16 @@ def update_settings(
         return masked_settings(settings)
     finally:
         service.close()
+
+
+@router.post("/validate-auth", response_model=AuthValidationResponse)
+def validate_pixiv_auth(
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> AuthValidationResponse:
+    service = AppSettingsService(db_path=db_path, settings_json_path=settings_json_path)
+    try:
+        service.validate_pixiv_auth()
+    finally:
+        service.close()
+    return AuthValidationResponse(ok=True, message="Pixiv authentication succeeded.")

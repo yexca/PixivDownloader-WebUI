@@ -4,7 +4,9 @@ from pathlib import Path
 
 from backend.core.config import Settings
 from backend.core.config import SettingsService as JsonSettingsService
+from backend.core.errors import PixivAuthError
 from backend.repositories.settings_repository import SettingsRepository
+from backend.services.pixiv_client import PixivApi, PixivClient
 
 
 class AppSettingsService:
@@ -41,6 +43,12 @@ class AppSettingsService:
         settings = Settings.from_dict(merged)
         self.save(settings)
         return settings
+
+    def validate_pixiv_auth(self, *, api: PixivApi | None = None) -> None:
+        settings = self.load()
+        if not settings.refresh_token:
+            raise PixivAuthError("Pixiv refresh token is not configured")
+        PixivClient(refresh_token=settings.refresh_token, api=api)
 
     def save(self, settings: Settings) -> None:
         values = settings.to_dict()

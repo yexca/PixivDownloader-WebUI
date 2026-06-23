@@ -27,7 +27,7 @@ run-gui.bat
 - `backend/`: FastAPI 接口、服务、仓储、SQLite 迁移和后台下载队列。
 - `frontend/`: React、TypeScript、Vite、Tailwind CSS 前端。
 - `resources/`: 本地配置与 SQLite 数据库。
-- `app/`: 迁移期间保留的旧 PyQt 代码。
+- `app/`: 为兼容迁移保留的旧 PyQt 代码；当前面向用户的界面是 WebUI。
 
 ## 安装
 
@@ -91,6 +91,7 @@ npm run build
 - [项目概览](docs/project-overview.md)
 - [WebUI 架构](docs/webui-architecture.md)
 - [数据库迁移](docs/database-migrations.md)
+- [UI 验证说明](docs/ui-verification.md)
 
 ## 打包说明
 

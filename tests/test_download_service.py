@@ -1,6 +1,11 @@
+import pytest
+
+from backend.core.errors import JobCancelledError
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.repositories.artist_repository import ArtistRepository
+from backend.repositories.artwork_repository import ArtworkRepository
+from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.legacy_artist_repository import LegacyArtistRepository
 from backend.services.download_service import DownloadService
 from backend.services.file_downloader import FileDownloadResult
@@ -132,3 +137,37 @@ def test_incremental_skip_uses_legacy_last_download_id(tmp_path):
     assert len(file_downloader.calls) == 1
     assert file_downloader.calls[0][2].endswith("101_p0.jpg")
     assert repository.get_by_id("123").last_download_id == "101"
+
+
+def test_cancellation_marks_active_file_failed(tmp_path):
+    db_path = tmp_path / "pixiv.db"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = LegacyArtistRepository(db_path=db_path)
+    webui_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    callbacks = 0
+
+    def cancel_after_file_selected() -> bool:
+        nonlocal callbacks
+        callbacks += 1
+        return callbacks >= 3
+
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        webui_artist_repository=webui_repository,
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+        sleeper=lambda: None,
+    )
+
+    with pytest.raises(JobCancelledError):
+        service.download(user_id="123", cancel_callback=cancel_after_file_selected)
+
+    files = file_repository.list_by_artwork("100")
+    assert files[0].status == "failed"
+    assert files[0].error_message == "Download cancelled before this file completed."

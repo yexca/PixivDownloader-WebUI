@@ -21,6 +21,11 @@ export type SettingsUpdateRequest = {
   skip_existing_files: boolean;
 };
 
+export type AuthValidationResponse = {
+  ok: boolean;
+  message: string;
+};
+
 export function getSettings(): Promise<SettingsResponse> {
   return apiRequest<SettingsResponse>("/settings");
 }
@@ -29,5 +34,11 @@ export function updateSettings(settings: SettingsUpdateRequest): Promise<Setting
   return apiRequest<SettingsResponse>("/settings", {
     method: "PUT",
     body: settings
+  });
+}
+
+export function validatePixivAuth(): Promise<AuthValidationResponse> {
+  return apiRequest<AuthValidationResponse>("/settings/validate-auth", {
+    method: "POST"
   });
 }

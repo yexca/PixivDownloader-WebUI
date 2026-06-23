@@ -99,7 +99,14 @@ class DownloadWorker:
             latest = repository.get_by_id(job_id)
             if latest is None:
                 raise
-            return self._finish(repository, latest, "failed", str(exc), level="error")
+            return self._finish(
+                repository,
+                latest,
+                "failed",
+                user_safe_error_message(exc),
+                level="error",
+                payload={"error_type": type(exc).__name__},
+            )
         finally:
             repository.close()
 
@@ -117,6 +124,7 @@ class DownloadWorker:
         message: str,
         *,
         level: str = "info",
+        payload: dict[str, object] | None = None,
     ) -> Job:
         finished = replace(
             job,
@@ -126,7 +134,7 @@ class DownloadWorker:
             finished_at=utc_now(),
         )
         repository.update(finished)
-        repository.add_event(JobEvent(job_id=job.id, level=level, message=message))  # type: ignore[arg-type]
+        repository.add_event(JobEvent(job_id=job.id, level=level, message=message, payload=payload))  # type: ignore[arg-type]
         return repository.get_by_id(job.id) or finished
 
     def _record_progress(
@@ -180,3 +188,12 @@ class DownloadWorker:
             settings.download_path,
             skip_existing=settings.skip_existing_files,
         )
+
+
+def user_safe_error_message(exc: Exception) -> str:
+    if isinstance(exc, JobCancelledError):
+        return "Job cancelled"
+    message = str(exc).strip()
+    if not message:
+        return "Download job failed"
+    return message.replace("\n", " ")[:500]

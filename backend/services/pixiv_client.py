@@ -48,7 +48,11 @@ class PixivClient:
             api = AppPixivAPI()
         self.api = api
         self.sleeper = sleeper
-        self.api.auth(refresh_token=self.refresh_token)
+        try:
+            self.api.auth(refresh_token=self.refresh_token)
+        except Exception as exc:
+            message = "Pixiv authentication failed. Please update refresh token."
+            raise PixivAuthError(message) from exc
 
     def get_artist_by_user_id(self, user_id: str) -> Artist:
         try:

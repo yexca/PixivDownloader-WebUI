@@ -65,6 +65,7 @@ Current API groups:
 
 - `/api/health`
 - `/api/settings`
+- `/api/settings/validate-auth`
 - `/api/downloads`
 - `/api/jobs`
 - `/api/artists`

@@ -5,8 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Query
 
 from backend.api.dependencies import DbPath
-from backend.db.connection import connect
-from backend.repositories.job_repository import job_event_from_row
+from backend.repositories.job_repository import JobRepository
 from backend.schemas.jobs import JobEventResponse
 
 router = APIRouter(prefix="/api/logs", tags=["logs"])
@@ -17,16 +16,8 @@ def recent_logs(
     db_path: DbPath,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> list[JobEventResponse]:
-    conn = connect(db_path)
+    repository = JobRepository(db_path)
     try:
-        rows = conn.execute(
-            """
-            SELECT * FROM job_events
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
         return [
             JobEventResponse(
                 id=event.id,
@@ -36,7 +27,7 @@ def recent_logs(
                 payload=event.payload,
                 created_at=event.created_at,
             )
-            for event in (job_event_from_row(row) for row in reversed(rows))
+            for event in repository.list_recent_events(limit=limit)
         ]
     finally:
-        conn.close()
+        repository.close()

@@ -20,7 +20,14 @@ from backend.api import (
     routes_logs,
     routes_settings,
 )
-from backend.core.errors import ConfigError, DatabaseError, PixivApiError, PixivAuthError
+from backend.core.errors import (
+    ConfigError,
+    DatabaseError,
+    JobNotCancellableError,
+    JobNotFoundError,
+    PixivApiError,
+    PixivAuthError,
+)
 from backend.core.paths import project_root
 from backend.db.migrate import migrate_database
 from backend.workers.job_queue import JobQueue
@@ -93,6 +100,20 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(DatabaseError)
     async def database_exception_handler(_request: Request, exc: DatabaseError) -> JSONResponse:
         return error_response("database_error", str(exc), status_code=500)
+
+    @app.exception_handler(JobNotFoundError)
+    async def job_not_found_exception_handler(
+        _request: Request,
+        exc: JobNotFoundError,
+    ) -> JSONResponse:
+        return error_response("job_not_found", str(exc), status_code=404)
+
+    @app.exception_handler(JobNotCancellableError)
+    async def job_not_cancellable_exception_handler(
+        _request: Request,
+        exc: JobNotCancellableError,
+    ) -> JSONResponse:
+        return error_response("job_not_cancellable", str(exc), status_code=409)
 
     @app.exception_handler(Exception)
     async def internal_exception_handler(_request: Request, _exc: Exception) -> JSONResponse:

@@ -1,8 +1,14 @@
 import * as React from "react";
-import { Eye, EyeOff, Save, Undo2 } from "lucide-react";
+import { Eye, EyeOff, Save, ShieldCheck, Undo2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getSettings, updateSettings, type SettingsResponse, type SettingsUpdateRequest } from "@/api/settings";
+import {
+  getSettings,
+  updateSettings,
+  validatePixivAuth,
+  type SettingsResponse,
+  type SettingsUpdateRequest
+} from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataState } from "@/components/DataState";
@@ -34,6 +40,13 @@ export function SettingsPage(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
     onError: (error) => pushToast({ title: "Settings save failed", description: error.message, tone: "error" })
+  });
+  const authMutation = useMutation({
+    mutationFn: validatePixivAuth,
+    onSuccess: (response) =>
+      pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" }),
+    onError: (error) =>
+      pushToast({ title: "Pixiv authentication failed", description: error.message, tone: "error" })
   });
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -140,6 +153,10 @@ export function SettingsPage(): JSX.Element {
               <Button type="submit" disabled={mutation.isPending}>
                 <Save className="h-4 w-4" aria-hidden="true" />
                 Save
+              </Button>
+              <Button type="button" variant="outline" disabled={authMutation.isPending} onClick={() => authMutation.mutate()}>
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Test Auth
               </Button>
               <Button type="button" variant="outline" onClick={() => setForm(toForm(settings.data))}>
                 <Undo2 className="h-4 w-4" aria-hidden="true" />

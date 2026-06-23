@@ -22,3 +22,8 @@ class SettingsUpdateRequest(BaseModel):
     max_concurrent_downloads: int = Field(ge=1)
     overwrite_existing_files: bool
     skip_existing_files: bool
+
+
+class AuthValidationResponse(BaseModel):
+    ok: bool
+    message: str

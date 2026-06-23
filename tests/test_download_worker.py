@@ -46,6 +46,11 @@ class FakeFileDownloader:
         )
 
 
+class FailingFileDownloader:
+    def download(self, _artist_name: str, _artist_id: str, _url: str) -> FileDownloadResult:
+        raise OSError("disk write failed")
+
+
 def test_worker_updates_job_and_file_statuses(tmp_path):
     db_path = tmp_path / "pixiv.db"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
@@ -107,3 +112,41 @@ def test_worker_observes_pre_cancelled_job(tmp_path):
 
     assert job.status == "cancelled"
     assert job.cancel_requested is True
+
+
+def test_worker_persists_failed_file_and_job_event(tmp_path):
+    db_path = tmp_path / "pixiv.db"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = JobRepository(db_path)
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="download_artist",
+                status="queued",
+                input_user_id="123",
+            )
+        )
+    finally:
+        repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=FakePixivClient,
+        file_downloader_factory=FailingFileDownloader,
+    )
+
+    job = worker.run_job("job-1")
+
+    assert job.status == "completed"
+    assert job.failed_files == 1
+    file_repository = ArtworkFileRepository(db_path)
+    job_repository = JobRepository(db_path)
+    try:
+        files = file_repository.list_by_artwork("200")
+        events = job_repository.list_events("job-1")
+        assert files[0].status == "failed"
+        assert files[0].error_message == "disk write failed"
+        assert any(event.message == "Job completed" for event in events)
+    finally:
+        file_repository.close()
+        job_repository.close()

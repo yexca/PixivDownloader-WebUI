@@ -24,3 +24,11 @@ class DatabaseError(PixivDownloaderError):
 
 class JobCancelledError(PixivDownloaderError):
     """Raised when a download job is cancelled."""
+
+
+class JobNotFoundError(PixivDownloaderError):
+    """Raised when a requested job does not exist."""
+
+
+class JobNotCancellableError(PixivDownloaderError):
+    """Raised when a requested job cannot be cancelled."""

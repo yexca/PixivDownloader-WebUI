@@ -29,7 +29,7 @@ Main components:
 - `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
 - `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
 - `resources/`: local configuration and SQLite database.
-- `app/`: legacy PyQt code kept during the transition.
+- `app/`: legacy PyQt code retained for compatibility during the transition; the WebUI is the current user-facing interface.
 
 ## Install
 
@@ -93,6 +93,7 @@ npm run build
 - [Project overview](docs/project-overview.md)
 - [WebUI architecture](docs/webui-architecture.md)
 - [Database migrations](docs/database-migrations.md)
+- [UI verification notes](docs/ui-verification.md)
 
 ## Packaging Notes
 

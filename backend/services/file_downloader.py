@@ -53,11 +53,17 @@ class FileDownloader:
             self.download_path = Path(download_path)
             self.skip_existing = skip_existing
         self.http_client = http_client or requests
-        self.download_path.mkdir(parents=True, exist_ok=True)
+        try:
+            self.download_path.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise DownloadError(f"download path is not writable: {self.download_path}") from exc
 
     def download(self, artist_name: str, artist_id: str, url: str) -> FileDownloadResult:
         artist_dir = self.download_path / f"{clean_path(artist_name)} - {artist_id}"
-        artist_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            artist_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise DownloadError(f"download path is not writable: {artist_dir}") from exc
 
         file_name = url.split("/")[-1]
         local_path = artist_dir / file_name

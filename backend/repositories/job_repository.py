@@ -188,6 +188,20 @@ class JobRepository:
             raise DatabaseError(f"failed to list events for job {job_id}") from exc
         return [job_event_from_row(row) for row in reversed(rows)]
 
+    def list_recent_events(self, *, limit: int = 100) -> list[JobEvent]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM job_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to list recent job events") from exc
+        return [job_event_from_row(row) for row in reversed(rows)]
+
     def close(self) -> None:
         self.conn.close()
 

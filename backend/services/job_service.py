@@ -3,9 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
+from backend.core.errors import JobNotCancellableError
 from backend.domain.entities import Job, JobEvent
 from backend.domain.types import JobStatus, JobType
+from backend.repositories._time import utc_now
 from backend.repositories.job_repository import JobRepository
+
+TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
 
 class JobService:
@@ -69,6 +73,8 @@ class JobService:
         job = self.repository.get_by_id(job_id)
         if job is None:
             return None
+        if job.status in TERMINAL_STATUSES:
+            raise JobNotCancellableError(f"job {job_id} is already {job.status}")
         if job.status == "queued":
             cancelled = Job(
                 id=job.id,
@@ -85,7 +91,7 @@ class JobService:
                 error_message=job.error_message,
                 created_at=job.created_at,
                 started_at=job.started_at,
-                finished_at=job.finished_at,
+                finished_at=utc_now(),
             )
             self.repository.update(cancelled)
             self.repository.add_event(

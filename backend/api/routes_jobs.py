@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from backend.api.dependencies import DbPath, Queue
+from backend.core.errors import JobNotFoundError
 from backend.domain.types import JobStatus
 from backend.schemas.jobs import (
     JobCancelResponse,
@@ -43,7 +44,7 @@ def get_job(job_id: str, db_path: DbPath) -> JobDetailResponse:
     try:
         job = service.get_job(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            raise JobNotFoundError(f"job {job_id} was not found")
         return JobDetailResponse(
             **job_response(job).model_dump(),
             events=[job_event_response(event) for event in service.list_events(job_id)],
@@ -58,7 +59,7 @@ def cancel_job(job_id: str, db_path: DbPath, queue: Queue) -> JobCancelResponse:
     try:
         job = service.cancel_job(job_id)
         if job is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            raise JobNotFoundError(f"job {job_id} was not found")
     finally:
         service.close()
     queue.wake()
@@ -74,7 +75,7 @@ def list_job_events(job_id: str, db_path: DbPath) -> list[JobEventResponse]:
     service = JobService(db_path)
     try:
         if service.get_job(job_id) is None:
-            raise HTTPException(status_code=404, detail="job not found")
+            raise JobNotFoundError(f"job {job_id} was not found")
         return [job_event_response(event) for event in service.list_events(job_id)]
     finally:
         service.close()
