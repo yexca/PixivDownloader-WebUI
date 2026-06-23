@@ -83,12 +83,43 @@ class ArtistRepository:
             raise DatabaseError("failed to list artists") from exc
         return [artist_from_row(row) for row in rows]
 
-    def count(self) -> int:
+    def count(self, *, query: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS total FROM artists"
+        params: list[object] = []
+        if query:
+            sql += " WHERE id LIKE ? OR name LIKE ?"
+            like_query = f"%{query}%"
+            params.extend([like_query, like_query])
         try:
-            row = self.conn.execute("SELECT COUNT(*) AS total FROM artists").fetchone()
+            row = self.conn.execute(sql, params).fetchone()
         except sqlite3.Error as exc:
             raise DatabaseError("failed to count artists") from exc
         return int(row["total"])
+
+    def get_counts(self, artist_id: str) -> dict[str, int]:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT
+                    COUNT(DISTINCT artworks.id) AS artwork_count,
+                    SUM(CASE WHEN artwork_files.status = 'downloaded' THEN 1 ELSE 0 END)
+                        AS downloaded_file_count,
+                    SUM(CASE WHEN artwork_files.status = 'failed' THEN 1 ELSE 0 END)
+                        AS failed_file_count
+                FROM artists
+                LEFT JOIN artworks ON artworks.artist_id = artists.id
+                LEFT JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+                WHERE artists.id = ?
+                """,
+                (artist_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to count artist aggregates for {artist_id}") from exc
+        return {
+            "artwork_count": int(row["artwork_count"] or 0),
+            "downloaded_file_count": int(row["downloaded_file_count"] or 0),
+            "failed_file_count": int(row["failed_file_count"] or 0),
+        }
 
     def close(self) -> None:
         self.conn.close()

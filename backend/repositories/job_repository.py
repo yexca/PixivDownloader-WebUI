@@ -102,6 +102,35 @@ class JobRepository:
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to update job {job.id}") from exc
 
+    def request_cancel(self, job_id: str) -> Job | None:
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE jobs
+                    SET cancel_requested = 1
+                    WHERE id = ?
+                    """,
+                    (job_id,),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to request cancellation for job {job_id}") from exc
+        return self.get_by_id(job_id)
+
+    def next_queued(self) -> Job | None:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE status = 'queued'
+                ORDER BY created_at
+                LIMIT 1
+                """
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to fetch next queued job") from exc
+        return job_from_row(row) if row is not None else None
+
     def list(self, *, status: str | None = None, limit: int = 50, offset: int = 0) -> list[Job]:
         sql = "SELECT * FROM jobs"
         params: list[object] = []
@@ -115,6 +144,18 @@ class JobRepository:
         except sqlite3.Error as exc:
             raise DatabaseError("failed to list jobs") from exc
         return [job_from_row(row) for row in rows]
+
+    def count(self, *, status: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS total FROM jobs"
+        params: list[object] = []
+        if status:
+            sql += " WHERE status = ?"
+            params.append(status)
+        try:
+            row = self.conn.execute(sql, params).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to count jobs") from exc
+        return int(row["total"])
 
     def add_event(self, event: JobEvent) -> int:
         created_at = event.created_at or utc_now()

@@ -92,6 +92,57 @@ class ArtworkFileRepository:
             raise DatabaseError(f"failed to fetch artwork file {file_id}") from exc
         return artwork_file_from_row(row) if row is not None else None
 
+    def update_status(
+        self,
+        file_id: int,
+        *,
+        status: str,
+        local_path: Path | str | None = None,
+        size_bytes: int | None = None,
+        downloaded_at: str | None = None,
+        error_message: str | None = None,
+    ) -> None:
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE artwork_files
+                    SET status = ?,
+                        local_path = COALESCE(?, local_path),
+                        size_bytes = COALESCE(?, size_bytes),
+                        downloaded_at = COALESCE(?, downloaded_at),
+                        error_message = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        status,
+                        str(local_path) if local_path is not None else None,
+                        size_bytes,
+                        downloaded_at,
+                        error_message,
+                        utc_now(),
+                        file_id,
+                    ),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to update artwork file {file_id}") from exc
+
+    def list_failed(self, *, limit: int = 100) -> list[ArtworkFile]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM artwork_files
+                WHERE status = 'failed'
+                ORDER BY updated_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to list failed artwork files") from exc
+        return [artwork_file_from_row(row) for row in rows]
+
     def close(self) -> None:
         self.conn.close()
 

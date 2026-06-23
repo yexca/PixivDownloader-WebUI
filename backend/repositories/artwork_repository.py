@@ -99,6 +99,42 @@ class ArtworkRepository:
             raise DatabaseError(f"failed to list artworks for artist {artist_id}") from exc
         return [artwork_from_row(row) for row in rows]
 
+    def count_by_artist(self, artist_id: str) -> int:
+        try:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS total FROM artworks WHERE artist_id = ?",
+                (artist_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to count artworks for artist {artist_id}") from exc
+        return int(row["total"])
+
+    def get_file_counts(self, artwork_id: str) -> dict[str, int]:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_files,
+                    SUM(CASE WHEN status = 'downloaded' THEN 1 ELSE 0 END)
+                        AS downloaded_files,
+                    SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END)
+                        AS skipped_files,
+                    SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END)
+                        AS failed_files
+                FROM artwork_files
+                WHERE artwork_id = ?
+                """,
+                (artwork_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to count files for artwork {artwork_id}") from exc
+        return {
+            "total_files": int(row["total_files"] or 0),
+            "downloaded_files": int(row["downloaded_files"] or 0),
+            "skipped_files": int(row["skipped_files"] or 0),
+            "failed_files": int(row["failed_files"] or 0),
+        }
+
     def close(self) -> None:
         self.conn.close()
 
