@@ -129,6 +129,25 @@ Node strategy:
 
 A local managed Node cache can be added later, but the current scripts intentionally fail clearly instead of silently choosing an unknown Node installation path.
 
+## Docker Compose
+
+The repository includes `docker-compose.yaml` for running the published image:
+
+```bat
+docker compose up -d
+```
+
+It uses `yexca/pixivdownloader:v0.2.0`, includes a local `build` definition, maps host port `7653` to container port `7653`, and mounts:
+
+- `./resources:/app/resources`
+- `./downloads:/app/downloads`
+
+Build the image explicitly with:
+
+```bat
+docker compose build
+```
+
 ## Resource Paths
 
 Path resolution is centralized in `backend.core.paths`.

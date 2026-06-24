@@ -68,6 +68,20 @@ run-gui.bat
 
 別のローカルポートを使う場合は、スクリプト実行前に `PIXIVDOWNLOADER_PORT` を設定してください。
 
+## Docker Compose
+
+公開済みイメージを同じローカルポートで起動します:
+
+```bat
+docker compose up -d
+```
+
+Compose ファイルは `yexca/pixivdownloader:v0.2.0` を使用およびビルドでき、`7653:7653` を公開し、永続化のためにローカルの `resources/` と `downloads/` をマウントします。
+
+```bat
+docker compose build
+```
+
 ## 開発
 
 バックエンド開発サーバー:

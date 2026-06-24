@@ -70,6 +70,20 @@ The script starts the original PyQt desktop interface through `main.py`.
 
 Set `PIXIVDOWNLOADER_PORT` before running the scripts if you need a different local port.
 
+## Docker Compose
+
+Run the published image on the same local port:
+
+```bat
+docker compose up -d
+```
+
+The compose file uses and can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `resources/` plus `downloads/` for persistence.
+
+```bat
+docker compose build
+```
+
 ## Development
 
 Backend dev server:

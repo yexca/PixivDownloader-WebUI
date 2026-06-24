@@ -1,0 +1,16 @@
+services:
+  pixivdownloader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yexca/pixivdownloader:v0.2.0
+    container_name: pixivdownloader
+    ports:
+      - "7653:7653"
+    environment:
+      PIXIVDOWNLOADER_HOST: "0.0.0.0"
+      PIXIVDOWNLOADER_PORT: "7653"
+    volumes:
+      - ./resources:/app/resources
+      - ./downloads:/app/downloads
+    restart: unless-stopped

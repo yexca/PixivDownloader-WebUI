@@ -68,6 +68,20 @@ run-gui.bat
 
 如果需要使用其他本地端口，可以在运行脚本前设置 `PIXIVDOWNLOADER_PORT`。
 
+## Docker Compose
+
+使用已发布镜像并保持相同本地端口：
+
+```bat
+docker compose up -d
+```
+
+Compose 文件使用并可构建 `yexca/pixivdownloader:v0.2.0`，映射 `7653:7653`，并挂载本地 `resources/` 和 `downloads/` 目录用于持久化。
+
+```bat
+docker compose build
+```
+
 ## 开发
 
 后端开发服务：
