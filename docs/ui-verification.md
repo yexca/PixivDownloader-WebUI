@@ -22,7 +22,7 @@ Frontend verification was run against the local `frontend\node_modules` tools wi
 
 ## Manual Workflow Checklist
 
-Use `run-gui.bat`, then verify these WebUI flows:
+Use `run-webui.bat`, then verify these WebUI flows:
 
 - Dashboard loads and shows recent job state.
 - Settings loads masked refresh token state.

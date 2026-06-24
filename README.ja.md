@@ -10,12 +10,13 @@ PixivDownloader-SQLite は、Windows でローカル実行する Pixiv ダウン
 - WebUI でダウンロード先と Pixiv `refresh_token` を管理。
 - SQLite にジョブ、アーティスト、作品、ファイル状態を保存。
 - 旧 `resources/pixiv.db` の `pic` テーブルを新しいスキーマへ移行。
-- `run-gui.bat` からローカル起動。外部データベースサーバーは不要です。
+- `run-webui.bat` から WebUI をローカル起動。外部データベースサーバーは不要です。
+- `run-gui.bat` から旧 PyQt デスクトップ GUI も起動できます。
 
 ## 実行アーキテクチャ
 
 ```text
-run-gui.bat
+run-webui.bat
   -> env\python.exe -m backend.app
   -> http://127.0.0.1:7653 で FastAPI を起動
   -> frontend\dist を配信
@@ -27,7 +28,7 @@ run-gui.bat
 - `backend/`: FastAPI API、サービス、リポジトリ、SQLite マイグレーション、ダウンロードワーカー。
 - `frontend/`: React、TypeScript、Vite、Tailwind CSS の WebUI。
 - `resources/`: ローカル設定と SQLite データベース。
-- `app/`: 移行互換のために残している旧 PyQt コード。現在のユーザー向け画面は WebUI です。
+- `app/`: `run-gui.bat` から起動できる旧 PyQt コード。現在の主なユーザー向け画面は WebUI です。
 
 ## インストール
 
@@ -49,11 +50,21 @@ run-install.bat
 
 ## 起動
 
+WebUI:
+
+```bat
+run-webui.bat
+```
+
+スクリプトは `env\python.exe` と `frontend\dist\index.html` を確認し、バックエンドを起動して <http://127.0.0.1:7653> を開きます。
+
+旧 PyQt GUI:
+
 ```bat
 run-gui.bat
 ```
 
-スクリプトは `env\python.exe` と `frontend\dist\index.html` を確認し、バックエンドを起動して <http://127.0.0.1:7653> を開きます。
+スクリプトは `main.py` から旧 PyQt デスクトップ画面を起動します。
 
 別のローカルポートを使う場合は、スクリプト実行前に `PIXIVDOWNLOADER_PORT` を設定してください。
 

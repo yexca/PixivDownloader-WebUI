@@ -12,12 +12,13 @@ The project was originally a PyQt6 desktop application and is being refactored i
 - Manage download settings, including download path and Pixiv refresh token.
 - Track jobs, progress, history, artists, artworks, and file status in SQLite.
 - Migrate legacy `resources/pixiv.db` data from the old `pic` table.
-- Run locally through `run-gui.bat`; no separate database server is required.
+- Run the WebUI locally through `run-webui.bat`; no separate database server is required.
+- Keep the legacy PyQt desktop GUI available through `run-gui.bat`.
 
 ## Runtime Architecture
 
 ```text
-run-gui.bat
+run-webui.bat
   -> env\python.exe -m backend.app
   -> FastAPI on http://127.0.0.1:7653
   -> serves frontend\dist
@@ -29,7 +30,7 @@ Main components:
 - `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
 - `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
 - `resources/`: local configuration and SQLite database.
-- `app/`: legacy PyQt code retained for compatibility during the transition; the WebUI is the current user-facing interface.
+- `app/`: legacy PyQt code available through `run-gui.bat`; the WebUI is the current user-facing interface.
 
 ## Install
 
@@ -51,11 +52,21 @@ The installer does not rely on global Python. Node.js is currently detected from
 
 ## Run
 
+WebUI:
+
+```bat
+run-webui.bat
+```
+
+The script checks that `env\python.exe` and `frontend\dist\index.html` exist, starts the backend, and opens <http://127.0.0.1:7653>.
+
+Legacy PyQt GUI:
+
 ```bat
 run-gui.bat
 ```
 
-The script checks that `env\python.exe` and `frontend\dist\index.html` exist, starts the backend, and opens <http://127.0.0.1:7653>.
+The script starts the original PyQt desktop interface through `main.py`.
 
 Set `PIXIVDOWNLOADER_PORT` before running the scripts if you need a different local port.
 

@@ -47,7 +47,8 @@ set /a seconds=elapsed %% 60
 echo Installation time: %hours% hours, %minutes% minutes, %seconds% seconds.
 echo.
 echo PixivDownloader WebUI has been installed successfully.
-echo To start the app, run run-gui.bat.
+echo To start the WebUI, run run-webui.bat.
+echo To start the legacy PyQt GUI, run run-gui.bat.
 echo.
 pause
 exit /b 0

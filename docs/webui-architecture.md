@@ -5,7 +5,7 @@ PixivDownloader-SQLite now runs as a local WebUI application. The backend and fr
 ## Runtime Flow
 
 ```text
-run-gui.bat
+run-webui.bat
   |
   v
 env\python.exe -m backend.app
@@ -17,7 +17,7 @@ FastAPI on 127.0.0.1:7653
   +-- frontend/dist static files
 ```
 
-`run-gui.bat` opens the browser to `http://127.0.0.1:7653` after starting the backend process.
+`run-webui.bat` opens the browser to `http://127.0.0.1:7653` after starting the backend process.
 
 Set `PIXIVDOWNLOADER_PORT` before running scripts to use a different local port.
 
@@ -93,7 +93,7 @@ Errors should use the shared shape:
 - Unknown non-API paths return `index.html` for client-side routing.
 - `/api/*` paths remain API-owned.
 
-If `frontend/dist/index.html` is missing, the static route is not registered. `run-gui.bat` catches this earlier and asks the user to run `run-install.bat`.
+If `frontend/dist/index.html` is missing, the static route is not registered. `run-webui.bat` catches this earlier and asks the user to run `run-install.bat`.
 
 ## Local Development
 
