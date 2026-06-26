@@ -10,7 +10,26 @@ services:
     environment:
       PIXIVDOWNLOADER_HOST: "0.0.0.0"
       PIXIVDOWNLOADER_PORT: "7653"
+      PIXIV_AUTH_BROWSER_INTERNAL_URL: "http://pixiv-auth-browser:7654"
+      PIXIV_AUTH_BROWSER_PUBLIC_URL: "http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale"
+      PIXIV_AUTH_BROWSER_CALLBACK_URL: "http://pixivdownloader:7653/api/settings/pixiv-auth/browser/callback"
+      PIXIV_AUTH_BROWSER_TOKEN: "pixivdownloader-local-auth-browser"
     volumes:
       - ./resources:/app/resources
       - ./downloads:/app/downloads
+    depends_on:
+      - pixiv-auth-browser
+    restart: unless-stopped
+
+  pixiv-auth-browser:
+    build:
+      context: ./auth-browser
+      dockerfile: Dockerfile
+    image: yexca/pixivdownloader-auth-browser:v0.2.0
+    container_name: pixiv-auth-browser
+    ports:
+      - "6080:6080"
+    environment:
+      PIXIV_AUTH_BROWSER_PORT: "7654"
+      PIXIV_AUTH_BROWSER_TOKEN: "pixivdownloader-local-auth-browser"
     restart: unless-stopped

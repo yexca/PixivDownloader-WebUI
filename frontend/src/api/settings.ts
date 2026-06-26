@@ -26,6 +26,36 @@ export type AuthValidationResponse = {
   message: string;
 };
 
+export type PixivAuthStartResponse = {
+  flow_id: string;
+  login_url: string;
+  expires_at: string;
+};
+
+export type PixivBrowserAuthStartResponse = PixivAuthStartResponse & {
+  novnc_url: string;
+};
+
+export type PixivBrowserAuthStatusResponse = {
+  flow_id: string;
+  status: "pending" | "callback_received" | "completed" | "failed";
+  expires_at: string;
+  error?: string | null;
+};
+
+export type PixivAuthCompleteRequest = {
+  flow_id: string;
+  code_or_callback_url: string;
+};
+
+export type PixivAuthCompleteResponse = SettingsResponse & {
+  message: string;
+};
+
+export type PixivAuthRefreshResponse = SettingsResponse & {
+  message: string;
+};
+
 export function getSettings(): Promise<SettingsResponse> {
   return apiRequest<SettingsResponse>("/settings");
 }
@@ -39,6 +69,35 @@ export function updateSettings(settings: SettingsUpdateRequest): Promise<Setting
 
 export function validatePixivAuth(): Promise<AuthValidationResponse> {
   return apiRequest<AuthValidationResponse>("/settings/validate-auth", {
+    method: "POST"
+  });
+}
+
+export function startPixivAuth(): Promise<PixivAuthStartResponse> {
+  return apiRequest<PixivAuthStartResponse>("/settings/pixiv-auth/start", {
+    method: "POST"
+  });
+}
+
+export function startPixivBrowserAuth(): Promise<PixivBrowserAuthStartResponse> {
+  return apiRequest<PixivBrowserAuthStartResponse>("/settings/pixiv-auth/browser/start", {
+    method: "POST"
+  });
+}
+
+export function getPixivBrowserAuthStatus(flowId: string): Promise<PixivBrowserAuthStatusResponse> {
+  return apiRequest<PixivBrowserAuthStatusResponse>(`/settings/pixiv-auth/browser/${flowId}`);
+}
+
+export function completePixivAuth(request: PixivAuthCompleteRequest): Promise<PixivAuthCompleteResponse> {
+  return apiRequest<PixivAuthCompleteResponse>("/settings/pixiv-auth/complete", {
+    method: "POST",
+    body: request
+  });
+}
+
+export function refreshPixivAuth(): Promise<PixivAuthRefreshResponse> {
+  return apiRequest<PixivAuthRefreshResponse>("/settings/pixiv-auth/refresh", {
     method: "POST"
   });
 }

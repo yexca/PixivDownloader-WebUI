@@ -5,6 +5,8 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 
+from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
+from backend.services.pixiv_oauth import PixivOAuthFlowStore
 from backend.workers.job_queue import JobQueue
 
 
@@ -20,6 +22,19 @@ def get_job_queue(request: Request) -> JobQueue:
     return request.app.state.job_queue
 
 
+def get_pixiv_oauth_flow_store(request: Request) -> PixivOAuthFlowStore:
+    return request.app.state.pixiv_oauth_flow_store
+
+
+def get_pixiv_browser_auth_store(request: Request) -> PixivBrowserAuthStore:
+    return request.app.state.pixiv_browser_auth_store
+
+
 DbPath = Annotated[Path | None, Depends(get_db_path)]
 SettingsJsonPath = Annotated[Path | None, Depends(get_settings_json_path)]
 Queue = Annotated[JobQueue, Depends(get_job_queue)]
+PixivOAuthStore = Annotated[PixivOAuthFlowStore, Depends(get_pixiv_oauth_flow_store)]
+PixivBrowserAuthStoreDep = Annotated[
+    PixivBrowserAuthStore,
+    Depends(get_pixiv_browser_auth_store),
+]

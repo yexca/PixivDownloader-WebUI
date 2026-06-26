@@ -9,7 +9,7 @@ For the Windows script workflow:
 - Windows.
 - Internet access for Python, frontend, and Pixiv dependencies.
 - Node.js LTS on `PATH` for frontend installation and build.
-- A Pixiv `refresh_token`.
+- A Pixiv account. The WebUI can help retrieve and save a Pixiv `refresh_token`.
 
 `run-install.bat` installs Miniconda if needed and creates the local Python environment under `env/`. It does not use global Python.
 
@@ -57,7 +57,9 @@ run-webui.bat
 Open the Settings page and configure:
 
 - Download path.
-- Pixiv `refresh_token`.
+- Pixiv authentication. Use **Sign in with Pixiv** to open the Pixiv login page,
+  then paste the callback URL or authorization code back into Settings. You can
+  also paste a known Pixiv `refresh_token` manually.
 - Request delay options.
 - Existing file behavior.
 

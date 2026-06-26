@@ -27,3 +27,39 @@ class SettingsUpdateRequest(BaseModel):
 class AuthValidationResponse(BaseModel):
     ok: bool
     message: str
+
+
+class PixivAuthStartResponse(BaseModel):
+    flow_id: str
+    login_url: str
+    expires_at: str
+
+
+class PixivBrowserAuthStartResponse(PixivAuthStartResponse):
+    novnc_url: str
+
+
+class PixivBrowserAuthStatusResponse(BaseModel):
+    flow_id: str
+    status: str
+    expires_at: str
+    error: str | None = None
+
+
+class PixivBrowserAuthCallbackRequest(BaseModel):
+    flow_id: str = Field(min_length=1)
+    callback_url: str | None = None
+    error: str | None = None
+
+
+class PixivAuthCompleteRequest(BaseModel):
+    flow_id: str = Field(min_length=1)
+    code_or_callback_url: str = Field(min_length=1)
+
+
+class PixivAuthCompleteResponse(SettingsResponse):
+    message: str
+
+
+class PixivAuthRefreshResponse(SettingsResponse):
+    message: str

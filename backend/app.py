@@ -30,6 +30,8 @@ from backend.core.errors import (
 )
 from backend.core.paths import project_root
 from backend.db.migrate import migrate_database
+from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
+from backend.services.pixiv_oauth import PixivOAuthFlowStore
 from backend.workers.job_queue import JobQueue
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,8 @@ def create_app(
         Path(settings_json_path) if settings_json_path is not None else None
     )
     app.state.job_queue = job_queue or JobQueue(db_path=db_path)
+    app.state.pixiv_oauth_flow_store = PixivOAuthFlowStore()
+    app.state.pixiv_browser_auth_store = PixivBrowserAuthStore()
     app.include_router(routes_health.router)
     app.include_router(routes_settings.router)
     app.include_router(routes_downloads.router)

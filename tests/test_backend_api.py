@@ -1,5 +1,8 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
+from backend.api import routes_settings
 from backend.app import create_app
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Job
@@ -67,6 +70,119 @@ def test_settings_validate_auth_endpoint(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"ok": True, "message": "Pixiv authentication succeeded."}
     assert called is True
+
+
+def test_pixiv_auth_start_endpoint(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.post("/api/settings/pixiv-auth/start")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["flow_id"]
+    assert body["login_url"].startswith("https://app-api.pixiv.net/web/v1/login?")
+    assert body["expires_at"]
+
+
+def test_pixiv_auth_complete_saves_masked_refresh_token(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+
+    def fake_complete(_service, *, flow_id, code_or_callback_url):
+        assert flow_id == "flow-1"
+        assert code_or_callback_url == "code-1"
+        return SimpleNamespace(refresh_token="new-refresh-token")
+
+    monkeypatch.setattr(routes_settings.PixivOAuthService, "complete", fake_complete)
+
+    response = client.post(
+        "/api/settings/pixiv-auth/complete",
+        json={"flow_id": "flow-1", "code_or_callback_url": "code-1"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["message"] == "Pixiv refresh token saved."
+    assert body["refresh_token_configured"] is True
+    assert body["refresh_token_preview"] == "new-...oken"
+    assert "new-refresh-token" not in str(body)
+
+
+def test_pixiv_browser_auth_start_calls_sidecar(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    calls = []
+
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_PUBLIC_URL", "http://127.0.0.1:6080/vnc.html")
+
+    def fake_post(url, *, json, headers, timeout):
+        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(routes_settings.requests, "post", fake_post)
+
+    response = client.post("/api/settings/pixiv-auth/browser/start")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["flow_id"]
+    assert body["novnc_url"] == "http://127.0.0.1:6080/vnc.html"
+    assert calls[0]["url"] == "http://auth-browser.test/api/auth/start"
+    assert calls[0]["json"]["flow_id"] == body["flow_id"]
+    assert calls[0]["json"]["login_url"].startswith("https://app-api.pixiv.net/web/v1/login?")
+
+
+def test_pixiv_browser_auth_callback_saves_token(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "shared-secret")
+    def fake_sidecar_post(_url, *, json: object, headers: object, timeout: object):
+        _ = (json, headers, timeout)
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(routes_settings.requests, "post", fake_sidecar_post)
+
+    start_response = client.post("/api/settings/pixiv-auth/browser/start")
+    flow_id = start_response.json()["flow_id"]
+
+    def fake_complete(_service, *, flow_id, code_or_callback_url):
+        assert flow_id == start_response.json()["flow_id"]
+        assert code_or_callback_url.endswith("code=browser-code")
+        return SimpleNamespace(refresh_token="browser-refresh-token")
+
+    monkeypatch.setattr(routes_settings.PixivOAuthService, "complete", fake_complete)
+
+    response = client.post(
+        "/api/settings/pixiv-auth/browser/callback",
+        headers={"X-Pixiv-Auth-Browser-Token": "shared-secret"},
+        json={
+            "flow_id": flow_id,
+            "callback_url": (
+                "https://app-api.pixiv.net/web/v1/users/auth/pixiv/"
+                "callback?code=browser-code"
+            ),
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "completed"
+    settings_response = client.get("/api/settings")
+    assert settings_response.json()["refresh_token_preview"] == "brow...oken"
+
+
+def test_pixiv_browser_auth_callback_rejects_bad_token(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "shared-secret")
+
+    response = client.post(
+        "/api/settings/pixiv-auth/browser/callback",
+        headers={"X-Pixiv-Auth-Browser-Token": "wrong"},
+        json={"flow_id": "flow-1", "error": "failed"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "config_error"
 
 
 def test_create_download_job(tmp_path):

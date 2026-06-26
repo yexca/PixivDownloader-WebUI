@@ -78,6 +78,8 @@ docker compose up -d
 
 Compose 文件使用并可构建 `yexca/pixivdownloader:v0.2.0`，映射 `7653:7653`，并挂载本地 `resources/` 和 `downloads/` 目录用于持久化。
 
+Docker Compose 还会启动 `pixiv-auth-browser` 认证浏览器 sidecar，并映射 noVNC 端口 `6080:6080`。在 WebUI 设置页点击 Pixiv 登录后，会打开 <http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale>，在远程浏览器中完成 Pixiv 登录后，后端会自动捕获回调并保存 `refresh_token`。
+
 ```bat
 docker compose build
 ```

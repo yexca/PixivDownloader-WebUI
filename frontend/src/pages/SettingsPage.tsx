@@ -1,11 +1,18 @@
 import * as React from "react";
-import { Eye, EyeOff, Save, ShieldCheck, Undo2 } from "lucide-react";
+import { ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Save, ShieldCheck, Undo2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   getSettings,
+  completePixivAuth,
+  getPixivBrowserAuthStatus,
+  refreshPixivAuth,
+  startPixivBrowserAuth,
+  startPixivAuth,
   updateSettings,
   validatePixivAuth,
+  type PixivBrowserAuthStartResponse,
+  type PixivAuthStartResponse,
   type SettingsResponse,
   type SettingsUpdateRequest
 } from "@/api/settings";
@@ -24,12 +31,60 @@ export function SettingsPage(): JSX.Element {
   const [form, setForm] = React.useState<SettingsForm | null>(null);
   const [showToken, setShowToken] = React.useState(false);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
+  const [authFlow, setAuthFlow] = React.useState<PixivAuthStartResponse | null>(null);
+  const [browserAuthFlow, setBrowserAuthFlow] = React.useState<PixivBrowserAuthStartResponse | null>(null);
+  const [authCode, setAuthCode] = React.useState("");
+  const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
+  const isPixivStartUrl = isPixivAuthStartUrl(authCode);
+  const hasIntermediatePixivUrl = Boolean(pixivReturnToUrl || isPixivStartUrl);
 
   React.useEffect(() => {
     if (settings.data && !form) {
       setForm(toForm(settings.data));
     }
   }, [settings.data, form]);
+
+  React.useEffect(() => {
+    if (!browserAuthFlow) {
+      return;
+    }
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const status = await getPixivBrowserAuthStatus(browserAuthFlow.flow_id);
+        if (cancelled) {
+          return;
+        }
+        if (status.status === "completed") {
+          pushToast({ title: "Pixiv token saved", description: "Browser sign-in completed.", tone: "success" });
+          setBrowserAuthFlow(null);
+          void queryClient.invalidateQueries({ queryKey: ["settings"] });
+        } else if (status.status === "failed") {
+          pushToast({
+            title: "Pixiv browser sign-in failed",
+            description: status.error ?? "Try again or use manual token entry.",
+            tone: "error"
+          });
+          setBrowserAuthFlow(null);
+        }
+      } catch (error) {
+        if (!cancelled && error instanceof Error) {
+          pushToast({ title: "Pixiv browser sign-in failed", description: error.message, tone: "error" });
+          setBrowserAuthFlow(null);
+        }
+      }
+    };
+
+    void poll();
+    const intervalId = window.setInterval(() => {
+      void poll();
+    }, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [browserAuthFlow, pushToast, queryClient]);
 
   const mutation = useMutation({
     mutationFn: (request: SettingsUpdateRequest) => updateSettings(request),
@@ -47,6 +102,49 @@ export function SettingsPage(): JSX.Element {
       pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" }),
     onError: (error) =>
       pushToast({ title: "Pixiv authentication failed", description: error.message, tone: "error" })
+  });
+  const startManualAuthMutation = useMutation({
+    mutationFn: startPixivAuth,
+    onSuccess: (response) => {
+      setAuthFlow(response);
+      setAuthCode("");
+      window.open(response.login_url, "_blank", "noopener,noreferrer");
+      pushToast({ title: "Pixiv sign-in opened", description: "Paste the callback URL or code after logging in." });
+    },
+    onError: (error) => pushToast({ title: "Could not start Pixiv sign-in", description: error.message, tone: "error" })
+  });
+  const startBrowserAuthMutation = useMutation({
+    mutationFn: startPixivBrowserAuth,
+    onSuccess: (response) => {
+      setBrowserAuthFlow(response);
+      setAuthFlow(null);
+      setAuthCode("");
+      window.open(response.novnc_url, "_blank", "noopener,noreferrer");
+      pushToast({ title: "Pixiv browser sign-in opened", description: "Complete login in the remote browser window." });
+    },
+    onError: () => {
+      startManualAuthMutation.mutate();
+    }
+  });
+  const completeAuthMutation = useMutation({
+    mutationFn: completePixivAuth,
+    onSuccess: (response) => {
+      pushToast({ title: "Pixiv token saved", description: response.message, tone: "success" });
+      setForm(toForm(response));
+      setAuthFlow(null);
+      setAuthCode("");
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (error) => pushToast({ title: "Pixiv sign-in failed", description: error.message, tone: "error" })
+  });
+  const refreshAuthMutation = useMutation({
+    mutationFn: refreshPixivAuth,
+    onSuccess: (response) => {
+      pushToast({ title: "Pixiv token refreshed", description: response.message, tone: "success" });
+      setForm(toForm(response));
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+    },
+    onError: (error) => pushToast({ title: "Pixiv token refresh failed", description: error.message, tone: "error" })
   });
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -107,6 +205,95 @@ export function SettingsPage(): JSX.Element {
                 </Button>
               </div>
             </Field>
+
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={startBrowserAuthMutation.isPending || startManualAuthMutation.isPending}
+                  onClick={() => startBrowserAuthMutation.mutate()}
+                >
+                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                  Sign in with Pixiv
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={refreshAuthMutation.isPending || !settings.data.refresh_token_configured}
+                  onClick={() => refreshAuthMutation.mutate()}
+                >
+                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  Refresh Token
+                </Button>
+              </div>
+
+              {browserAuthFlow ? (
+                <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
+                  <span className="block text-sm font-medium">Waiting for Pixiv browser sign-in</span>
+                  <span className="block text-xs text-muted-foreground">
+                    Complete Pixiv login in the remote browser window. The token is saved automatically after Pixiv redirects back.
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer")}
+                    >
+                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                      Open Browser
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setBrowserAuthFlow(null)}>
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {authFlow ? (
+                <div className="mt-3 space-y-2">
+                  <textarea
+                    className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    value={authCode}
+                    onChange={(event) => setAuthCode(event.target.value)}
+                    placeholder="Paste Pixiv callback URL, copied request, cURL, HAR snippet, or authorization code"
+                  />
+                  {pixivReturnToUrl ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer")}
+                    >
+                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                      Continue Pixiv Sign-in
+                    </Button>
+                  ) : null}
+                  {isPixivStartUrl ? (
+                    <span className="block text-xs text-muted-foreground">
+                      This Pixiv URL is an intermediate auth endpoint. Copy the callback request that contains code= from the browser network log.
+                    </span>
+                  ) : null}
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      disabled={completeAuthMutation.isPending || !authCode.trim() || hasIntermediatePixivUrl}
+                      onClick={() =>
+                        completeAuthMutation.mutate({
+                          flow_id: authFlow.flow_id,
+                          code_or_callback_url: authCode.trim()
+                        })
+                      }
+                    >
+                      <KeyRound className="h-4 w-4" aria-hidden="true" />
+                      Save Pixiv Token
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => setAuthFlow(null)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-3">
               <NumberField
@@ -197,6 +384,37 @@ function validate(form: SettingsForm): Record<string, string> {
     errors.max_concurrent_downloads = "Must be a whole number of at least 1.";
   }
   return errors;
+}
+
+function getPixivPostRedirectReturnTo(value: string): string | null {
+  const input = value.trim();
+  if (!input) {
+    return null;
+  }
+
+  try {
+    const url = new URL(input);
+    if (url.hostname !== "accounts.pixiv.net" || url.pathname !== "/post-redirect") {
+      return null;
+    }
+    return url.searchParams.get("return_to");
+  } catch {
+    return null;
+  }
+}
+
+function isPixivAuthStartUrl(value: string): boolean {
+  const input = value.trim();
+  if (!input) {
+    return false;
+  }
+
+  try {
+    const url = new URL(input);
+    return url.hostname === "app-api.pixiv.net" && url.pathname === "/web/v1/users/auth/pixiv/start";
+  } catch {
+    return false;
+  }
 }
 
 function Field({

@@ -52,6 +52,16 @@ Open:
 http://127.0.0.1:7653
 ```
 
+Pixiv browser sign-in opens the authentication sidecar through noVNC:
+
+```text
+http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
+```
+
+Complete Pixiv login in that remote browser window. The sidecar captures the
+Pixiv OAuth callback and the main backend saves the `refresh_token`
+automatically.
+
 Stop:
 
 ```bat
@@ -67,6 +77,13 @@ build:
   dockerfile: Dockerfile
 ports:
   - "7653:7653"
+```
+
+Compose also starts `pixiv-auth-browser`, which exposes:
+
+```yaml
+ports:
+  - "6080:6080"
 ```
 
 ## Docker Volumes
@@ -88,6 +105,12 @@ Default port:
 
 ```text
 7653
+```
+
+Pixiv auth browser noVNC port:
+
+```text
+6080
 ```
 
 Windows scripts:
