@@ -1,3 +1,6 @@
+import json
+
+from backend.core.paths import downloads_dir
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile, Job
 from backend.repositories.file_repository import ArtworkFileRepository
@@ -150,3 +153,31 @@ def test_worker_persists_failed_file_and_job_event(tmp_path):
     finally:
         file_repository.close()
         job_repository.close()
+
+
+def test_worker_file_downloader_uses_runtime_enforced_download_path(tmp_path, monkeypatch):
+    db_path = tmp_path / "pixiv.sqlite3"
+    settings_path = tmp_path / "settings.json"
+    settings_example_path = tmp_path / "settings.example.json"
+    settings_example_path.write_text(
+        json.dumps(
+            {
+                "download_path": "D:\\Downloads",
+                "refresh_token": "token",
+                "request_base_delay_seconds": 0,
+                "request_random_delay_seconds": 0,
+                "max_concurrent_downloads": 1,
+                "overwrite_existing_files": False,
+                "skip_existing_files": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings_path.write_text("{}", encoding="utf-8")
+    migrate_database(db_path, settings_json_path=settings_path)
+    monkeypatch.setenv("PIXIVDOWNLOADER_RUNTIME", "docker")
+
+    worker = DownloadWorker(db_path=db_path, settings_json_path=settings_path)
+    file_downloader = worker._create_file_downloader()
+
+    assert file_downloader.download_path == downloads_dir()

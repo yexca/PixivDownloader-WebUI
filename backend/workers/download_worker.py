@@ -5,7 +5,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
-from backend.core.config import SettingsService
 from backend.core.errors import JobCancelledError
 from backend.domain.entities import DownloadProgress, Job, JobEvent
 from backend.repositories._time import utc_now
@@ -17,6 +16,7 @@ from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.random_sleep import RandomSleep
+from backend.services.settings_service import AppSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +34,12 @@ class DownloadWorker:
         self,
         *,
         db_path: Path | str | None = None,
+        settings_json_path: Path | str | None = None,
         pixiv_client_factory: PixivClientFactory | None = None,
         file_downloader_factory: FileDownloaderFactory | None = None,
     ) -> None:
         self.db_path = db_path
+        self.settings_json_path = settings_json_path
         self.pixiv_client_factory = pixiv_client_factory or self._create_pixiv_client
         self.file_downloader_factory = file_downloader_factory or self._create_file_downloader
 
@@ -173,7 +175,14 @@ class DownloadWorker:
         return job.cancel_requested if job is not None else True
 
     def _create_pixiv_client(self) -> PixivClient:
-        settings = SettingsService().load()
+        settings_service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            settings = settings_service.load()
+        finally:
+            settings_service.close()
         sleeper = RandomSleep(
             base_seconds=settings.request_base_delay_seconds,
             random_seconds=settings.request_random_delay_seconds,
@@ -181,7 +190,14 @@ class DownloadWorker:
         return PixivClient(refresh_token=settings.refresh_token, sleeper=sleeper)
 
     def _create_file_downloader(self) -> FileDownloader:
-        settings = SettingsService().load()
+        settings_service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            settings = settings_service.load()
+        finally:
+            settings_service.close()
         return FileDownloader(
             settings.download_path,
             skip_existing=settings.skip_existing_files,

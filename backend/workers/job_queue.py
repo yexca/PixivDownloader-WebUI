@@ -16,11 +16,15 @@ class JobQueue:
         self,
         *,
         db_path: Path | str | None = None,
+        settings_json_path: Path | str | None = None,
         worker: DownloadWorker | None = None,
         poll_interval_seconds: float = 0.2,
     ) -> None:
         self.db_path = db_path
-        self.worker = worker or DownloadWorker(db_path=db_path)
+        self.worker = worker or DownloadWorker(
+            db_path=db_path,
+            settings_json_path=settings_json_path,
+        )
         self.poll_interval_seconds = poll_interval_seconds
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()

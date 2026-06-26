@@ -62,7 +62,10 @@ def create_app(
     app.state.settings_json_path = (
         Path(settings_json_path) if settings_json_path is not None else None
     )
-    app.state.job_queue = job_queue or JobQueue(db_path=db_path)
+    app.state.job_queue = job_queue or JobQueue(
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+    )
     app.state.pixiv_oauth_flow_store = PixivOAuthFlowStore()
     app.state.pixiv_browser_auth_store = PixivBrowserAuthStore()
     app.include_router(routes_health.router)
