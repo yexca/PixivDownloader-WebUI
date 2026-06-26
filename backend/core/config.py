@@ -16,7 +16,7 @@ class Settings:
     download_path: str
     refresh_token: str = ""
     request_base_delay_seconds: float = 0.0
-    request_random_delay_seconds: float = 0.0
+    request_random_delay_seconds: float = 2.0
     max_concurrent_downloads: int = 1
     overwrite_existing_files: bool = False
     skip_existing_files: bool = True
@@ -32,7 +32,7 @@ class Settings:
             raise ConfigError("max_concurrent_downloads must be at least 1")
 
         request_base_delay_seconds = float(data.get("request_base_delay_seconds", 0.0))
-        request_random_delay_seconds = float(data.get("request_random_delay_seconds", 0.0))
+        request_random_delay_seconds = float(data.get("request_random_delay_seconds", 2.0))
         if request_base_delay_seconds < 0 or request_random_delay_seconds < 0:
             raise ConfigError("request delays must be non-negative")
 

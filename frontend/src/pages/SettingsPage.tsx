@@ -194,218 +194,265 @@ export function SettingsPage(): JSX.Element {
         ) : settings.isError ? (
           <DataState title="Could not load settings" description={settings.error.message} variant="error" />
         ) : (
-          <form className="surface max-w-3xl space-y-5 p-4" onSubmit={submit}>
-            <Field label="Download path" error={errors.download_path}>
-              <Input
-                value={form.download_path}
-                disabled={!settings.data.download_path_editable}
-                onChange={(event) => setForm({ ...form, download_path: event.target.value })}
-              />
-            </Field>
-
-            <Field
-              label="Refresh token"
-              error={errors.refresh_token}
-              help={
-                settings.data.refresh_token_configured
-                  ? `Configured: ${settings.data.refresh_token_preview}`
-                  : "No refresh token configured"
-              }
+          <form className="surface max-w-3xl divide-y p-4" onSubmit={submit}>
+            <SettingsSection
+              title="Pixiv authentication"
+              description="Manage the account token used for Pixiv API requests."
             >
-              <div className="flex gap-2">
-                <Input
-                  type={showToken ? "text" : "password"}
-                  value={form.refresh_token ?? ""}
-                  onChange={(event) => setForm({ ...form, refresh_token: event.target.value })}
-                  placeholder="Leave blank to keep existing token"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label={showToken ? "Hide refresh token" : "Show refresh token"}
-                  title={showToken ? "Hide token" : "Show token"}
-                  onClick={() => setShowToken((value) => !value)}
+              <div className="space-y-4">
+                <Field
+                  label="Refresh token"
+                  error={errors.refresh_token}
+                  tooltip="Pixiv OAuth refresh token. Leave this field blank when saving to keep the existing token."
+                  help={
+                    settings.data.refresh_token_configured
+                      ? `Configured: ${settings.data.refresh_token_preview}`
+                      : "No refresh token configured"
+                  }
                 >
-                  {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-            </Field>
-
-            <div className="rounded-md border bg-muted/20 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={startBrowserAuthMutation.isPending || startManualAuthMutation.isPending}
-                  onClick={() => startBrowserAuthMutation.mutate()}
-                >
-                  <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                  Sign in with Pixiv
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={refreshAuthMutation.isPending || !settings.data.refresh_token_configured}
-                  onClick={() => refreshAuthMutation.mutate()}
-                >
-                  <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                  Refresh Token
-                </Button>
-              </div>
-
-              {browserAuthFlow ? (
-                <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
-                  <span className="block text-sm font-medium">Waiting for Pixiv browser sign-in</span>
-                  <span className="block text-xs text-muted-foreground">
-                    Complete Pixiv login in the remote browser window. The token is saved automatically after Pixiv redirects back.
-                  </span>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex gap-2">
+                    <Input
+                      type={showToken ? "text" : "password"}
+                      value={form.refresh_token ?? ""}
+                      onChange={(event) => setForm({ ...form, refresh_token: event.target.value })}
+                      placeholder="Leave blank to keep existing token"
+                    />
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer")}
+                      size="icon"
+                      aria-label={showToken ? "Hide refresh token" : "Show refresh token"}
+                      title={showToken ? "Hide token" : "Show token"}
+                      onClick={() => setShowToken((value) => !value)}
                     >
-                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                      Open Browser
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => setBrowserAuthFlow(null)}>
-                      Dismiss
+                      {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </Button>
                   </div>
-                </div>
-              ) : null}
+                </Field>
 
-              {authFlow ? (
-                <div className="mt-3 space-y-2">
-                  <textarea
-                    className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    value={authCode}
-                    onChange={(event) => setAuthCode(event.target.value)}
-                    placeholder="Paste Pixiv callback URL, copied request, cURL, HAR snippet, or authorization code"
-                  />
-                  {pixivReturnToUrl ? (
+                <div className="rounded-md border bg-muted/20 p-3">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
                       type="button"
                       variant="outline"
-                      onClick={() => window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer")}
+                      title="Open the Pixiv login flow and save a refresh token after sign-in."
+                      disabled={startBrowserAuthMutation.isPending || startManualAuthMutation.isPending}
+                      onClick={() => startBrowserAuthMutation.mutate()}
                     >
                       <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                      Continue Pixiv Sign-in
+                      Sign in with Pixiv
                     </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      title="Exchange the saved refresh token for a fresh Pixiv token pair."
+                      disabled={refreshAuthMutation.isPending || !settings.data.refresh_token_configured}
+                      onClick={() => refreshAuthMutation.mutate()}
+                    >
+                      <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                      Refresh Token
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      title="Verify that the configured Pixiv refresh token can authenticate."
+                      disabled={authMutation.isPending}
+                      onClick={() => authMutation.mutate()}
+                    >
+                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                      Test Auth
+                    </Button>
+                  </div>
+
+                  {browserAuthFlow ? (
+                    <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
+                      <span className="block text-sm font-medium">Waiting for Pixiv browser sign-in</span>
+                      <span className="block text-xs text-muted-foreground">
+                        Complete Pixiv login in the remote browser window. The token is saved automatically after Pixiv redirects back.
+                      </span>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          title="Reopen the remote browser for the current Pixiv sign-in flow."
+                          onClick={() => window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer")}
+                        >
+                          <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                          Open Browser
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => setBrowserAuthFlow(null)}>
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
                   ) : null}
-                  {isPixivStartUrl ? (
-                    <span className="block text-xs text-muted-foreground">
-                      This Pixiv URL is an intermediate auth endpoint. Copy the callback request that contains code= from the browser network log.
+
+                  {authFlow ? (
+                    <div className="mt-3 space-y-2">
+                      <textarea
+                        className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        value={authCode}
+                        onChange={(event) => setAuthCode(event.target.value)}
+                        placeholder="Paste Pixiv callback URL, copied request, cURL, HAR snippet, or authorization code"
+                      />
+                      {pixivReturnToUrl ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          title="Open the next Pixiv URL from the pasted intermediate login response."
+                          onClick={() => window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer")}
+                        >
+                          <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                          Continue Pixiv Sign-in
+                        </Button>
+                      ) : null}
+                      {isPixivStartUrl ? (
+                        <span className="block text-xs text-muted-foreground">
+                          This Pixiv URL is an intermediate auth endpoint. Copy the callback request that contains code= from the browser network log.
+                        </span>
+                      ) : null}
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          title="Exchange the pasted callback URL or authorization code and save the resulting refresh token."
+                          disabled={completeAuthMutation.isPending || !authCode.trim() || hasIntermediatePixivUrl}
+                          onClick={() =>
+                            completeAuthMutation.mutate({
+                              flow_id: authFlow.flow_id,
+                              code_or_callback_url: authCode.trim()
+                            })
+                          }
+                        >
+                          <KeyRound className="h-4 w-4" aria-hidden="true" />
+                          Save Pixiv Token
+                        </Button>
+                        <Button type="button" variant="outline" onClick={() => setAuthFlow(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            </SettingsSection>
+
+            <SettingsSection title="Storage" description="Choose where downloaded artwork files are written.">
+              <Field
+                label="Download path"
+                error={errors.download_path}
+                tooltip="Directory where downloaded Pixiv files are stored. Docker runtime fixes this to /app/downloads."
+              >
+                <Input
+                  value={form.download_path}
+                  disabled={!settings.data.download_path_editable}
+                  onChange={(event) => setForm({ ...form, download_path: event.target.value })}
+                />
+              </Field>
+            </SettingsSection>
+
+            <SettingsSection title="Download behavior" description="Control how the downloader handles files that already exist.">
+              <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+                <label
+                  className="flex items-center gap-2 text-sm"
+                  title="When a target file already exists, leave it untouched and mark that file as skipped."
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.skip_existing_files}
+                    onChange={(event) => setForm({ ...form, skip_existing_files: event.target.checked })}
+                  />
+                  Skip existing files
+                </label>
+                <label
+                  className="flex items-center gap-2 text-sm"
+                  title="Allow downloads to replace files that already exist at the target path."
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.overwrite_existing_files}
+                    onChange={(event) => setForm({ ...form, overwrite_existing_files: event.target.checked })}
+                  />
+                  Overwrite existing files
+                </label>
+              </div>
+            </SettingsSection>
+
+            <SettingsSection title="Requests and performance" description="Tune Pixiv request pacing and download concurrency.">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <NumberField
+                  label="Base delay seconds"
+                  value={form.request_base_delay_seconds}
+                  error={errors.request_base_delay_seconds}
+                  tooltip="Fixed minimum wait before each Pixiv request or download attempt."
+                  onChange={(value) => setForm({ ...form, request_base_delay_seconds: value })}
+                />
+                <NumberField
+                  label="Random delay seconds"
+                  value={form.request_random_delay_seconds}
+                  error={errors.request_random_delay_seconds}
+                  tooltip="Extra random wait from 0 up to this many seconds, added on top of the base delay."
+                  onChange={(value) => setForm({ ...form, request_random_delay_seconds: value })}
+                />
+                <NumberField
+                  label="Max concurrent"
+                  value={form.max_concurrent_downloads}
+                  error={errors.max_concurrent_downloads}
+                  min={1}
+                  step={1}
+                  tooltip="Maximum number of downloads allowed to run at the same time. Minimum is 1."
+                  onChange={(value) => setForm({ ...form, max_concurrent_downloads: Math.max(1, value) })}
+                />
+              </div>
+            </SettingsSection>
+
+            <SettingsSection title="Data maintenance" description="Run one-off maintenance tasks for local library data.">
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    id={legacyDatabaseInputId}
+                    className="hidden"
+                    type="file"
+                    accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
+                    disabled={importLegacyDatabaseMutation.isPending}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = "";
+                      if (file) {
+                        importLegacyDatabaseMutation.mutate(file);
+                      }
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    title="Import artists and artwork metadata from an archived PyQt pixiv.db or SQLite database."
+                    disabled={importLegacyDatabaseMutation.isPending}
+                    onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
+                  >
+                    <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
+                    Import Legacy Database
+                  </Button>
+                  {importLegacyDatabaseMutation.data ? (
+                    <span className="text-xs text-muted-foreground">
+                      {importLegacyDatabaseMutation.data.imported_artists} of{" "}
+                      {importLegacyDatabaseMutation.data.total_rows} rows imported.
                     </span>
                   ) : null}
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      disabled={completeAuthMutation.isPending || !authCode.trim() || hasIntermediatePixivUrl}
-                      onClick={() =>
-                        completeAuthMutation.mutate({
-                          flow_id: authFlow.flow_id,
-                          code_or_callback_url: authCode.trim()
-                        })
-                      }
-                    >
-                      <KeyRound className="h-4 w-4" aria-hidden="true" />
-                      Save Pixiv Token
-                    </Button>
-                    <Button type="button" variant="outline" onClick={() => setAuthFlow(null)}>
-                      Cancel
-                    </Button>
-                  </div>
                 </div>
-              ) : null}
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-3">
-              <NumberField
-                label="Base delay seconds"
-                value={form.request_base_delay_seconds}
-                error={errors.request_base_delay_seconds}
-                onChange={(value) => setForm({ ...form, request_base_delay_seconds: value })}
-              />
-              <NumberField
-                label="Random delay seconds"
-                value={form.request_random_delay_seconds}
-                error={errors.request_random_delay_seconds}
-                onChange={(value) => setForm({ ...form, request_random_delay_seconds: value })}
-              />
-              <NumberField
-                label="Max concurrent"
-                value={form.max_concurrent_downloads}
-                error={errors.max_concurrent_downloads}
-                step={1}
-                onChange={(value) => setForm({ ...form, max_concurrent_downloads: value })}
-              />
-            </div>
-
-            <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.skip_existing_files}
-                  onChange={(event) => setForm({ ...form, skip_existing_files: event.target.checked })}
-                />
-                Skip existing files
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.overwrite_existing_files}
-                  onChange={(event) => setForm({ ...form, overwrite_existing_files: event.target.checked })}
-                />
-                Overwrite existing files
-              </label>
-            </div>
-
-            <div className="rounded-md border bg-muted/20 p-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  id={legacyDatabaseInputId}
-                  className="hidden"
-                  type="file"
-                  accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
-                  disabled={importLegacyDatabaseMutation.isPending}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = "";
-                    if (file) {
-                      importLegacyDatabaseMutation.mutate(file);
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={importLegacyDatabaseMutation.isPending}
-                  onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
-                >
-                  <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
-                  Import Legacy Database
-                </Button>
-                {importLegacyDatabaseMutation.data ? (
-                  <span className="text-xs text-muted-foreground">
-                    {importLegacyDatabaseMutation.data.imported_artists} of{" "}
-                    {importLegacyDatabaseMutation.data.total_rows} rows imported.
-                  </span>
-                ) : null}
               </div>
-            </div>
+            </SettingsSection>
 
-            <div className="flex flex-wrap gap-2">
-              <Button type="submit" disabled={mutation.isPending}>
+            <div className="flex flex-wrap gap-2 pt-5">
+              <Button type="submit" title="Save the current settings to config/settings.json." disabled={mutation.isPending}>
                 <Save className="h-4 w-4" aria-hidden="true" />
                 Save
               </Button>
-              <Button type="button" variant="outline" disabled={authMutation.isPending} onClick={() => authMutation.mutate()}>
-                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                Test Auth
-              </Button>
-              <Button type="button" variant="outline" onClick={() => setForm(toForm(settings.data))}>
+              <Button
+                type="button"
+                variant="outline"
+                title="Restore the form values from the last loaded settings response."
+                onClick={() => setForm(toForm(settings.data))}
+              >
                 <Undo2 className="h-4 w-4" aria-hidden="true" />
                 Reset
               </Button>
@@ -481,15 +528,17 @@ function Field({
   label,
   children,
   error,
-  help
+  help,
+  tooltip
 }: {
   label: string;
   children: React.ReactNode;
   error?: string;
   help?: string;
+  tooltip?: string;
 }): JSX.Element {
   return (
-    <label className="block">
+    <label className="block" title={tooltip}>
       <span className="mb-2 block text-sm font-medium">{label}</span>
       {children}
       {help ? <span className="mt-1 block text-xs text-muted-foreground">{help}</span> : null}
@@ -498,24 +547,48 @@ function Field({
   );
 }
 
+function SettingsSection({
+  title,
+  description,
+  children
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <section className="grid gap-4 py-5 first:pt-0 sm:grid-cols-[180px_1fr]">
+      <div>
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+      </div>
+      <div className="min-w-0">{children}</div>
+    </section>
+  );
+}
+
 function NumberField({
   label,
   value,
   error,
   onChange,
-  step = 0.1
+  min = 0,
+  step = 0.1,
+  tooltip
 }: {
   label: string;
   value: number;
   error?: string;
   onChange: (value: number) => void;
+  min?: number;
   step?: number;
+  tooltip?: string;
 }): JSX.Element {
   return (
-    <Field label={label} error={error}>
+    <Field label={label} error={error} tooltip={tooltip}>
       <Input
         type="number"
-        min={0}
+        min={min}
         step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
