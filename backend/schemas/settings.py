@@ -5,6 +5,8 @@ from pydantic import BaseModel, Field
 
 class SettingsResponse(BaseModel):
     download_path: str
+    download_path_editable: bool
+    runtime_mode: str
     refresh_token_configured: bool
     refresh_token_preview: str
     request_base_delay_seconds: float

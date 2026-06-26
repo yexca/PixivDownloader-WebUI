@@ -51,8 +51,34 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert update_response.status_code == 200
     body = update_response.json()
     assert body["download_path"].endswith("new-downloads")
+    assert body["download_path_editable"] is True
+    assert body["runtime_mode"] == "local"
     assert body["refresh_token_configured"] is True
     assert body["refresh_token_preview"] == "secr...oken"
+
+
+def test_settings_download_path_is_fixed_in_docker_runtime(tmp_path, monkeypatch):
+    monkeypatch.setenv("PIXIVDOWNLOADER_RUNTIME", "docker")
+    client = make_client(tmp_path)
+
+    update_response = client.put(
+        "/api/settings",
+        json={
+            "download_path": str(tmp_path / "ignored-downloads"),
+            "refresh_token": "",
+            "request_base_delay_seconds": 0.2,
+            "request_random_delay_seconds": 0.3,
+            "max_concurrent_downloads": 2,
+            "overwrite_existing_files": False,
+            "skip_existing_files": True,
+        },
+    )
+
+    assert update_response.status_code == 200
+    body = update_response.json()
+    assert body["download_path"].replace("\\", "/").endswith("downloads")
+    assert body["download_path_editable"] is False
+    assert body["runtime_mode"] == "docker"
 
 
 def test_settings_validate_auth_endpoint(tmp_path, monkeypatch):

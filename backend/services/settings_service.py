@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from backend.core.config import Settings
 from backend.core.config import SettingsService as JsonSettingsService
 from backend.core.errors import PixivAuthError
+from backend.core.paths import downloads_dir
 from backend.repositories.settings_repository import SettingsRepository
 from backend.services.pixiv_client import PixivApi, PixivClient
 
@@ -27,19 +29,23 @@ class AppSettingsService:
 
     def load(self) -> Settings:
         settings = self.json_settings.load()
+        settings = enforce_runtime_settings(settings)
         self._sync_repository(settings)
         return settings
 
     def update(self, values: dict[str, object]) -> Settings:
         current = self.load().to_dict()
         refresh_token = str(values.get("refresh_token", "")).strip()
+        update_values = {key: value for key, value in values.items() if key != "refresh_token"}
+        if is_docker_runtime():
+            update_values.pop("download_path", None)
         merged = {
             **current,
-            **{key: value for key, value in values.items() if key != "refresh_token"},
+            **update_values,
         }
         if refresh_token:
             merged["refresh_token"] = refresh_token
-        settings = Settings.from_dict(merged)
+        settings = enforce_runtime_settings(Settings.from_dict(merged))
         self.save(settings)
         return settings
 
@@ -69,6 +75,8 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         preview = f"{token[:4]}...{token[-4:]}" if len(token) > 8 else "*" * len(token)
     return {
         "download_path": settings.download_path,
+        "download_path_editable": not is_docker_runtime(),
+        "runtime_mode": runtime_mode(),
         "refresh_token_configured": bool(token),
         "refresh_token_preview": preview,
         "request_base_delay_seconds": settings.request_base_delay_seconds,
@@ -77,3 +85,23 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         "overwrite_existing_files": settings.overwrite_existing_files,
         "skip_existing_files": settings.skip_existing_files,
     }
+
+
+def runtime_mode() -> str:
+    value = os.environ.get("PIXIVDOWNLOADER_RUNTIME", "").strip().lower()
+    return value or "local"
+
+
+def is_docker_runtime() -> bool:
+    return runtime_mode() == "docker"
+
+
+def enforce_runtime_settings(settings: Settings) -> Settings:
+    if not is_docker_runtime():
+        return settings
+    return Settings.from_dict(
+        {
+            **settings.to_dict(),
+            "download_path": str(downloads_dir()),
+        }
+    )

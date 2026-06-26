@@ -2,6 +2,8 @@ import { apiRequest } from "./client";
 
 export type SettingsResponse = {
   download_path: string;
+  download_path_editable: boolean;
+  runtime_mode: string;
   refresh_token_configured: boolean;
   refresh_token_preview: string;
   request_base_delay_seconds: number;

@@ -10,6 +10,7 @@ services:
     environment:
       PIXIVDOWNLOADER_HOST: "0.0.0.0"
       PIXIVDOWNLOADER_PORT: "7653"
+      PIXIVDOWNLOADER_RUNTIME: "docker"
       PIXIV_AUTH_BROWSER_INTERNAL_URL: "http://pixiv-auth-browser:7654"
       PIXIV_AUTH_BROWSER_PUBLIC_URL: "http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale"
       PIXIV_AUTH_BROWSER_CALLBACK_URL: "http://pixivdownloader:7653/api/settings/pixiv-auth/browser/callback"

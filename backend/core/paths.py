@@ -16,6 +16,10 @@ def resources_dir() -> Path:
     return project_root() / "resources"
 
 
+def downloads_dir() -> Path:
+    return project_root() / "downloads"
+
+
 def settings_path() -> Path:
     return config_dir() / "settings.json"
 

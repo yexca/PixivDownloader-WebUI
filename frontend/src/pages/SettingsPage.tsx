@@ -152,7 +152,7 @@ export function SettingsPage(): JSX.Element {
     if (!form) {
       return;
     }
-    const nextErrors = validate(form);
+    const nextErrors = validate(form, settings.data.download_path_editable);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
@@ -173,6 +173,7 @@ export function SettingsPage(): JSX.Element {
             <Field label="Download path" error={errors.download_path}>
               <Input
                 value={form.download_path}
+                disabled={!settings.data.download_path_editable}
                 onChange={(event) => setForm({ ...form, download_path: event.target.value })}
               />
             </Field>
@@ -369,9 +370,9 @@ function toForm(settings: SettingsResponse): SettingsForm {
   };
 }
 
-function validate(form: SettingsForm): Record<string, string> {
+function validate(form: SettingsForm, downloadPathEditable: boolean): Record<string, string> {
   const errors: Record<string, string> = {};
-  if (!form.download_path.trim()) {
+  if (downloadPathEditable && !form.download_path.trim()) {
     errors.download_path = "Download path is required.";
   }
   if (form.request_base_delay_seconds < 0) {
