@@ -1,10 +1,14 @@
 import * as React from "react";
 import {
+  AlertTriangle,
+  CheckCircle2,
+  Copy,
   DatabaseBackup,
   ExternalLink,
   Eye,
   EyeOff,
   KeyRound,
+  Loader2,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -32,11 +36,27 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 
-type SettingsForm = SettingsUpdateRequest;
+type SettingsTab = "basic" | "pixiv" | "advanced";
+type BasicForm = Pick<
+  SettingsUpdateRequest,
+  | "download_path"
+  | "request_base_delay_seconds"
+  | "request_random_delay_seconds"
+  | "max_concurrent_downloads"
+  | "overwrite_existing_files"
+  | "skip_existing_files"
+>;
+type TokenStatusState = "unconfigured" | "checking" | "valid" | "invalid";
+
+type TokenStatus = {
+  state: TokenStatusState;
+  message: string;
+};
 
 class AuthBrowserUnavailableError extends Error {
   constructor(message: string) {
@@ -56,17 +76,29 @@ export function SettingsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const settings = useQuery({ queryKey: ["settings"], queryFn: getSettings });
-  const [form, setForm] = React.useState<SettingsForm | null>(null);
+  const [activeTab, setActiveTab] = React.useState<SettingsTab>("basic");
+  const [basicForm, setBasicForm] = React.useState<BasicForm | null>(null);
+  const [refreshToken, setRefreshToken] = React.useState("");
   const [showToken, setShowToken] = React.useState(false);
-  const [errors, setErrors] = React.useState<Record<string, string>>({});
+  const [basicErrors, setBasicErrors] = React.useState<Record<string, string>>({});
   const [authFlow, setAuthFlow] = React.useState<PixivAuthStartResponse | null>(null);
   const [browserAuthFlow, setBrowserAuthFlow] = React.useState<PixivBrowserAuthStartResponse | null>(null);
   const [authBrowserDialog, setAuthBrowserDialog] = React.useState<AuthBrowserDialog | null>(null);
   const [authCode, setAuthCode] = React.useState("");
+  const [tokenStatus, setTokenStatus] = React.useState<TokenStatus>({
+    state: "checking",
+    message: "Checking Pixiv token status."
+  });
   const legacyDatabaseInputId = React.useId();
   const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
   const isPixivStartUrl = isPixivAuthStartUrl(authCode);
   const hasIntermediatePixivUrl = Boolean(pixivReturnToUrl || isPixivStartUrl);
+
+  React.useEffect(() => {
+    if (settings.data && !basicForm) {
+      setBasicForm(toBasicForm(settings.data));
+    }
+  }, [basicForm, settings.data]);
 
   const remindToStopAuthBrowserIfRunning = React.useCallback(async () => {
     try {
@@ -79,11 +111,36 @@ export function SettingsPage(): JSX.Element {
     }
   }, []);
 
+  const runPixivTokenCheck = React.useCallback(
+    async ({ notify = false, force = false }: { notify?: boolean; force?: boolean } = {}) => {
+      if (!force && !settings.data?.refresh_token_configured) {
+        setTokenStatus({ state: "unconfigured", message: "No Pixiv refresh token is configured." });
+        return;
+      }
+      setTokenStatus({ state: "checking", message: "Checking Pixiv authentication." });
+      try {
+        const response = await validatePixivAuth();
+        setTokenStatus({ state: "valid", message: response.message });
+        if (notify) {
+          pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" });
+        }
+        void remindToStopAuthBrowserIfRunning();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Pixiv authentication could not be verified.";
+        setTokenStatus({ state: "invalid", message });
+        if (notify) {
+          pushToast({ title: "Pixiv authentication failed", description: message, tone: "error" });
+        }
+      }
+    },
+    [pushToast, remindToStopAuthBrowserIfRunning, settings.data?.refresh_token_configured]
+  );
+
   React.useEffect(() => {
-    if (settings.data && !form) {
-      setForm(toForm(settings.data));
+    if (activeTab === "pixiv") {
+      void runPixivTokenCheck();
     }
-  }, [settings.data, form]);
+  }, [activeTab, runPixivTokenCheck]);
 
   React.useEffect(() => {
     if (!browserAuthFlow) {
@@ -101,6 +158,7 @@ export function SettingsPage(): JSX.Element {
           pushToast({ title: "Pixiv token saved", description: "Browser sign-in completed.", tone: "success" });
           setBrowserAuthFlow(null);
           void queryClient.invalidateQueries({ queryKey: ["settings"] });
+          void runPixivTokenCheck();
           void remindToStopAuthBrowserIfRunning();
         } else if (status.status === "failed") {
           pushToast({
@@ -126,27 +184,30 @@ export function SettingsPage(): JSX.Element {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [browserAuthFlow, pushToast, queryClient, remindToStopAuthBrowserIfRunning]);
+  }, [browserAuthFlow, pushToast, queryClient, remindToStopAuthBrowserIfRunning, runPixivTokenCheck]);
 
-  const mutation = useMutation({
-    mutationFn: (request: SettingsUpdateRequest) => updateSettings(request),
+  const basicMutation = useMutation({
+    mutationFn: (request: BasicForm) => updateSettings(request),
     onSuccess: (response) => {
-      pushToast({ title: "Settings saved", tone: "success" });
-      setForm(toForm(response));
-      setShowToken(false);
+      pushToast({ title: "Basic settings saved", tone: "success" });
+      setBasicForm(toBasicForm(response));
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
-    onError: (error) => pushToast({ title: "Settings save failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Basic settings save failed", description: error.message, tone: "error" })
   });
-  const authMutation = useMutation({
-    mutationFn: validatePixivAuth,
-    onSuccess: (response) => {
-      pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" });
-      void remindToStopAuthBrowserIfRunning();
+
+  const saveTokenMutation = useMutation({
+    mutationFn: (token: string) => updateSettings({ refresh_token: token }),
+    onSuccess: () => {
+      pushToast({ title: "Pixiv token saved", tone: "success" });
+      setRefreshToken("");
+      setShowToken(false);
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void runPixivTokenCheck({ force: true });
     },
-    onError: (error) =>
-      pushToast({ title: "Pixiv authentication failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Pixiv token save failed", description: error.message, tone: "error" })
   });
+
   const startManualAuthMutation = useMutation({
     mutationFn: startPixivAuth,
     onSuccess: (response) => {
@@ -157,6 +218,7 @@ export function SettingsPage(): JSX.Element {
     },
     onError: (error) => pushToast({ title: "Could not start Pixiv sign-in", description: error.message, tone: "error" })
   });
+
   const startBrowserAuthMutation = useMutation({
     mutationFn: async () => {
       const status = await getPixivBrowserAuthServiceStatus();
@@ -184,27 +246,30 @@ export function SettingsPage(): JSX.Element {
       }
     }
   });
+
   const completeAuthMutation = useMutation({
     mutationFn: completePixivAuth,
     onSuccess: (response) => {
       pushToast({ title: "Pixiv token saved", description: response.message, tone: "success" });
-      setForm(toForm(response));
       setAuthFlow(null);
       setAuthCode("");
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void runPixivTokenCheck({ force: true });
       void remindToStopAuthBrowserIfRunning();
     },
     onError: (error) => pushToast({ title: "Pixiv sign-in failed", description: error.message, tone: "error" })
   });
+
   const refreshAuthMutation = useMutation({
     mutationFn: refreshPixivAuth,
     onSuccess: (response) => {
       pushToast({ title: "Pixiv token refreshed", description: response.message, tone: "success" });
-      setForm(toForm(response));
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void runPixivTokenCheck({ force: true });
     },
     onError: (error) => pushToast({ title: "Pixiv token refresh failed", description: error.message, tone: "error" })
   });
+
   const importLegacyDatabaseMutation = useMutation({
     mutationFn: importLegacyDatabase,
     onSuccess: (response) => {
@@ -219,303 +284,502 @@ export function SettingsPage(): JSX.Element {
       pushToast({ title: "Legacy database import failed", description: error.message, tone: "error" })
   });
 
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+  const submitBasic = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!form) {
+    if (!basicForm || !settings.data) {
       return;
     }
-    const nextErrors = validate(form, settings.data.download_path_editable);
-    setErrors(nextErrors);
+    const nextErrors = validateBasic(basicForm, settings.data.download_path_editable);
+    setBasicErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
-    mutation.mutate({ ...form, refresh_token: form.refresh_token?.trim() || "" });
+    basicMutation.mutate(basicForm);
+  };
+
+  const saveManualToken = () => {
+    const token = refreshToken.trim();
+    if (!token) {
+      pushToast({ title: "Pixiv token is empty", description: "Paste a refresh token before saving.", tone: "error" });
+      return;
+    }
+    saveTokenMutation.mutate(token);
   };
 
   return (
     <>
       <PageHeader title="Settings" description="Configure local download and Pixiv request behavior." />
       <div className="p-4 sm:p-6">
-        {settings.isLoading || !form ? (
+        {settings.isLoading || !basicForm ? (
           <DataState title="Loading settings" variant="loading" />
         ) : settings.isError ? (
           <DataState title="Could not load settings" description={settings.error.message} variant="error" />
         ) : (
-          <form className="surface max-w-3xl divide-y p-4" onSubmit={submit}>
-            <SettingsSection
-              title="Pixiv authentication"
-              description="Manage the account token used for Pixiv API requests."
-            >
-              <div className="space-y-4">
-                <Field
-                  label="Refresh token"
-                  error={errors.refresh_token}
-                  tooltip="Pixiv OAuth refresh token. Leave this field blank when saving to keep the existing token."
-                  help={
-                    settings.data.refresh_token_configured
-                      ? `Configured: ${settings.data.refresh_token_preview}`
-                      : "No refresh token configured"
-                  }
-                >
-                  <div className="flex gap-2">
-                    <Input
-                      type={showToken ? "text" : "password"}
-                      value={form.refresh_token ?? ""}
-                      onChange={(event) => setForm({ ...form, refresh_token: event.target.value })}
-                      placeholder="Leave blank to keep existing token"
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      aria-label={showToken ? "Hide refresh token" : "Show refresh token"}
-                      title={showToken ? "Hide token" : "Show token"}
-                      onClick={() => setShowToken((value) => !value)}
-                    >
-                      {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                </Field>
+          <div className="surface max-w-4xl p-4">
+            <Tabs
+              value={activeTab}
+              onValueChange={setActiveTab}
+              items={[
+                { value: "basic", label: "Basic" },
+                { value: "pixiv", label: "Pixiv" },
+                { value: "advanced", label: "Advanced" }
+              ]}
+            />
 
-                <div className="rounded-md border bg-muted/20 p-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      title="Open the Pixiv login flow and save a refresh token after sign-in."
-                      disabled={startBrowserAuthMutation.isPending || startManualAuthMutation.isPending}
-                      onClick={() => startBrowserAuthMutation.mutate()}
-                    >
-                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                      Sign in with Pixiv
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      title="Exchange the saved refresh token for a fresh Pixiv token pair."
-                      disabled={refreshAuthMutation.isPending || !settings.data.refresh_token_configured}
-                      onClick={() => refreshAuthMutation.mutate()}
-                    >
-                      <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                      Refresh Token
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      title="Verify that the configured Pixiv refresh token can authenticate."
-                      disabled={authMutation.isPending}
-                      onClick={() => authMutation.mutate()}
-                    >
-                      <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                      Test Auth
-                    </Button>
-                  </div>
+            {activeTab === "basic" ? (
+              <BasicSettingsTab
+                form={basicForm}
+                settings={settings.data}
+                errors={basicErrors}
+                isSaving={basicMutation.isPending}
+                onSubmit={submitBasic}
+                onChange={setBasicForm}
+                onReset={() => {
+                  setBasicErrors({});
+                  setBasicForm(toBasicForm(settings.data));
+                }}
+              />
+            ) : null}
 
-                  {browserAuthFlow ? (
-                    <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
-                      <span className="block text-sm font-medium">Waiting for Pixiv browser sign-in</span>
-                      <span className="block text-xs text-muted-foreground">
-                        Complete Pixiv login in the remote browser window. The token is saved automatically after Pixiv redirects back.
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          title="Reopen the remote browser for the current Pixiv sign-in flow."
-                          onClick={() => window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer")}
-                        >
-                          <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                          Open Browser
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => setBrowserAuthFlow(null)}>
-                          Dismiss
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
+            {activeTab === "pixiv" ? (
+              <PixivSettingsTab
+                authCode={authCode}
+                authFlow={authFlow}
+                browserAuthFlow={browserAuthFlow}
+                completeAuthPending={completeAuthMutation.isPending}
+                hasIntermediatePixivUrl={hasIntermediatePixivUrl}
+                isPixivStartUrl={isPixivStartUrl}
+                pixivReturnToUrl={pixivReturnToUrl}
+                refreshAuthPending={refreshAuthMutation.isPending}
+                refreshToken={refreshToken}
+                saveTokenPending={saveTokenMutation.isPending}
+                settings={settings.data}
+                showToken={showToken}
+                startBrowserAuthPending={startBrowserAuthMutation.isPending}
+                startManualAuthPending={startManualAuthMutation.isPending}
+                tokenStatus={tokenStatus}
+                onAuthCodeChange={setAuthCode}
+                onCancelAuthFlow={() => setAuthFlow(null)}
+                onCompleteAuth={() =>
+                  authFlow
+                    ? completeAuthMutation.mutate({
+                        flow_id: authFlow.flow_id,
+                        code_or_callback_url: authCode.trim()
+                      })
+                    : undefined
+                }
+                onDismissBrowserFlow={() => setBrowserAuthFlow(null)}
+                onOpenBrowserFlow={() =>
+                  browserAuthFlow ? window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer") : undefined
+                }
+                onOpenContinueUrl={() =>
+                  pixivReturnToUrl ? window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer") : undefined
+                }
+                onRefreshAuth={() => refreshAuthMutation.mutate()}
+                onRefreshTokenChange={setRefreshToken}
+                onRunTokenCheck={() => void runPixivTokenCheck({ notify: true })}
+                onSaveManualToken={saveManualToken}
+                onStartBrowserAuth={() => startBrowserAuthMutation.mutate()}
+                onToggleToken={() => setShowToken((value) => !value)}
+              />
+            ) : null}
 
-                  {authFlow ? (
-                    <div className="mt-3 space-y-2">
-                      <textarea
-                        className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        value={authCode}
-                        onChange={(event) => setAuthCode(event.target.value)}
-                        placeholder="Paste Pixiv callback URL, copied request, cURL, HAR snippet, or authorization code"
-                      />
-                      {pixivReturnToUrl ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          title="Open the next Pixiv URL from the pasted intermediate login response."
-                          onClick={() => window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer")}
-                        >
-                          <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                          Continue Pixiv Sign-in
-                        </Button>
-                      ) : null}
-                      {isPixivStartUrl ? (
-                        <span className="block text-xs text-muted-foreground">
-                          This Pixiv URL is an intermediate auth endpoint. Copy the callback request that contains code= from the browser network log.
-                        </span>
-                      ) : null}
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          title="Exchange the pasted callback URL or authorization code and save the resulting refresh token."
-                          disabled={completeAuthMutation.isPending || !authCode.trim() || hasIntermediatePixivUrl}
-                          onClick={() =>
-                            completeAuthMutation.mutate({
-                              flow_id: authFlow.flow_id,
-                              code_or_callback_url: authCode.trim()
-                            })
-                          }
-                        >
-                          <KeyRound className="h-4 w-4" aria-hidden="true" />
-                          Save Pixiv Token
-                        </Button>
-                        <Button type="button" variant="outline" onClick={() => setAuthFlow(null)}>
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </SettingsSection>
-
-            <SettingsSection title="Storage" description="Choose where downloaded artwork files are written.">
-              <Field
-                label="Download path"
-                error={errors.download_path}
-                tooltip="Directory where downloaded Pixiv files are stored. Docker runtime fixes this to /app/downloads."
-              >
-                <Input
-                  value={form.download_path}
-                  disabled={!settings.data.download_path_editable}
-                  onChange={(event) => setForm({ ...form, download_path: event.target.value })}
-                />
-              </Field>
-            </SettingsSection>
-
-            <SettingsSection title="Download behavior" description="Control how the downloader handles files that already exist.">
-              <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
-                <label
-                  className="flex items-center gap-2 text-sm"
-                  title="When a target file already exists, leave it untouched and mark that file as skipped."
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.skip_existing_files}
-                    onChange={(event) => setForm({ ...form, skip_existing_files: event.target.checked })}
-                  />
-                  Skip existing files
-                </label>
-                <label
-                  className="flex items-center gap-2 text-sm"
-                  title="Allow downloads to replace files that already exist at the target path."
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.overwrite_existing_files}
-                    onChange={(event) => setForm({ ...form, overwrite_existing_files: event.target.checked })}
-                  />
-                  Overwrite existing files
-                </label>
-              </div>
-            </SettingsSection>
-
-            <SettingsSection title="Requests and performance" description="Tune Pixiv request pacing and download concurrency.">
-              <div className="grid gap-4 sm:grid-cols-3">
-                <NumberField
-                  label="Base delay seconds"
-                  value={form.request_base_delay_seconds}
-                  error={errors.request_base_delay_seconds}
-                  tooltip="Fixed minimum wait before each Pixiv request or download attempt."
-                  onChange={(value) => setForm({ ...form, request_base_delay_seconds: value })}
-                />
-                <NumberField
-                  label="Random delay seconds"
-                  value={form.request_random_delay_seconds}
-                  error={errors.request_random_delay_seconds}
-                  tooltip="Extra random wait from 0 up to this many seconds, added on top of the base delay."
-                  onChange={(value) => setForm({ ...form, request_random_delay_seconds: value })}
-                />
-                <NumberField
-                  label="Max concurrent"
-                  value={form.max_concurrent_downloads}
-                  error={errors.max_concurrent_downloads}
-                  min={1}
-                  step={1}
-                  tooltip="Maximum number of downloads allowed to run at the same time. Minimum is 1."
-                  onChange={(value) => setForm({ ...form, max_concurrent_downloads: Math.max(1, value) })}
-                />
-              </div>
-            </SettingsSection>
-
-            <SettingsSection title="Data maintenance" description="Run one-off maintenance tasks for local library data.">
-              <div className="rounded-md border bg-muted/20 p-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <input
-                    id={legacyDatabaseInputId}
-                    className="hidden"
-                    type="file"
-                    accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
-                    disabled={importLegacyDatabaseMutation.isPending}
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      event.target.value = "";
-                      if (file) {
-                        importLegacyDatabaseMutation.mutate(file);
-                      }
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    title="Import artists and artwork metadata from an archived PyQt pixiv.db or SQLite database."
-                    disabled={importLegacyDatabaseMutation.isPending}
-                    onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
-                  >
-                    <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
-                    Import Legacy Database
-                  </Button>
-                  {importLegacyDatabaseMutation.data ? (
-                    <span className="text-xs text-muted-foreground">
-                      {importLegacyDatabaseMutation.data.imported_artists} of{" "}
-                      {importLegacyDatabaseMutation.data.total_rows} rows imported.
-                    </span>
-                  ) : null}
-                </div>
-              </div>
-            </SettingsSection>
-
-            <div className="flex flex-wrap gap-2 pt-5">
-              <Button type="submit" title="Save the current settings to config/settings.json." disabled={mutation.isPending}>
-                <Save className="h-4 w-4" aria-hidden="true" />
-                Save
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                title="Restore the form values from the last loaded settings response."
-                onClick={() => setForm(toForm(settings.data))}
-              >
-                <Undo2 className="h-4 w-4" aria-hidden="true" />
-                Reset
-              </Button>
-            </div>
-          </form>
+            {activeTab === "advanced" ? (
+              <AdvancedSettingsTab
+                importLegacyDatabaseData={importLegacyDatabaseMutation.data}
+                isImporting={importLegacyDatabaseMutation.isPending}
+                legacyDatabaseInputId={legacyDatabaseInputId}
+                onImportLegacyDatabase={(file) => importLegacyDatabaseMutation.mutate(file)}
+              />
+            ) : null}
+          </div>
         )}
       </div>
       <AuthBrowserCommandDialog
         dialog={authBrowserDialog}
         onClose={() => setAuthBrowserDialog(null)}
+        onCopy={(command) => {
+          void copyCommand(command)
+            .then(() => pushToast({ title: "Command copied", tone: "success" }))
+            .catch((error: Error) =>
+              pushToast({ title: "Command copy failed", description: error.message, tone: "error" })
+            );
+        }}
         onUseManual={() => {
           setAuthBrowserDialog(null);
           startManualAuthMutation.mutate();
         }}
       />
     </>
+  );
+}
+
+function BasicSettingsTab({
+  form,
+  settings,
+  errors,
+  isSaving,
+  onSubmit,
+  onChange,
+  onReset
+}: {
+  form: BasicForm;
+  settings: SettingsResponse;
+  errors: Record<string, string>;
+  isSaving: boolean;
+  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  onChange: (form: BasicForm) => void;
+  onReset: () => void;
+}): JSX.Element {
+  return (
+    <form className="mt-5 divide-y" onSubmit={onSubmit}>
+      <SettingsSection title="Storage" description="Choose where downloaded artwork files are written.">
+        <Field
+          label="Download path"
+          error={errors.download_path}
+          tooltip="Directory where downloaded Pixiv files are stored. Docker runtime fixes this to /app/downloads."
+        >
+          <Input
+            value={form.download_path}
+            disabled={!settings.download_path_editable}
+            onChange={(event) => onChange({ ...form, download_path: event.target.value })}
+          />
+        </Field>
+      </SettingsSection>
+
+      <SettingsSection title="Download behavior" description="Control download concurrency and existing file handling.">
+        <div className="space-y-4">
+          <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+            <label
+              className="flex items-center gap-2 text-sm"
+              title="When a target file already exists, leave it untouched and mark that file as skipped."
+            >
+              <input
+                type="checkbox"
+                checked={form.skip_existing_files}
+                onChange={(event) => onChange({ ...form, skip_existing_files: event.target.checked })}
+              />
+              Skip existing files
+            </label>
+            <label
+              className="flex items-center gap-2 text-sm"
+              title="Allow downloads to replace files that already exist at the target path."
+            >
+              <input
+                type="checkbox"
+                checked={form.overwrite_existing_files}
+                onChange={(event) => onChange({ ...form, overwrite_existing_files: event.target.checked })}
+              />
+              Overwrite existing files
+            </label>
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Requests and performance" description="Tune Pixiv request pacing and download concurrency.">
+        <div className="space-y-3">
+          <div className="grid gap-4 sm:grid-cols-3">
+            <NumberField
+              label="Base delay seconds"
+              value={form.request_base_delay_seconds}
+              error={errors.request_base_delay_seconds}
+              tooltip="Fixed minimum wait before each Pixiv request or download attempt."
+              onChange={(value) => onChange({ ...form, request_base_delay_seconds: value })}
+            />
+            <NumberField
+              label="Random delay seconds"
+              value={form.request_random_delay_seconds}
+              error={errors.request_random_delay_seconds}
+              tooltip="Extra random wait from 0 up to this many seconds, added on top of the base delay."
+              onChange={(value) => onChange({ ...form, request_random_delay_seconds: value })}
+            />
+            <NumberField
+              label="Max concurrent"
+              value={form.max_concurrent_downloads}
+              error={errors.max_concurrent_downloads}
+              min={1}
+              step={1}
+              tooltip="Maximum number of downloads allowed to run at the same time. Minimum is 1."
+              onChange={(value) => onChange({ ...form, max_concurrent_downloads: Math.max(1, value) })}
+            />
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            Each request waits base delay + random(0, random delay) seconds before running.
+          </p>
+        </div>
+      </SettingsSection>
+
+      <SettingsActions>
+        <Button type="submit" title="Save basic settings to config/settings.json." disabled={isSaving}>
+          <Save className="h-4 w-4" aria-hidden="true" />
+          Save Basic
+        </Button>
+        <Button type="button" variant="outline" title="Restore basic settings from the last loaded values." onClick={onReset}>
+          <Undo2 className="h-4 w-4" aria-hidden="true" />
+          Reset
+        </Button>
+      </SettingsActions>
+    </form>
+  );
+}
+
+function PixivSettingsTab({
+  authCode,
+  authFlow,
+  browserAuthFlow,
+  completeAuthPending,
+  hasIntermediatePixivUrl,
+  isPixivStartUrl,
+  pixivReturnToUrl,
+  refreshAuthPending,
+  refreshToken,
+  saveTokenPending,
+  settings,
+  showToken,
+  startBrowserAuthPending,
+  startManualAuthPending,
+  tokenStatus,
+  onAuthCodeChange,
+  onCancelAuthFlow,
+  onCompleteAuth,
+  onDismissBrowserFlow,
+  onOpenBrowserFlow,
+  onOpenContinueUrl,
+  onRefreshAuth,
+  onRefreshTokenChange,
+  onRunTokenCheck,
+  onSaveManualToken,
+  onStartBrowserAuth,
+  onToggleToken
+}: {
+  authCode: string;
+  authFlow: PixivAuthStartResponse | null;
+  browserAuthFlow: PixivBrowserAuthStartResponse | null;
+  completeAuthPending: boolean;
+  hasIntermediatePixivUrl: boolean;
+  isPixivStartUrl: boolean;
+  pixivReturnToUrl: string | null;
+  refreshAuthPending: boolean;
+  refreshToken: string;
+  saveTokenPending: boolean;
+  settings: SettingsResponse;
+  showToken: boolean;
+  startBrowserAuthPending: boolean;
+  startManualAuthPending: boolean;
+  tokenStatus: TokenStatus;
+  onAuthCodeChange: (value: string) => void;
+  onCancelAuthFlow: () => void;
+  onCompleteAuth: () => void;
+  onDismissBrowserFlow: () => void;
+  onOpenBrowserFlow: () => void;
+  onOpenContinueUrl: () => void;
+  onRefreshAuth: () => void;
+  onRefreshTokenChange: (value: string) => void;
+  onRunTokenCheck: () => void;
+  onSaveManualToken: () => void;
+  onStartBrowserAuth: () => void;
+  onToggleToken: () => void;
+}): JSX.Element {
+  return (
+    <div className="mt-5 divide-y">
+      <SettingsSection title="Token status" description="Validate the Pixiv account token used for API requests.">
+        <PixivTokenStatus status={tokenStatus} preview={settings.refresh_token_preview} />
+      </SettingsSection>
+
+      <SettingsSection title="Pixiv authentication" description="Sign in, refresh, test, or replace the saved token.">
+        <div className="space-y-4">
+          <Field
+            label="New refresh token"
+            tooltip="Paste a new Pixiv OAuth refresh token. Saved tokens are masked in normal settings responses."
+            help={
+              settings.refresh_token_configured
+                ? `Saved token: ${settings.refresh_token_preview}`
+                : "No saved token"
+            }
+          >
+            <div className="flex gap-2">
+              <Input
+                type={showToken ? "text" : "password"}
+                value={refreshToken}
+                onChange={(event) => onRefreshTokenChange(event.target.value)}
+                placeholder="Paste a new refresh token"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label={showToken ? "Hide refresh token" : "Show refresh token"}
+                title={showToken ? "Hide token" : "Show token"}
+                onClick={onToggleToken}
+              >
+                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </Button>
+            </div>
+          </Field>
+
+          <div className="rounded-md border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                title="Save the pasted refresh token."
+                disabled={saveTokenPending || !refreshToken.trim()}
+                onClick={onSaveManualToken}
+              >
+                <KeyRound className="h-4 w-4" aria-hidden="true" />
+                Save Token
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                title="Open the Pixiv login flow and save a refresh token after sign-in."
+                disabled={startBrowserAuthPending || startManualAuthPending}
+                onClick={onStartBrowserAuth}
+              >
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                Sign in with Pixiv
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                title="Exchange the saved refresh token for a fresh Pixiv token pair."
+                disabled={refreshAuthPending || !settings.refresh_token_configured}
+                onClick={onRefreshAuth}
+              >
+                <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                Refresh Token
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                title="Verify that the configured Pixiv refresh token can authenticate."
+                disabled={tokenStatus.state === "checking"}
+                onClick={onRunTokenCheck}
+              >
+                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                Test Auth
+              </Button>
+            </div>
+
+            {browserAuthFlow ? (
+              <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
+                <span className="block text-sm font-medium">Waiting for Pixiv browser sign-in</span>
+                <span className="block text-xs text-muted-foreground">
+                  Complete Pixiv login in the remote browser window. The token is saved automatically after Pixiv redirects back.
+                </span>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    title="Reopen the remote browser for the current Pixiv sign-in flow."
+                    onClick={onOpenBrowserFlow}
+                  >
+                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    Open Browser
+                  </Button>
+                  <Button type="button" variant="outline" onClick={onDismissBrowserFlow}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {authFlow ? (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  value={authCode}
+                  onChange={(event) => onAuthCodeChange(event.target.value)}
+                  placeholder="Paste Pixiv callback URL, copied request, cURL, HAR snippet, or authorization code"
+                />
+                {pixivReturnToUrl ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    title="Open the next Pixiv URL from the pasted intermediate login response."
+                    onClick={onOpenContinueUrl}
+                  >
+                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    Continue Pixiv Sign-in
+                  </Button>
+                ) : null}
+                {isPixivStartUrl ? (
+                  <span className="block text-xs text-muted-foreground">
+                    This Pixiv URL is an intermediate auth endpoint. Copy the callback request that contains code= from the browser network log.
+                  </span>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    title="Exchange the pasted callback URL or authorization code and save the resulting refresh token."
+                    disabled={completeAuthPending || !authCode.trim() || hasIntermediatePixivUrl}
+                    onClick={onCompleteAuth}
+                  >
+                    <KeyRound className="h-4 w-4" aria-hidden="true" />
+                    Save Pixiv Token
+                  </Button>
+                  <Button type="button" variant="outline" onClick={onCancelAuthFlow}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </SettingsSection>
+    </div>
+  );
+}
+
+function AdvancedSettingsTab({
+  importLegacyDatabaseData,
+  isImporting,
+  legacyDatabaseInputId,
+  onImportLegacyDatabase
+}: {
+  importLegacyDatabaseData?: { imported_artists: number; total_rows: number };
+  isImporting: boolean;
+  legacyDatabaseInputId: string;
+  onImportLegacyDatabase: (file: File) => void;
+}): JSX.Element {
+  return (
+    <div className="mt-5 divide-y">
+      <SettingsSection title="Data maintenance" description="Run one-off maintenance tasks for local library data.">
+        <div className="rounded-md border bg-muted/20 p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id={legacyDatabaseInputId}
+              className="hidden"
+              type="file"
+              accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
+              disabled={isImporting}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) {
+                  onImportLegacyDatabase(file);
+                }
+              }}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              title="Import artists and artwork metadata from an archived PyQt pixiv.db or SQLite database."
+              disabled={isImporting}
+              onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
+            >
+              <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
+              Import Legacy Database
+            </Button>
+            {importLegacyDatabaseData ? (
+              <span className="text-xs text-muted-foreground">
+                {importLegacyDatabaseData.imported_artists} of {importLegacyDatabaseData.total_rows} rows imported.
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </SettingsSection>
+    </div>
   );
 }
 
@@ -527,10 +791,12 @@ type AuthBrowserDialog = {
 function AuthBrowserCommandDialog({
   dialog,
   onClose,
+  onCopy,
   onUseManual
 }: {
   dialog: AuthBrowserDialog | null;
   onClose: () => void;
+  onCopy: (command: string) => void;
   onUseManual: () => void;
 }): JSX.Element | null {
   if (!dialog) {
@@ -538,8 +804,7 @@ function AuthBrowserCommandDialog({
   }
 
   const command = dialog.type === "start" ? dialog.status.start_command : dialog.status.stop_command;
-  const title =
-    dialog.type === "start" ? "Start Pixiv auth browser" : "Pixiv auth browser can be stopped";
+  const title = dialog.type === "start" ? "Start Pixiv auth browser" : "Pixiv auth browser can be stopped";
   const description =
     dialog.type === "start"
       ? "The browser authentication service is not running. Start it, then click Sign in with Pixiv again."
@@ -568,23 +833,56 @@ function AuthBrowserCommandDialog({
         </>
       }
     >
-      <CommandBlock command={command} />
+      <CommandBlock command={command} onCopy={() => onCopy(command)} />
     </Dialog>
   );
 }
 
-function CommandBlock({ command }: { command: string }): JSX.Element {
+function CommandBlock({ command, onCopy }: { command: string; onCopy: () => void }): JSX.Element {
   return (
-    <pre className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 text-sm">
-      <code>{command}</code>
-    </pre>
+    <div className="flex items-center gap-2 rounded-md border bg-muted/40 p-2">
+      <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-sm">{command}</code>
+      <Button type="button" variant="outline" size="icon" title="Copy command" aria-label="Copy command" onClick={onCopy}>
+        <Copy className="h-4 w-4" aria-hidden="true" />
+      </Button>
+    </div>
   );
 }
 
-function toForm(settings: SettingsResponse): SettingsForm {
+function PixivTokenStatus({ status, preview }: { status: TokenStatus; preview: string }): JSX.Element {
+  const Icon = status.state === "checking" ? Loader2 : status.state === "valid" ? CheckCircle2 : AlertTriangle;
+  const label =
+    status.state === "valid"
+      ? "Token verified"
+      : status.state === "checking"
+        ? "Checking token"
+        : status.state === "invalid"
+          ? "Token needs attention"
+          : "Token not configured";
+  const className =
+    status.state === "valid"
+      ? "border-green-200 bg-green-50 text-green-900"
+      : status.state === "checking"
+        ? "border-border bg-muted/30 text-foreground"
+        : "border-yellow-200 bg-yellow-50 text-yellow-950";
+
+  return (
+    <div className={`rounded-md border p-3 ${className}`}>
+      <div className="flex items-start gap-3">
+        <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${status.state === "checking" ? "animate-spin" : ""}`} aria-hidden="true" />
+        <div className="min-w-0">
+          <span className="block text-sm font-semibold">{label}</span>
+          <span className="mt-1 block text-sm leading-5">{status.message}</span>
+          {preview ? <span className="mt-1 block text-xs opacity-75">Saved token: {preview}</span> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function toBasicForm(settings: SettingsResponse): BasicForm {
   return {
     download_path: settings.download_path,
-    refresh_token: "",
     request_base_delay_seconds: settings.request_base_delay_seconds,
     request_random_delay_seconds: settings.request_random_delay_seconds,
     max_concurrent_downloads: settings.max_concurrent_downloads,
@@ -593,7 +891,7 @@ function toForm(settings: SettingsResponse): SettingsForm {
   };
 }
 
-function validate(form: SettingsForm, downloadPathEditable: boolean): Record<string, string> {
+function validateBasic(form: BasicForm, downloadPathEditable: boolean): Record<string, string> {
   const errors: Record<string, string> = {};
   if (downloadPathEditable && !form.download_path.trim()) {
     errors.download_path = "Download path is required.";
@@ -608,6 +906,10 @@ function validate(form: SettingsForm, downloadPathEditable: boolean): Record<str
     errors.max_concurrent_downloads = "Must be a whole number of at least 1.";
   }
   return errors;
+}
+
+async function copyCommand(command: string): Promise<void> {
+  await navigator.clipboard.writeText(command);
 }
 
 function getPixivPostRedirectReturnTo(value: string): string | null {
@@ -682,6 +984,10 @@ function SettingsSection({
       <div className="min-w-0">{children}</div>
     </section>
   );
+}
+
+function SettingsActions({ children }: { children: React.ReactNode }): JSX.Element {
+  return <div className="flex flex-wrap gap-2 pt-5">{children}</div>;
 }
 
 function NumberField({

@@ -60,6 +60,20 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["refresh_token_preview"] == "secr...oken"
 
 
+def test_settings_partial_update_preserves_other_values(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.put("/api/settings", json={"max_concurrent_downloads": 4})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["max_concurrent_downloads"] == 4
+    assert body["refresh_token_configured"] is True
+    assert body["refresh_token_preview"] == "secr...oken"
+    assert body["request_base_delay_seconds"] == 0.1
+    assert body["skip_existing_files"] is True
+
+
 def test_settings_download_path_is_fixed_in_docker_runtime(tmp_path, monkeypatch):
     monkeypatch.setenv("PIXIVDOWNLOADER_RUNTIME", "docker")
     client = make_client(tmp_path)

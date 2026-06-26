@@ -35,7 +35,10 @@ class AppSettingsService:
 
     def update(self, values: dict[str, object]) -> Settings:
         current = self.load().to_dict()
-        refresh_token = str(values.get("refresh_token", "")).strip()
+        refresh_token_value = values.get("refresh_token", "")
+        refresh_token = (
+            refresh_token_value.strip() if isinstance(refresh_token_value, str) else ""
+        )
         update_values = {key: value for key, value in values.items() if key != "refresh_token"}
         if is_docker_runtime():
             update_values.pop("download_path", None)

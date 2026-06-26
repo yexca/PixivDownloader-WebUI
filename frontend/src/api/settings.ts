@@ -14,13 +14,13 @@ export type SettingsResponse = {
 };
 
 export type SettingsUpdateRequest = {
-  download_path: string;
+  download_path?: string;
   refresh_token?: string | null;
-  request_base_delay_seconds: number;
-  request_random_delay_seconds: number;
-  max_concurrent_downloads: number;
-  overwrite_existing_files: boolean;
-  skip_existing_files: boolean;
+  request_base_delay_seconds?: number;
+  request_random_delay_seconds?: number;
+  max_concurrent_downloads?: number;
+  overwrite_existing_files?: boolean;
+  skip_existing_files?: boolean;
 };
 
 export type AuthValidationResponse = {

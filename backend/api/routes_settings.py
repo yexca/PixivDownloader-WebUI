@@ -49,7 +49,7 @@ def update_settings(
 ) -> dict[str, object]:
     service = AppSettingsService(db_path=db_path, settings_json_path=settings_json_path)
     try:
-        settings = service.update(request.model_dump())
+        settings = service.update(request.model_dump(exclude_unset=True))
         return masked_settings(settings)
     finally:
         service.close()

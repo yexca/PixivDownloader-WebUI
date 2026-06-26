@@ -17,13 +17,13 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdateRequest(BaseModel):
-    download_path: str = Field(min_length=1)
+    download_path: str | None = Field(default=None, min_length=1)
     refresh_token: str | None = None
-    request_base_delay_seconds: float = Field(ge=0)
-    request_random_delay_seconds: float = Field(ge=0)
-    max_concurrent_downloads: int = Field(ge=1)
-    overwrite_existing_files: bool
-    skip_existing_files: bool
+    request_base_delay_seconds: float | None = Field(default=None, ge=0)
+    request_random_delay_seconds: float | None = Field(default=None, ge=0)
+    max_concurrent_downloads: int | None = Field(default=None, ge=1)
+    overwrite_existing_files: bool | None = None
+    skip_existing_files: bool | None = None
 
 
 class AuthValidationResponse(BaseModel):
