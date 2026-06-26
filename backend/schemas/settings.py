@@ -48,6 +48,15 @@ class PixivBrowserAuthStatusResponse(BaseModel):
     error: str | None = None
 
 
+class PixivBrowserAuthServiceStatusResponse(BaseModel):
+    configured: bool
+    running: bool
+    novnc_url: str
+    start_command: str
+    stop_command: str
+    message: str
+
+
 class PixivBrowserAuthCallbackRequest(BaseModel):
     flow_id: str = Field(min_length=1)
     callback_url: str | None = None

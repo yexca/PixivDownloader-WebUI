@@ -16,7 +16,13 @@ Open:
 http://127.0.0.1:7653
 ```
 
-Pixiv browser sign-in opens the authentication sidecar through noVNC:
+Pixiv browser sign-in uses an optional authentication sidecar. Start it only when browser authentication is needed:
+
+```bat
+docker compose --profile auth up -d pixiv-auth-browser
+```
+
+The sidecar exposes noVNC:
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
@@ -25,6 +31,12 @@ http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
 Complete Pixiv login in that remote browser window. The sidecar captures the
 Pixiv OAuth callback and the main backend saves the `refresh_token`
 automatically.
+
+After configuration and auth testing, the WebUI can remind you to stop the sidecar:
+
+```bat
+docker compose stop pixiv-auth-browser
+```
 
 Stop:
 
@@ -49,7 +61,7 @@ ports:
   - "7653:7653"
 ```
 
-Compose also starts `pixiv-auth-browser`, which exposes:
+With the `auth` profile, Compose can also start `pixiv-auth-browser`, which exposes:
 
 ```yaml
 ports:

@@ -28,13 +28,23 @@ docker compose up -d
 http://127.0.0.1:7653
 ```
 
-Docker Compose 还会启动 `pixiv-auth-browser` 认证浏览器 sidecar，并映射 noVNC：
+默认启动只包含 WebUI。需要通过浏览器登录 Pixiv 时，WebUI 会提示启动 `pixiv-auth-browser` 认证浏览器 sidecar：
+
+```bat
+docker compose --profile auth up -d pixiv-auth-browser
+```
+
+认证浏览器 sidecar 会映射 noVNC：
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
 ```
 
-在 WebUI 设置页点击 Pixiv 登录后，在 noVNC 浏览器中完成 Pixiv 登录。后端会自动捕获回调并保存 `refresh_token`。
+在 WebUI 设置页点击 Pixiv 登录后，在 noVNC 浏览器中完成 Pixiv 登录。后端会自动捕获回调并保存 `refresh_token`。配置完成并通过测试后，WebUI 会提示可以关闭认证浏览器：
+
+```bat
+docker compose stop pixiv-auth-browser
+```
 
 停止：
 

@@ -75,8 +75,12 @@ service into `config/settings.json`.
 
 ## Docker Browser Authentication
 
-Docker Compose includes a `pixiv-auth-browser` sidecar. It runs Chromium inside
-Xvfb and exposes the browser through noVNC:
+Docker Compose includes an optional `pixiv-auth-browser` sidecar. It runs Chromium inside
+Xvfb and exposes the browser through noVNC. Start it only when browser authentication is needed:
+
+```text
+docker compose --profile auth up -d pixiv-auth-browser
+```
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
@@ -85,6 +89,12 @@ http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
 The main backend starts the sidecar through the Docker network, then the sidecar
 posts the captured Pixiv callback URL back to the backend. The shared callback
 header token is configured with `PIXIV_AUTH_BROWSER_TOKEN`.
+
+After authentication is configured and tested, stop the sidecar:
+
+```text
+docker compose stop pixiv-auth-browser
+```
 
 Relevant environment variables:
 

@@ -16,10 +16,22 @@ Open:
 http://127.0.0.1:7653
 ```
 
-Pixiv browser authentication is available through noVNC:
+The default Compose startup only runs the WebUI. When Pixiv browser authentication is needed, the Settings page prompts you to start the auth sidecar:
+
+```bat
+docker compose --profile auth up -d pixiv-auth-browser
+```
+
+Pixiv browser authentication is then available through noVNC:
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
+```
+
+After the token is configured and tested, the Settings page prompts you to stop the auth sidecar:
+
+```bat
+docker compose stop pixiv-auth-browser
 ```
 
 Stop:
@@ -83,7 +95,7 @@ run-webui.bat
 Open the Settings page and configure:
 
 - Download path.
-- Pixiv authentication. In Docker Compose, use **Sign in with Pixiv** and complete login in the noVNC browser. In the script runtime, paste a callback URL, authorization code, or known Pixiv `refresh_token` if browser sidecar authentication is not configured.
+- Pixiv authentication. In Docker Compose, use **Sign in with Pixiv**. If the auth sidecar is stopped, the WebUI shows the command to start it, then opens the noVNC browser. In the script runtime, paste a callback URL, authorization code, or known Pixiv `refresh_token` if browser sidecar authentication is not configured.
 - Request delay options.
 - Existing file behavior.
 

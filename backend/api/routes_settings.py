@@ -20,6 +20,7 @@ from backend.schemas.settings import (
     PixivAuthRefreshResponse,
     PixivAuthStartResponse,
     PixivBrowserAuthCallbackRequest,
+    PixivBrowserAuthServiceStatusResponse,
     PixivBrowserAuthStartResponse,
     PixivBrowserAuthStatusResponse,
     SettingsResponse,
@@ -113,6 +114,35 @@ def get_pixiv_browser_auth_status(
     )
 
 
+@router.get(
+    "/pixiv-auth/browser-service",
+    response_model=PixivBrowserAuthServiceStatusResponse,
+)
+def get_pixiv_browser_auth_service_status() -> PixivBrowserAuthServiceStatusResponse:
+    internal_url = _auth_browser_internal_url_or_none()
+    running = False
+    configured = internal_url is not None
+    if internal_url:
+        try:
+            response = requests.get(f"{internal_url}/health", timeout=2)
+            running = response.status_code < 400
+        except requests.RequestException:
+            running = False
+    message = (
+        "Pixiv browser authentication service is running."
+        if running
+        else "Pixiv browser authentication service is not running."
+    )
+    return PixivBrowserAuthServiceStatusResponse(
+        configured=configured,
+        running=running,
+        novnc_url=_auth_browser_public_url(),
+        start_command="docker compose --profile auth up -d pixiv-auth-browser",
+        stop_command="docker compose stop pixiv-auth-browser",
+        message=message,
+    )
+
+
 @router.post(
     "/pixiv-auth/browser/callback",
     response_model=PixivBrowserAuthStatusResponse,
@@ -197,10 +227,15 @@ def _save_callback_refresh_token(
 
 
 def _auth_browser_internal_url() -> str:
-    value = os.environ.get("PIXIV_AUTH_BROWSER_INTERNAL_URL", "").strip().rstrip("/")
+    value = _auth_browser_internal_url_or_none()
     if not value:
         raise ConfigError("Pixiv browser authentication sidecar is not configured.")
     return value
+
+
+def _auth_browser_internal_url_or_none() -> str | None:
+    value = os.environ.get("PIXIV_AUTH_BROWSER_INTERNAL_URL", "").strip().rstrip("/")
+    return value or None
 
 
 def _auth_browser_public_url() -> str:

@@ -15,6 +15,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getSettings,
   completePixivAuth,
+  getPixivBrowserAuthServiceStatus,
   getPixivBrowserAuthStatus,
   importLegacyDatabase,
   refreshPixivAuth,
@@ -23,17 +24,33 @@ import {
   updateSettings,
   validatePixivAuth,
   type PixivBrowserAuthStartResponse,
+  type PixivBrowserAuthServiceStatusResponse,
   type PixivAuthStartResponse,
   type SettingsResponse,
   type SettingsUpdateRequest
 } from "@/api/settings";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 
 type SettingsForm = SettingsUpdateRequest;
+
+class AuthBrowserUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthBrowserUnavailableError";
+  }
+}
+
+class AuthBrowserNotConfiguredError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthBrowserNotConfiguredError";
+  }
+}
 
 export function SettingsPage(): JSX.Element {
   const queryClient = useQueryClient();
@@ -44,11 +61,23 @@ export function SettingsPage(): JSX.Element {
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [authFlow, setAuthFlow] = React.useState<PixivAuthStartResponse | null>(null);
   const [browserAuthFlow, setBrowserAuthFlow] = React.useState<PixivBrowserAuthStartResponse | null>(null);
+  const [authBrowserDialog, setAuthBrowserDialog] = React.useState<AuthBrowserDialog | null>(null);
   const [authCode, setAuthCode] = React.useState("");
   const legacyDatabaseInputId = React.useId();
   const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
   const isPixivStartUrl = isPixivAuthStartUrl(authCode);
   const hasIntermediatePixivUrl = Boolean(pixivReturnToUrl || isPixivStartUrl);
+
+  const remindToStopAuthBrowserIfRunning = React.useCallback(async () => {
+    try {
+      const status = await getPixivBrowserAuthServiceStatus();
+      if (status.running) {
+        setAuthBrowserDialog({ type: "stop", status });
+      }
+    } catch {
+      // If status probing fails after auth, do not interrupt the completed token flow.
+    }
+  }, []);
 
   React.useEffect(() => {
     if (settings.data && !form) {
@@ -72,6 +101,7 @@ export function SettingsPage(): JSX.Element {
           pushToast({ title: "Pixiv token saved", description: "Browser sign-in completed.", tone: "success" });
           setBrowserAuthFlow(null);
           void queryClient.invalidateQueries({ queryKey: ["settings"] });
+          void remindToStopAuthBrowserIfRunning();
         } else if (status.status === "failed") {
           pushToast({
             title: "Pixiv browser sign-in failed",
@@ -96,7 +126,7 @@ export function SettingsPage(): JSX.Element {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [browserAuthFlow, pushToast, queryClient]);
+  }, [browserAuthFlow, pushToast, queryClient, remindToStopAuthBrowserIfRunning]);
 
   const mutation = useMutation({
     mutationFn: (request: SettingsUpdateRequest) => updateSettings(request),
@@ -110,8 +140,10 @@ export function SettingsPage(): JSX.Element {
   });
   const authMutation = useMutation({
     mutationFn: validatePixivAuth,
-    onSuccess: (response) =>
-      pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" }),
+    onSuccess: (response) => {
+      pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" });
+      void remindToStopAuthBrowserIfRunning();
+    },
     onError: (error) =>
       pushToast({ title: "Pixiv authentication failed", description: error.message, tone: "error" })
   });
@@ -126,7 +158,17 @@ export function SettingsPage(): JSX.Element {
     onError: (error) => pushToast({ title: "Could not start Pixiv sign-in", description: error.message, tone: "error" })
   });
   const startBrowserAuthMutation = useMutation({
-    mutationFn: startPixivBrowserAuth,
+    mutationFn: async () => {
+      const status = await getPixivBrowserAuthServiceStatus();
+      if (!status.configured) {
+        throw new AuthBrowserNotConfiguredError(status.message);
+      }
+      if (!status.running) {
+        setAuthBrowserDialog({ type: "start", status });
+        throw new AuthBrowserUnavailableError(status.message);
+      }
+      return startPixivBrowserAuth();
+    },
     onSuccess: (response) => {
       setBrowserAuthFlow(response);
       setAuthFlow(null);
@@ -134,8 +176,12 @@ export function SettingsPage(): JSX.Element {
       window.open(response.novnc_url, "_blank", "noopener,noreferrer");
       pushToast({ title: "Pixiv browser sign-in opened", description: "Complete login in the remote browser window." });
     },
-    onError: () => {
-      startManualAuthMutation.mutate();
+    onError: (error) => {
+      if (error instanceof AuthBrowserNotConfiguredError) {
+        startManualAuthMutation.mutate();
+      } else if (!(error instanceof AuthBrowserUnavailableError)) {
+        pushToast({ title: "Pixiv browser sign-in failed", description: error.message, tone: "error" });
+      }
     }
   });
   const completeAuthMutation = useMutation({
@@ -146,6 +192,7 @@ export function SettingsPage(): JSX.Element {
       setAuthFlow(null);
       setAuthCode("");
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void remindToStopAuthBrowserIfRunning();
     },
     onError: (error) => pushToast({ title: "Pixiv sign-in failed", description: error.message, tone: "error" })
   });
@@ -460,7 +507,77 @@ export function SettingsPage(): JSX.Element {
           </form>
         )}
       </div>
+      <AuthBrowserCommandDialog
+        dialog={authBrowserDialog}
+        onClose={() => setAuthBrowserDialog(null)}
+        onUseManual={() => {
+          setAuthBrowserDialog(null);
+          startManualAuthMutation.mutate();
+        }}
+      />
     </>
+  );
+}
+
+type AuthBrowserDialog = {
+  type: "start" | "stop";
+  status: PixivBrowserAuthServiceStatusResponse;
+};
+
+function AuthBrowserCommandDialog({
+  dialog,
+  onClose,
+  onUseManual
+}: {
+  dialog: AuthBrowserDialog | null;
+  onClose: () => void;
+  onUseManual: () => void;
+}): JSX.Element | null {
+  if (!dialog) {
+    return null;
+  }
+
+  const command = dialog.type === "start" ? dialog.status.start_command : dialog.status.stop_command;
+  const title =
+    dialog.type === "start" ? "Start Pixiv auth browser" : "Pixiv auth browser can be stopped";
+  const description =
+    dialog.type === "start"
+      ? "The browser authentication service is not running. Start it, then click Sign in with Pixiv again."
+      : "Pixiv authentication is configured. The browser service is only needed when signing in again.";
+
+  return (
+    <Dialog
+      open
+      title={title}
+      description={description}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose();
+        }
+      }}
+      footer={
+        <>
+          {dialog.type === "start" ? (
+            <Button type="button" variant="outline" onClick={onUseManual}>
+              Use manual sign-in
+            </Button>
+          ) : null}
+          <Button type="button" onClick={onClose}>
+            Done
+          </Button>
+        </>
+      }
+    >
+      <CommandBlock command={command} />
+    </Dialog>
+  );
+}
+
+function CommandBlock({ command }: { command: string }): JSX.Element {
+  return (
+    <pre className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 text-sm">
+      <code>{command}</code>
+    </pre>
   );
 }
 

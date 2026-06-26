@@ -19,11 +19,11 @@ services:
       - ./config:/app/config
       - ./resources:/app/resources
       - ./downloads:/app/downloads
-    depends_on:
-      - pixiv-auth-browser
     restart: unless-stopped
 
   pixiv-auth-browser:
+    profiles:
+      - auth
     build:
       context: ./auth-browser
       dockerfile: Dockerfile

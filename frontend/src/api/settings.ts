@@ -45,6 +45,15 @@ export type PixivBrowserAuthStatusResponse = {
   error?: string | null;
 };
 
+export type PixivBrowserAuthServiceStatusResponse = {
+  configured: boolean;
+  running: boolean;
+  novnc_url: string;
+  start_command: string;
+  stop_command: string;
+  message: string;
+};
+
 export type PixivAuthCompleteRequest = {
   flow_id: string;
   code_or_callback_url: string;
@@ -96,6 +105,10 @@ export function startPixivBrowserAuth(): Promise<PixivBrowserAuthStartResponse> 
 
 export function getPixivBrowserAuthStatus(flowId: string): Promise<PixivBrowserAuthStatusResponse> {
   return apiRequest<PixivBrowserAuthStatusResponse>(`/settings/pixiv-auth/browser/${flowId}`);
+}
+
+export function getPixivBrowserAuthServiceStatus(): Promise<PixivBrowserAuthServiceStatusResponse> {
+  return apiRequest<PixivBrowserAuthServiceStatusResponse>("/settings/pixiv-auth/browser-service");
 }
 
 export function completePixivAuth(request: PixivAuthCompleteRequest): Promise<PixivAuthCompleteResponse> {

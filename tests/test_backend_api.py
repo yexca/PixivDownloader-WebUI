@@ -160,6 +160,48 @@ def test_pixiv_browser_auth_start_calls_sidecar(tmp_path, monkeypatch):
     assert calls[0]["json"]["login_url"].startswith("https://app-api.pixiv.net/web/v1/login?")
 
 
+def test_pixiv_browser_auth_service_status_reports_running(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_PUBLIC_URL", "http://127.0.0.1:6080/vnc.html")
+
+    def fake_get(url, *, timeout):
+        assert url == "http://auth-browser.test/health"
+        assert timeout == 2
+        return SimpleNamespace(status_code=200)
+
+    monkeypatch.setattr(routes_settings.requests, "get", fake_get)
+
+    response = client.get("/api/settings/pixiv-auth/browser-service")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["configured"] is True
+    assert body["running"] is True
+    assert body["novnc_url"] == "http://127.0.0.1:6080/vnc.html"
+    assert body["start_command"] == "docker compose --profile auth up -d pixiv-auth-browser"
+    assert body["stop_command"] == "docker compose stop pixiv-auth-browser"
+
+
+def test_pixiv_browser_auth_service_status_reports_stopped(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+
+    def fake_get(url, *, timeout):
+        _ = (url, timeout)
+        raise routes_settings.requests.ConnectionError("not running")
+
+    monkeypatch.setattr(routes_settings.requests, "get", fake_get)
+
+    response = client.get("/api/settings/pixiv-auth/browser-service")
+
+    assert response.status_code == 200
+    assert response.json()["configured"] is True
+    assert response.json()["running"] is False
+
+
 def test_pixiv_browser_auth_callback_saves_token(tmp_path, monkeypatch):
     client = make_client(tmp_path)
 
