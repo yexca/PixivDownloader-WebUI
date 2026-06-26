@@ -107,13 +107,14 @@ Use `--overwrite` if `config\settings.json` already exists.
 Backend dev server:
 
 ```bat
-run-backend-dev.bat
+env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 Frontend dev server:
 
 ```bat
-run-frontend-dev.bat
+cd frontend
+npm run dev
 ```
 
 Manual checks:

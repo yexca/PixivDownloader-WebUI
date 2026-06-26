@@ -13,7 +13,7 @@ This creates `env/`, installs Python dependencies, installs frontend dependencie
 ## Backend Development
 
 ```bat
-run-backend-dev.bat
+env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 The backend runs with Uvicorn reload on:
@@ -22,16 +22,11 @@ The backend runs with Uvicorn reload on:
 http://127.0.0.1:7653
 ```
 
-Useful direct command:
-
-```bat
-env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
-```
-
 ## Frontend Development
 
 ```bat
-run-frontend-dev.bat
+cd frontend
+npm run dev
 ```
 
 Vite proxies API and WebSocket traffic to the backend. Keep the backend running while developing frontend pages.

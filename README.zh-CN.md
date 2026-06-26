@@ -117,13 +117,14 @@ env\python.exe tools\migrate_settings_to_config.py
 后端开发服务：
 
 ```bat
-run-backend-dev.bat
+env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 前端开发服务：
 
 ```bat
-run-frontend-dev.bat
+cd frontend
+npm run dev
 ```
 
 检查命令：

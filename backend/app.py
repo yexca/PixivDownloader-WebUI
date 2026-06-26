@@ -63,7 +63,7 @@ def create_app(
                 await scheduler.stop()
                 await queue.stop()
 
-    app = FastAPI(title="PixivDownloader API", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="PixivDownloader API", version="0.2.0", lifespan=lifespan)
     app.state.db_path = Path(db_path) if db_path is not None else None
     app.state.settings_json_path = (
         Path(settings_json_path) if settings_json_path is not None else None
