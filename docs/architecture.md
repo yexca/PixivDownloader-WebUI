@@ -64,7 +64,7 @@ config/
   settings.json
 
 resources/
-  pixiv.db
+  pixiv.sqlite3
   static application assets
 
 legacy/pyqt/

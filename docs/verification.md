@@ -13,7 +13,7 @@ env\python.exe -m pytest
 Expected current baseline:
 
 ```text
-34 passed
+35 passed
 ```
 
 There may be a third-party Starlette/FastAPI deprecation warning from `TestClient`.
@@ -84,6 +84,7 @@ Use `run-webui.bat`, then verify:
 - Settings loads masked refresh token state.
 - Settings saves download path and request options.
 - Settings `Test Auth` reports success or a clear token failure.
+- Settings imports an old PyQt `pixiv.db` and updates Library artists.
 - Download creates a job from a Pixiv user ID.
 - Download creates a job from an artwork ID.
 - Active job progress and recent events update.

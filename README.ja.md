@@ -11,7 +11,7 @@ PixivDownloader-SQLite は、Pixiv 作品のバックアップと管理を行う
 - Pixiv ユーザー ID または作品 ID からダウンロードジョブを作成。
 - WebUI でダウンロード先と Pixiv `refresh_token` を管理。
 - SQLite にジョブ、アーティスト、作品、ファイル状態を保存。
-- 旧 `resources/pixiv.db` の `pic` テーブルを新しいスキーマへ移行。
+- WebUI の Settings から旧 PyQt `pixiv.db` データを明示的にインポート。
 - Docker Compose を優先し、必要に応じて Windows ローカルスクリプトでも WebUI を実行可能。
 
 ## 推奨: Docker Compose
@@ -146,7 +146,7 @@ npm run build
 
 - `config\settings.example.json`
 - `config\settings.json`
-- `resources\pixiv.db`
+- `resources\pixiv.sqlite3`
 - `frontend\dist`
 
 将来、実行ファイルとしてパッケージ化する場合は、同じ相対構造で実行ファイルの隣にリソースを配置してください。凍結ビルドでは、バックエンドのパス解決は実行ファイルのディレクトリを基準にします。

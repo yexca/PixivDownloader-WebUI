@@ -8,6 +8,7 @@ dependencies = [
     "fastapi",
     "pixivpy3",
     "pydantic",
+    "python-multipart",
     "requests",
     "PyYAML",
     "uvicorn",

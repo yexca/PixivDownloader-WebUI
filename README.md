@@ -11,7 +11,7 @@ The maintained runtime is the WebUI. The old PyQt desktop application has been a
 - Start downloads by Pixiv user ID or artwork ID.
 - Manage download settings, including download path and Pixiv refresh token.
 - Track jobs, progress, history, artists, artworks, and file status in SQLite.
-- Migrate legacy `resources/pixiv.db` data from the old `pic` table.
+- Import old PyQt `pixiv.db` data explicitly from WebUI Settings.
 - Run the WebUI with Docker Compose or local Windows scripts.
 
 ## Recommended: Docker Compose
@@ -146,7 +146,7 @@ In source checkout mode, the backend resolves resources from the repository root
 
 - `config\settings.example.json`
 - `config\settings.json`
-- `resources\pixiv.db`
+- `resources\pixiv.sqlite3`
 - `frontend\dist`
 
 For a packaged executable, resources should be placed beside the executable with the same relative layout. The backend path resolver uses the executable directory when running from a frozen build.

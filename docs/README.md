@@ -16,7 +16,7 @@ This documentation is organized for three common readers:
 
 - [Architecture](architecture.md): backend/frontend/runtime architecture and code ownership.
 - [API Reference](api-reference.md): current HTTP and WebSocket API surface.
-- [Database](database.md): SQLite schema, migration flow, and legacy `pic` migration.
+- [Database](database.md): SQLite schema, migration flow, and legacy database import.
 
 ## Development
 

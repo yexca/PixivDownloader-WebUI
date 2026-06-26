@@ -58,6 +58,13 @@ export type PixivAuthRefreshResponse = SettingsResponse & {
   message: string;
 };
 
+export type LegacyDatabaseImportResponse = {
+  imported_artists: number;
+  skipped_rows: number;
+  total_rows: number;
+  message: string;
+};
+
 export function getSettings(): Promise<SettingsResponse> {
   return apiRequest<SettingsResponse>("/settings");
 }
@@ -101,5 +108,14 @@ export function completePixivAuth(request: PixivAuthCompleteRequest): Promise<Pi
 export function refreshPixivAuth(): Promise<PixivAuthRefreshResponse> {
   return apiRequest<PixivAuthRefreshResponse>("/settings/pixiv-auth/refresh", {
     method: "POST"
+  });
+}
+
+export function importLegacyDatabase(file: File): Promise<LegacyDatabaseImportResponse> {
+  const body = new FormData();
+  body.set("file", file);
+  return apiRequest<LegacyDatabaseImportResponse>("/imports/legacy-database", {
+    method: "POST",
+    body
   });
 }

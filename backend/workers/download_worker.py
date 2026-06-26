@@ -13,7 +13,6 @@ from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
-from backend.repositories.legacy_artist_repository import LegacyArtistRepository
 from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
@@ -55,8 +54,7 @@ class DownloadWorker:
             service = DownloadService(
                 pixiv_client=self.pixiv_client_factory(),
                 file_downloader=self.file_downloader_factory(),
-                artist_repository=LegacyArtistRepository(self.db_path),
-                webui_artist_repository=ArtistRepository(self.db_path),
+                artist_repository=ArtistRepository(self.db_path),
                 artwork_repository=ArtworkRepository(self.db_path),
                 file_repository=ArtworkFileRepository(self.db_path),
                 sleeper=lambda: None,

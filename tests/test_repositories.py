@@ -115,6 +115,6 @@ def test_settings_repository_crud(tmp_path):
 
 
 def migrated_db(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     return db_path

@@ -24,7 +24,7 @@ class ArtistListResponse(BaseModel):
 class ArtistDetailResponse(ArtistSummaryResponse):
     account: str | None
     comment: str | None
-    legacy_last_download_id: str | None
+    latest_downloaded_artwork_id: str | None
 
 
 class ArtworkSummaryResponse(BaseModel):
@@ -66,7 +66,7 @@ def artist_detail_response(artist: Artist, counts: dict[str, int]) -> ArtistDeta
         **artist_summary_response(artist, counts).model_dump(),
         account=artist.account,
         comment=artist.comment,
-        legacy_last_download_id=artist.last_download_id,
+        latest_downloaded_artwork_id=artist.last_download_id,
     )
 
 

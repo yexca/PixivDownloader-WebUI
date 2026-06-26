@@ -33,6 +33,14 @@ POST /api/settings/validate-auth
 
 Normal settings responses should not expose the full Pixiv refresh token.
 
+## Imports
+
+```text
+POST /api/imports/legacy-database
+```
+
+Uploads an old PyQt `pixiv.db` and imports its `pic` table into the current WebUI database.
+
 ## Downloads
 
 ```text

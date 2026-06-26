@@ -33,4 +33,4 @@ def legacy_settings_path() -> Path:
 
 
 def database_path() -> Path:
-    return resources_dir() / "pixiv.db"
+    return resources_dir() / "pixiv.sqlite3"

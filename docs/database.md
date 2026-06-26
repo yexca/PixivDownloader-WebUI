@@ -4,10 +4,10 @@ PixivDownloader-SQLite uses SQLite for local metadata, migration state, settings
 
 ## Location
 
-Default database:
+Default WebUI database:
 
 ```text
-resources/pixiv.db
+resources/pixiv.sqlite3
 ```
 
 Resolved by:
@@ -15,6 +15,8 @@ Resolved by:
 ```text
 backend.core.paths.database_path()
 ```
+
+The old PyQt application used `resources/pixiv.db`. That file is treated only as an optional legacy import source.
 
 ## Migration Runner
 
@@ -45,6 +47,8 @@ Startup flow:
 5. Applied versions are recorded.
 6. Runtime settings are synced by the settings service when the WebUI reads or saves them.
 
+Schema migrations do not create or read legacy PyQt tables.
+
 ## Migration Metadata
 
 ```sql
@@ -66,27 +70,23 @@ Main WebUI tables:
 - `job_events`
 - `settings`
 
-Imported legacy table:
+`artists.latest_downloaded_artwork_id` stores the latest artwork ID reached by incremental artist downloads.
 
-- `pic`
+## Legacy Database Import
 
-The legacy table is preserved and not dropped.
+Legacy PyQt databases are not migrated automatically. Use Settings -> Import Legacy Database to upload an old `pixiv.db`.
 
-## Legacy Migration
-
-Migration `002_migrate_legacy_pic.sql` copies legacy data from `pic` into `artists`.
-
-Mapping:
+The import reads the old `pic` table and upserts rows into `artists`:
 
 ```text
 pic.ID             -> artists.id
 pic.name           -> artists.name
 pic.url            -> artists.profile_url
 pic.downloadedDate -> artists.last_checked_at
-pic.lastDownloadID -> artists.legacy_last_download_id
+pic.lastDownloadID -> artists.latest_downloaded_artwork_id
 ```
 
-Rows are copied with `INSERT OR IGNORE`, so existing `artists` rows are not overwritten.
+The old database is read-only during import. The WebUI continues to use `resources/pixiv.sqlite3`.
 
 ## Job And File State
 
@@ -115,9 +115,9 @@ failed
 ## Adding A Migration
 
 1. Add a SQL file under `backend/db/migrations/`.
-2. Use the next numeric prefix, for example `004_add_example.sql`.
+2. Use the next numeric prefix, for example `003_add_example.sql`.
 3. Keep it idempotent where practical.
-4. Do not drop legacy data without a backup path.
+4. Do not put one-time legacy import logic in schema migrations.
 5. Add or update tests.
 6. Run:
 

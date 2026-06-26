@@ -1,11 +1,22 @@
 import * as React from "react";
-import { ExternalLink, Eye, EyeOff, KeyRound, RefreshCw, Save, ShieldCheck, Undo2 } from "lucide-react";
+import {
+  DatabaseBackup,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  KeyRound,
+  RefreshCw,
+  Save,
+  ShieldCheck,
+  Undo2
+} from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   getSettings,
   completePixivAuth,
   getPixivBrowserAuthStatus,
+  importLegacyDatabase,
   refreshPixivAuth,
   startPixivBrowserAuth,
   startPixivAuth,
@@ -34,6 +45,7 @@ export function SettingsPage(): JSX.Element {
   const [authFlow, setAuthFlow] = React.useState<PixivAuthStartResponse | null>(null);
   const [browserAuthFlow, setBrowserAuthFlow] = React.useState<PixivBrowserAuthStartResponse | null>(null);
   const [authCode, setAuthCode] = React.useState("");
+  const legacyDatabaseInputId = React.useId();
   const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
   const isPixivStartUrl = isPixivAuthStartUrl(authCode);
   const hasIntermediatePixivUrl = Boolean(pixivReturnToUrl || isPixivStartUrl);
@@ -145,6 +157,19 @@ export function SettingsPage(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
     },
     onError: (error) => pushToast({ title: "Pixiv token refresh failed", description: error.message, tone: "error" })
+  });
+  const importLegacyDatabaseMutation = useMutation({
+    mutationFn: importLegacyDatabase,
+    onSuccess: (response) => {
+      pushToast({
+        title: "Legacy database imported",
+        description: `${response.imported_artists} artists imported, ${response.skipped_rows} rows skipped.`,
+        tone: "success"
+      });
+      void queryClient.invalidateQueries({ queryKey: ["artists"] });
+    },
+    onError: (error) =>
+      pushToast({ title: "Legacy database import failed", description: error.message, tone: "error" })
   });
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
@@ -335,6 +360,40 @@ export function SettingsPage(): JSX.Element {
                 />
                 Overwrite existing files
               </label>
+            </div>
+
+            <div className="rounded-md border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id={legacyDatabaseInputId}
+                  className="hidden"
+                  type="file"
+                  accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
+                  disabled={importLegacyDatabaseMutation.isPending}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) {
+                      importLegacyDatabaseMutation.mutate(file);
+                    }
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={importLegacyDatabaseMutation.isPending}
+                  onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
+                >
+                  <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
+                  Import Legacy Database
+                </Button>
+                {importLegacyDatabaseMutation.data ? (
+                  <span className="text-xs text-muted-foreground">
+                    {importLegacyDatabaseMutation.data.imported_artists} of{" "}
+                    {importLegacyDatabaseMutation.data.total_rows} rows imported.
+                  </span>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">

@@ -13,6 +13,7 @@ sample
 sample*
 prompts
 resources/pixiv.db
+resources/pixiv.sqlite3
 resources/conf/settings.json
 resources/logs
 logs

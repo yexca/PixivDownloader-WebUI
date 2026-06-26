@@ -6,7 +6,6 @@ from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
-from backend.repositories.legacy_artist_repository import LegacyArtistRepository
 from backend.services.download_service import DownloadService
 from backend.services.file_downloader import FileDownloadResult
 
@@ -71,10 +70,10 @@ class FakeFileDownloader:
         )
 
 
-def test_download_user_id_path_downloads_and_updates_legacy_artist(tmp_path):
-    repository = LegacyArtistRepository(db_path=tmp_path / "pixiv.db")
-    migrate_database(tmp_path / "pixiv.db", settings_json_path=tmp_path / "missing.json")
-    webui_repository = ArtistRepository(tmp_path / "pixiv.db")
+def test_download_user_id_path_downloads_and_updates_artist(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
     pixiv_client = FakePixivClient()
     file_downloader = FakeFileDownloader(tmp_path)
     progress_messages = []
@@ -82,7 +81,6 @@ def test_download_user_id_path_downloads_and_updates_legacy_artist(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
-        webui_artist_repository=webui_repository,
         sleeper=lambda: None,
     )
 
@@ -94,12 +92,13 @@ def test_download_user_id_path_downloads_and_updates_legacy_artist(tmp_path):
     assert pixiv_client.artist_artworks_requests == ["123"]
     assert len(file_downloader.calls) == 2
     assert repository.get_by_id("123").last_download_id == "101"
-    assert webui_repository.get_by_id("123").last_download_id == "101"
     assert progress_messages[0] == "Getting user info..."
 
 
 def test_download_artwork_id_path_resolves_artist_then_downloads_artist(tmp_path):
-    repository = LegacyArtistRepository(db_path=tmp_path / "pixiv.db")
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
     pixiv_client = FakePixivClient()
     file_downloader = FakeFileDownloader(tmp_path)
     service = DownloadService(
@@ -118,8 +117,10 @@ def test_download_artwork_id_path_resolves_artist_then_downloads_artist(tmp_path
     assert {call[1] for call in file_downloader.calls} == {"999"}
 
 
-def test_incremental_skip_uses_legacy_last_download_id(tmp_path):
-    repository = LegacyArtistRepository(db_path=tmp_path / "pixiv.db")
+def test_incremental_skip_uses_latest_downloaded_artwork_id(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
     repository.upsert(Artist(id="123", name="Existing", last_download_id="100"))
     pixiv_client = FakePixivClient()
     file_downloader = FakeFileDownloader(tmp_path)
@@ -140,10 +141,9 @@ def test_incremental_skip_uses_legacy_last_download_id(tmp_path):
 
 
 def test_cancellation_marks_active_file_failed(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
-    repository = LegacyArtistRepository(db_path=db_path)
-    webui_repository = ArtistRepository(db_path)
+    repository = ArtistRepository(db_path)
     artwork_repository = ArtworkRepository(db_path)
     file_repository = ArtworkFileRepository(db_path)
     pixiv_client = FakePixivClient()
@@ -159,7 +159,6 @@ def test_cancellation_marks_active_file_failed(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
-        webui_artist_repository=webui_repository,
         artwork_repository=artwork_repository,
         file_repository=file_repository,
         sleeper=lambda: None,

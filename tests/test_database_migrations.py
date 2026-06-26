@@ -13,11 +13,11 @@ def table_names(db_path):
 
 
 def test_fresh_database_migration_creates_webui_schema(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
 
     applied = migrate_database(db_path, settings_json_path=tmp_path / "ignored.json")
 
-    assert [migration.version for migration in applied] == ["001", "002", "003"]
+    assert [migration.version for migration in applied] == ["001", "002"]
     assert {
         "schema_migrations",
         "artists",
@@ -26,52 +26,12 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "jobs",
         "job_events",
         "settings",
-        "pic",
     }.issubset(table_names(db_path))
-
-
-def test_legacy_pic_migration_keeps_legacy_data_and_copies_artists(tmp_path):
-    db_path = tmp_path / "pixiv.db"
-    conn = sqlite3.connect(db_path)
-    conn.execute(
-        """
-        CREATE TABLE pic (
-            ID TEXT PRIMARY KEY,
-            name TEXT,
-            downloadedDate TEXT,
-            lastDownloadID TEXT,
-            url TEXT
-        )
-        """
-    )
-    conn.execute(
-        """
-        INSERT INTO pic(ID, name, downloadedDate, lastDownloadID, url)
-        VALUES('123', 'Legacy Artist', '2026-06-24 01:02:03', '456', 'https://example.test/u/123')
-        """
-    )
-    conn.commit()
-    conn.close()
-
-    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    try:
-        legacy = conn.execute("SELECT * FROM pic WHERE ID = '123'").fetchone()
-        artist = conn.execute("SELECT * FROM artists WHERE id = '123'").fetchone()
-    finally:
-        conn.close()
-
-    assert legacy is not None
-    assert artist["name"] == "Legacy Artist"
-    assert artist["profile_url"] == "https://example.test/u/123"
-    assert artist["legacy_last_download_id"] == "456"
-    assert artist["last_checked_at"] == "2026-06-24 01:02:03"
+    assert "pic" not in table_names(db_path)
 
 
 def test_migration_is_idempotent(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
 
     first_applied = migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     second_applied = migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
@@ -82,6 +42,6 @@ def test_migration_is_idempotent(tmp_path):
     finally:
         conn.close()
 
-    assert len(first_applied) == 3
+    assert len(first_applied) == 2
     assert second_applied == []
-    assert migration_count == 3
+    assert migration_count == 2

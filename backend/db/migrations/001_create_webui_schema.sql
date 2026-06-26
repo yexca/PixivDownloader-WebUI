@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS artists (
     profile_url TEXT NOT NULL,
     avatar_url TEXT,
     comment TEXT,
-    legacy_last_download_id TEXT,
+    latest_downloaded_artwork_id TEXT,
     last_checked_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -79,4 +79,3 @@ CREATE TABLE IF NOT EXISTS settings (
     value_json TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-

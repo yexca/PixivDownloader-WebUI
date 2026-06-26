@@ -27,7 +27,7 @@ class ArtistRepository:
                         profile_url,
                         avatar_url,
                         comment,
-                        legacy_last_download_id,
+                        latest_downloaded_artwork_id,
                         last_checked_at,
                         created_at,
                         updated_at
@@ -39,7 +39,7 @@ class ArtistRepository:
                         profile_url = excluded.profile_url,
                         avatar_url = excluded.avatar_url,
                         comment = excluded.comment,
-                        legacy_last_download_id = excluded.legacy_last_download_id,
+                        latest_downloaded_artwork_id = excluded.latest_downloaded_artwork_id,
                         last_checked_at = excluded.last_checked_at,
                         updated_at = excluded.updated_at
                     """,
@@ -133,8 +133,8 @@ def artist_from_row(row: sqlite3.Row) -> Artist:
         account=str(row["account"]) if row["account"] else None,
         avatar_url=str(row["avatar_url"]) if row["avatar_url"] else None,
         comment=str(row["comment"]) if row["comment"] else None,
-        last_download_id=str(row["legacy_last_download_id"])
-        if row["legacy_last_download_id"]
+        last_download_id=str(row["latest_downloaded_artwork_id"])
+        if row["latest_downloaded_artwork_id"]
         else None,
         last_checked_at=str(row["last_checked_at"]) if row["last_checked_at"] else None,
     )

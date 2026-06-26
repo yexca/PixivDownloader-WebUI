@@ -15,7 +15,7 @@ export type ArtistSummary = {
 export type ArtistDetail = ArtistSummary & {
   account: string | null;
   comment: string | null;
-  legacy_last_download_id: string | null;
+  latest_downloaded_artwork_id: string | null;
 };
 
 export type ArtistListResponse = {

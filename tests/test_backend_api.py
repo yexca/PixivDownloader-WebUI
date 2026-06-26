@@ -1,3 +1,4 @@
+import sqlite3
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -162,6 +163,7 @@ def test_pixiv_browser_auth_callback_saves_token(tmp_path, monkeypatch):
 
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "shared-secret")
+
     def fake_sidecar_post(_url, *, json: object, headers: object, timeout: object):
         _ = (json, headers, timeout)
         return SimpleNamespace(status_code=200)
@@ -184,8 +186,7 @@ def test_pixiv_browser_auth_callback_saves_token(tmp_path, monkeypatch):
         json={
             "flow_id": flow_id,
             "callback_url": (
-                "https://app-api.pixiv.net/web/v1/users/auth/pixiv/"
-                "callback?code=browser-code"
+                "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback?code=browser-code"
             ),
         },
     )
@@ -211,6 +212,28 @@ def test_pixiv_browser_auth_callback_rejects_bad_token(tmp_path, monkeypatch):
     assert response.json()["error"]["code"] == "config_error"
 
 
+def test_import_legacy_database_endpoint(tmp_path):
+    client = make_client(tmp_path)
+    legacy_db_path = tmp_path / "legacy-pixiv.db"
+    create_legacy_database(legacy_db_path)
+
+    with legacy_db_path.open("rb") as file:
+        response = client.post(
+            "/api/imports/legacy-database",
+            files={"file": ("pixiv.db", file, "application/octet-stream")},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["imported_artists"] == 2
+    assert body["skipped_rows"] == 0
+    assert body["total_rows"] == 2
+
+    artist_response = client.get("/api/artists/100058387")
+    assert artist_response.status_code == 200
+    assert artist_response.json()["latest_downloaded_artwork_id"] == "113381074"
+
+
 def test_create_download_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
@@ -230,7 +253,7 @@ def test_create_download_job(tmp_path):
     body = response.json()
     assert body["status"] == "queued"
     assert queue.wake_count == 1
-    repository = JobRepository(tmp_path / "pixiv.db")
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
         job = repository.get_by_id(body["job_id"])
         assert job is not None
@@ -242,7 +265,7 @@ def test_create_download_job(tmp_path):
 def test_cancel_queued_job_marks_terminal(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
-    repository = JobRepository(tmp_path / "pixiv.db")
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
         repository.create(Job(id="job-1", type="download_artist", status="queued"))
     finally:
@@ -261,7 +284,7 @@ def test_cancel_queued_job_marks_terminal(tmp_path):
 
 def test_cancel_completed_job_returns_consistent_error(tmp_path):
     client = make_client(tmp_path)
-    repository = JobRepository(tmp_path / "pixiv.db")
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
         repository.create(Job(id="job-1", type="download_artist", status="completed"))
     finally:
@@ -301,11 +324,52 @@ def make_client(tmp_path, queue=None):
         """,
         encoding="utf-8",
     )
-    migrate_database(tmp_path / "pixiv.db", settings_json_path=settings_path)
+    migrate_database(tmp_path / "pixiv.sqlite3", settings_json_path=settings_path)
     app = create_app(
-        db_path=tmp_path / "pixiv.db",
+        db_path=tmp_path / "pixiv.sqlite3",
         settings_json_path=settings_path,
         start_queue=False,
         job_queue=queue or NoopQueue(),
     )
     return TestClient(app)
+
+
+def create_legacy_database(db_path):
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE pic (
+                ID TEXT PRIMARY KEY,
+                name TEXT,
+                downloadedDate TEXT,
+                lastDownloadID TEXT,
+                url TEXT
+            )
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO pic(ID, name, downloadedDate, lastDownloadID, url)
+            VALUES(?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "100058387",
+                    "Legacy Artist",
+                    "2023-11-13 00:00:00",
+                    "113381074",
+                    "https://www.pixiv.net/users/100058387",
+                ),
+                (
+                    "101013492",
+                    "Second Artist",
+                    "2025-01-05 23:52:11",
+                    "125619677",
+                    "https://www.pixiv.net/users/101013492",
+                ),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()

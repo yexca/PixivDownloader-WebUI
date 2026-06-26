@@ -19,7 +19,7 @@ config/settings.json
 SQLite metadata:
 
 ```text
-resources/pixiv.db
+resources/pixiv.sqlite3
 ```
 
 The WebUI loads `settings.example.json` first, then overlays values from
@@ -155,7 +155,7 @@ executable-folder/frontend/dist
 Persistent local data:
 
 - `config/settings.json`
-- `resources/pixiv.db`
+- `resources/pixiv.sqlite3`
 - the configured download directory
 
 Ignored/generated data:

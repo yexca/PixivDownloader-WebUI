@@ -52,7 +52,7 @@ class FailingFileDownloader:
 
 
 def test_worker_updates_job_and_file_statuses(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     repository = JobRepository(db_path)
     try:
@@ -87,7 +87,7 @@ def test_worker_updates_job_and_file_statuses(tmp_path):
 
 
 def test_worker_observes_pre_cancelled_job(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     repository = JobRepository(db_path)
     try:
@@ -115,7 +115,7 @@ def test_worker_observes_pre_cancelled_job(tmp_path):
 
 
 def test_worker_persists_failed_file_and_job_event(tmp_path):
-    db_path = tmp_path / "pixiv.db"
+    db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     repository = JobRepository(db_path)
     try:

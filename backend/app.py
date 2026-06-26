@@ -16,6 +16,7 @@ from backend.api import (
     routes_artwork_files,
     routes_downloads,
     routes_health,
+    routes_imports,
     routes_jobs,
     routes_logs,
     routes_settings,
@@ -67,6 +68,7 @@ def create_app(
     app.include_router(routes_health.router)
     app.include_router(routes_settings.router)
     app.include_router(routes_downloads.router)
+    app.include_router(routes_imports.router)
     app.include_router(routes_jobs.router)
     app.include_router(routes_artists.router)
     app.include_router(routes_artwork_files.router)
