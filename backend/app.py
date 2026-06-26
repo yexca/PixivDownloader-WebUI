@@ -150,6 +150,10 @@ def register_frontend_routes(app: FastAPI) -> None:
     if not index_file.is_file():
         return
 
+    @app.get("/resources/icon.ico", include_in_schema=False)
+    def serve_icon() -> FileResponse:
+        return FileResponse(project_root() / "resources" / "icon.ico")
+
     @app.get("/{full_path:path}", include_in_schema=False)
     def serve_frontend(full_path: str) -> FileResponse:
         if full_path.startswith("api/"):
