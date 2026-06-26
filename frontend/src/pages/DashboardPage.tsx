@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Download, RefreshCw } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useJobStream } from "@/hooks/useJobStream";
 
 export function DashboardPage(): JSX.Element {
+  const navigate = useNavigate();
   const jobs = useQuery({
     queryKey: ["jobs", "all", 10],
     queryFn: () => listJobs({ limit: 10 }),
@@ -84,7 +85,10 @@ export function DashboardPage(): JSX.Element {
           ) : jobs.data.items.length === 0 ? (
             <DataState title="No jobs yet" description="Started downloads will appear here." />
           ) : (
-            <JobTable jobs={jobs.data.items} />
+            <JobTable
+              jobs={jobs.data.items}
+              onSelect={(job) => navigate(`/jobs?job=${encodeURIComponent(job.id)}`)}
+            />
           )}
         </section>
       </div>

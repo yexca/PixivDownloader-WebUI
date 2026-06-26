@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, XCircle } from "lucide-react";
 
@@ -22,8 +23,11 @@ const statusOptions: Array<{ label: string; value: JobStatus | "" }> = [
 ];
 
 export function JobsPage(): JSX.Element {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [status, setStatus] = React.useState<JobStatus | "">("");
-  const [selectedJobId, setSelectedJobId] = React.useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = React.useState<string | null>(
+    searchParams.get("job")
+  );
   const jobs = useQuery({
     queryKey: ["jobs", status || "all", 50],
     queryFn: () => listJobs({ status, limit: 50 }),
@@ -35,6 +39,28 @@ export function JobsPage(): JSX.Element {
     enabled: Boolean(selectedJobId)
   });
 
+  React.useEffect(() => {
+    const jobId = searchParams.get("job");
+    if (jobId && jobId !== selectedJobId) {
+      setSelectedJobId(jobId);
+    }
+  }, [searchParams, selectedJobId]);
+
+  React.useEffect(() => {
+    if (!selectedJobId || !jobs.isSuccess) {
+      return;
+    }
+    const row = document.getElementById(`job-${selectedJobId}`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [jobs.isSuccess, selectedJobId]);
+
+  const selectJob = (job: Job) => {
+    setSelectedJobId(job.id);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("job", job.id);
+    setSearchParams(nextParams, { replace: true });
+  };
+
   return (
     <>
       <PageHeader
@@ -44,7 +70,11 @@ export function JobsPage(): JSX.Element {
           <>
             <Select
               value={status}
-              onChange={(event) => setStatus(event.target.value as JobStatus | "")}
+              onChange={(event) => {
+                setStatus(event.target.value as JobStatus | "");
+                setSelectedJobId(null);
+                setSearchParams({}, { replace: true });
+              }}
               aria-label="Filter jobs by status"
             >
               {statusOptions.map((option) => (
@@ -69,7 +99,11 @@ export function JobsPage(): JSX.Element {
           ) : jobs.data.items.length === 0 ? (
             <DataState title="No jobs found" description="Try another status filter or start a download." />
           ) : (
-            <JobTable jobs={jobs.data.items} onSelect={(job: Job) => setSelectedJobId(job.id)} />
+            <JobTable
+              jobs={jobs.data.items}
+              onSelect={selectJob}
+              selectedJobId={selectedJobId}
+            />
           )}
         </section>
         <aside className="space-y-3">
