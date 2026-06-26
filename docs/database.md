@@ -43,7 +43,7 @@ Startup flow:
 3. `schema_migrations` is created if missing.
 4. SQL migrations are applied in filename order.
 5. Applied versions are recorded.
-6. `resources/conf/settings.json` is synced into the `settings` table when present.
+6. Runtime settings are synced by the settings service when the WebUI reads or saves them.
 
 ## Migration Metadata
 

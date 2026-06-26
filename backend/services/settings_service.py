@@ -17,19 +17,18 @@ class AppSettingsService:
         settings_json_path: Path | str | None = None,
     ) -> None:
         self.repository = SettingsRepository(db_path)
-        self.json_settings = JsonSettingsService(settings_json_path)
+        settings_path = Path(settings_json_path) if settings_json_path is not None else None
+        example_path = settings_path.with_name("settings.example.json") if settings_path else None
+        self.json_settings = JsonSettingsService(settings_path, example_path=example_path)
 
     def get_masked(self) -> dict[str, object]:
         settings = self.load()
         return masked_settings(settings)
 
     def load(self) -> Settings:
-        values = self.repository.all()
-        if not values:
-            settings = self.json_settings.load()
-            self.save(settings)
-            return settings
-        return Settings.from_dict(values)
+        settings = self.json_settings.load()
+        self._sync_repository(settings)
+        return settings
 
     def update(self, values: dict[str, object]) -> Settings:
         current = self.load().to_dict()
@@ -51,10 +50,13 @@ class AppSettingsService:
         PixivClient(refresh_token=settings.refresh_token, api=api)
 
     def save(self, settings: Settings) -> None:
+        self.json_settings.save(settings)
+        self._sync_repository(settings)
+
+    def _sync_repository(self, settings: Settings) -> None:
         values = settings.to_dict()
         for key, value in values.items():
             self.repository.set(key, value)
-        self.json_settings.save(settings)
 
     def close(self) -> None:
         self.repository.close()

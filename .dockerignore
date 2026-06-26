@@ -7,10 +7,12 @@ env
 frontend/node_modules
 frontend/dist
 downloads
+config/settings.json
 sample
 sample*
 prompts
 resources/pixiv.db
+resources/conf/settings.json
 resources/logs
 logs
 build

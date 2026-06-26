@@ -15,6 +15,7 @@ services:
       PIXIV_AUTH_BROWSER_CALLBACK_URL: "http://pixivdownloader:7653/api/settings/pixiv-auth/browser/callback"
       PIXIV_AUTH_BROWSER_TOKEN: "pixivdownloader-local-auth-browser"
     volumes:
+      - ./config:/app/config
       - ./resources:/app/resources
       - ./downloads:/app/downloads
     depends_on:

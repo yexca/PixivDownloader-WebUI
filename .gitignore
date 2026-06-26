@@ -8,3 +8,4 @@ sample*/
 env/
 node_modules/
 downloads/
+config/settings.json

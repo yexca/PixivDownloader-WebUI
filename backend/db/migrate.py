@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from backend.core.config import SettingsService
-from backend.core.errors import ConfigError, DatabaseError
+from backend.core.errors import DatabaseError
 from backend.core.paths import database_path as default_database_path
-from backend.core.paths import settings_path as default_settings_path
 from backend.db.connection import connect
 
 logger = logging.getLogger(__name__)
@@ -30,10 +27,8 @@ def migrate_database(
     *,
     settings_json_path: Path | str | None = None,
 ) -> list[Migration]:
+    _ = settings_json_path
     path = Path(db_path) if db_path is not None else default_database_path()
-    settings_path = (
-        Path(settings_json_path) if settings_json_path is not None else default_settings_path()
-    )
 
     with connect(path) as conn:
         ensure_migration_table(conn)
@@ -45,8 +40,6 @@ def migrate_database(
                 continue
             apply_migration(conn, migration)
             applied_migrations.append(migration)
-
-        sync_settings_from_json(conn, settings_path)
 
     return applied_migrations
 
@@ -101,34 +94,6 @@ def apply_migration(conn: sqlite3.Connection, migration: Migration) -> None:
     except sqlite3.Error as exc:
         conn.rollback()
         raise DatabaseError(f"failed to apply migration {migration.path.name}") from exc
-
-
-def sync_settings_from_json(conn: sqlite3.Connection, settings_path: Path) -> None:
-    if not settings_path.exists():
-        logger.info("settings file not found; skipping settings table sync")
-        return
-
-    try:
-        settings = SettingsService(settings_path).load()
-    except ConfigError as exc:
-        raise DatabaseError("failed to migrate settings from JSON") from exc
-
-    values = settings.to_dict()
-    try:
-        with conn:
-            for key, value in values.items():
-                conn.execute(
-                    """
-                    INSERT INTO settings(key, value_json, updated_at)
-                    VALUES(?, ?, ?)
-                    ON CONFLICT(key) DO UPDATE SET
-                        value_json = excluded.value_json,
-                        updated_at = excluded.updated_at
-                    """,
-                    (key, json.dumps(value), utc_now()),
-                )
-    except sqlite3.Error as exc:
-        raise DatabaseError("failed to sync settings table") from exc
 
 
 def utc_now() -> str:

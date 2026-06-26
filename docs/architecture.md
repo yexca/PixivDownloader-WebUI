@@ -59,8 +59,11 @@ frontend/
 app/
   legacy PyQt code available through run-gui.bat.
 
+config/
+  settings.example.json
+  settings.json
+
 resources/
-  conf/settings.json
   pixiv.db
   static application assets
 ```

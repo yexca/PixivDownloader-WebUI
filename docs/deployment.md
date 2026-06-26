@@ -30,7 +30,8 @@ The script runtime uses:
 - `%UserProfile%\Miniconda3` as the Miniconda installation.
 - `env/` as the project-local Python environment.
 - `frontend/dist` as the built WebUI.
-- `resources/` as the local config and database folder.
+- `config/` as the local WebUI configuration folder.
+- `resources/` as the local database and resource folder.
 
 ## Docker Compose
 
@@ -91,11 +92,14 @@ ports:
 Compose mounts:
 
 ```text
+./config:/app/config
 ./resources:/app/resources
 ./downloads:/app/downloads
 ```
 
-`resources/` persists settings and SQLite metadata.
+`config/` persists WebUI settings and Pixiv authentication secrets.
+
+`resources/` persists SQLite metadata.
 
 `downloads/` is intended for downloaded files when the container configuration points downloads there.
 
@@ -151,6 +155,7 @@ For a future frozen executable, keep runtime resources beside the executable:
 ```text
 release-folder/
   PixivDownloader.exe
+  config/
   frontend/dist/
   resources/
 ```

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from backend.core.errors import ConfigError
+from backend.core.paths import settings_example_path as default_settings_example_path
 from backend.core.paths import settings_path as default_settings_path
 
 
@@ -58,16 +59,34 @@ class Settings:
 
 
 class SettingsService:
-    def __init__(self, path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        *,
+        example_path: Path | str | None = None,
+    ) -> None:
         self.path = Path(path) if path is not None else default_settings_path()
+        self.example_path = (
+            Path(example_path) if example_path is not None else default_settings_example_path()
+        )
 
     def load_raw(self) -> dict[str, Any]:
+        defaults = self._load_file(self.example_path, required=True)
+        overrides = self._load_file(self.path, required=False)
+        return {**defaults, **overrides}
+
+    def _load_file(self, path: Path, *, required: bool) -> dict[str, Any]:
         try:
-            return json.loads(self.path.read_text(encoding="utf-8"))
+            data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError as exc:
-            raise ConfigError(f"settings file not found: {self.path}") from exc
+            if required:
+                raise ConfigError(f"settings example file not found: {path}") from exc
+            return {}
         except json.JSONDecodeError as exc:
-            raise ConfigError(f"settings file is invalid JSON: {self.path}") from exc
+            raise ConfigError(f"settings file is invalid JSON: {path}") from exc
+        if not isinstance(data, dict):
+            raise ConfigError(f"settings file must contain a JSON object: {path}")
+        return data
 
     def load(self) -> Settings:
         return Settings.from_dict(self.load_raw())

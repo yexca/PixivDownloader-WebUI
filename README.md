@@ -29,7 +29,8 @@ Main components:
 
 - `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
 - `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
-- `resources/`: local configuration and SQLite database.
+- `config/`: WebUI configuration; `settings.example.json` is committed and `settings.json` stores local user settings.
+- `resources/`: SQLite database and static resources.
 - `app/`: legacy PyQt code available through `run-gui.bat`; the WebUI is the current user-facing interface.
 
 ## Install
@@ -78,11 +79,35 @@ Run the published image on the same local port:
 docker compose up -d
 ```
 
-The compose file uses and can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `resources/` plus `downloads/` for persistence.
+The compose file uses and can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
+
+Docker Compose also starts the `pixiv-auth-browser` sidecar and maps noVNC on `6080:6080`. After clicking Pixiv sign-in in WebUI Settings, complete Pixiv login in <http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale>; the backend captures the callback and saves the `refresh_token` automatically.
 
 ```bat
 docker compose build
 ```
+
+## Configuration Migration
+
+WebUI settings now load defaults from:
+
+```text
+config\settings.example.json
+```
+
+Local user overrides and secrets are saved to ignored file:
+
+```text
+config\settings.json
+```
+
+Legacy `resources\conf\settings.json` is not read automatically. To migrate it explicitly:
+
+```bat
+env\python.exe tools\migrate_settings_to_config.py
+```
+
+Use `--overwrite` if `config\settings.json` already exists.
 
 ## Development
 
@@ -126,7 +151,8 @@ npm run build
 
 In source checkout mode, the backend resolves resources from the repository root:
 
-- `resources\conf\settings.json`
+- `config\settings.example.json`
+- `config\settings.json`
 - `resources\pixiv.db`
 - `frontend\dist`
 

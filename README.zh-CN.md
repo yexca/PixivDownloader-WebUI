@@ -27,7 +27,8 @@ run-webui.bat
 
 - `backend/`: FastAPI 接口、服务、仓储、SQLite 迁移和后台下载队列。
 - `frontend/`: React、TypeScript、Vite、Tailwind CSS 前端。
-- `resources/`: 本地配置与 SQLite 数据库。
+- `config/`: WebUI 配置；`settings.example.json` 可提交，`settings.json` 保存本地用户配置。
+- `resources/`: SQLite 数据库与静态资源。
 - `app/`: 通过 `run-gui.bat` 启动的旧 PyQt 代码；当前主要面向用户的界面是 WebUI。
 
 ## 安装
@@ -76,7 +77,7 @@ run-gui.bat
 docker compose up -d
 ```
 
-Compose 文件使用并可构建 `yexca/pixivdownloader:v0.2.0`，映射 `7653:7653`，并挂载本地 `resources/` 和 `downloads/` 目录用于持久化。
+Compose 文件使用并可构建 `yexca/pixivdownloader:v0.2.0`，映射 `7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。
 
 Docker Compose 还会启动 `pixiv-auth-browser` 认证浏览器 sidecar，并映射 noVNC 端口 `6080:6080`。在 WebUI 设置页点击 Pixiv 登录后，会打开 <http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale>，在远程浏览器中完成 Pixiv 登录后，后端会自动捕获回调并保存 `refresh_token`。
 
@@ -126,7 +127,8 @@ npm run build
 
 源码运行模式下，后端从仓库根目录解析资源：
 
-- `resources\conf\settings.json`
+- `config\settings.example.json`
+- `config\settings.json`
 - `resources\pixiv.db`
 - `frontend\dist`
 

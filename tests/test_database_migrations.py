@@ -1,7 +1,6 @@
 import sqlite3
 
 from backend.db.migrate import migrate_database
-from backend.repositories.settings_repository import SettingsRepository
 
 
 def table_names(db_path):
@@ -13,26 +12,10 @@ def table_names(db_path):
     return {row[0] for row in rows}
 
 
-def test_fresh_database_migration_creates_webui_schema_and_settings(tmp_path):
+def test_fresh_database_migration_creates_webui_schema(tmp_path):
     db_path = tmp_path / "pixiv.db"
-    settings_path = tmp_path / "conf" / "settings.json"
-    settings_path.parent.mkdir()
-    settings_path.write_text(
-        """
-        {
-            "download_path": "D:/Downloads",
-            "refresh_token": "secret-token",
-            "request_base_delay_seconds": 0.1,
-            "request_random_delay_seconds": 2.5,
-            "max_concurrent_downloads": 2,
-            "overwrite_existing_files": false,
-            "skip_existing_files": true
-        }
-        """,
-        encoding="utf-8",
-    )
 
-    applied = migrate_database(db_path, settings_json_path=settings_path)
+    applied = migrate_database(db_path, settings_json_path=tmp_path / "ignored.json")
 
     assert [migration.version for migration in applied] == ["001", "002", "003"]
     assert {
@@ -45,11 +28,6 @@ def test_fresh_database_migration_creates_webui_schema_and_settings(tmp_path):
         "settings",
         "pic",
     }.issubset(table_names(db_path))
-
-    settings = SettingsRepository(db_path).all()
-    assert settings["download_path"] == "D:/Downloads"
-    assert settings["refresh_token"] == "secret-token"
-    assert settings["max_concurrent_downloads"] == 2
 
 
 def test_legacy_pic_migration_keeps_legacy_data_and_copies_artists(tmp_path):

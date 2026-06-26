@@ -4,19 +4,35 @@ The application is local-first. Configuration lives in local files and SQLite.
 
 ## Settings Sources
 
-Legacy-compatible JSON:
+Committed defaults:
 
 ```text
-resources/conf/settings.json
+config/settings.example.json
 ```
 
-SQLite settings table:
+User overrides and secrets:
+
+```text
+config/settings.json
+```
+
+SQLite metadata:
 
 ```text
 resources/pixiv.db
 ```
 
-The migration runner syncs values from `settings.json` into the SQLite `settings` table during startup. New backend code should use the settings service rather than reading the JSON file directly.
+The WebUI loads `settings.example.json` first, then overlays values from
+`settings.json` when it exists. WebUI saves write to `config/settings.json`.
+The SQLite `settings` table is kept in sync for repository compatibility, but
+startup database migrations do not import legacy settings automatically.
+
+Legacy `resources/conf/settings.json` is not read by the WebUI. Use the explicit
+migration tool if you need to copy old settings:
+
+```bat
+env\python.exe tools\migrate_settings_to_config.py
+```
 
 ## Important Settings
 
@@ -55,7 +71,7 @@ The Settings page supports two ways to configure Pixiv authentication:
 
 The temporary PKCE verifier is stored only in backend memory and expires after
 five minutes. Successful token exchanges are saved through the normal settings
-service, so both SQLite and the legacy JSON settings file stay in sync.
+service into `config/settings.json`.
 
 ## Docker Browser Authentication
 
@@ -121,6 +137,7 @@ backend/core/paths.py
 Source checkout layout:
 
 ```text
+project-root/config
 project-root/resources
 project-root/frontend/dist
 ```
@@ -129,6 +146,7 @@ Frozen executable layout:
 
 ```text
 executable-folder/resources
+executable-folder/config
 executable-folder/frontend/dist
 ```
 
@@ -136,13 +154,14 @@ executable-folder/frontend/dist
 
 Persistent local data:
 
-- `resources/conf/settings.json`
+- `config/settings.json`
 - `resources/pixiv.db`
 - the configured download directory
 
 Ignored/generated data:
 
 - `env/`
+- `config/settings.json`
 - `frontend/node_modules/`
 - `frontend/dist/`
 - `downloads/`

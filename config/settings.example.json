@@ -1,0 +1,9 @@
+{
+    "download_path": "downloads",
+    "refresh_token": "",
+    "request_base_delay_seconds": 0.0,
+    "request_random_delay_seconds": 0.0,
+    "max_concurrent_downloads": 1,
+    "overwrite_existing_files": false,
+    "skip_existing_files": true
+}

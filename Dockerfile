@@ -20,6 +20,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY backend ./backend
+COPY config ./config
 COPY resources ./resources
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 

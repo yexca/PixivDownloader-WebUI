@@ -248,17 +248,29 @@ def test_cancel_completed_job_returns_consistent_error(tmp_path):
 
 
 def make_client(tmp_path, queue=None):
-    settings_path = tmp_path / "settings.json"
-    settings_path.write_text(
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    settings_example_path = config_dir / "settings.example.json"
+    settings_example_path.write_text(
         f"""
         {{
-            "download_path": "{str(tmp_path / "downloads").replace("\\", "\\\\")}",
-            "refresh_token": "secret-token",
+            "download_path": "{str(tmp_path / "default-downloads").replace("\\", "\\\\")}",
+            "refresh_token": "",
             "request_base_delay_seconds": 0.1,
             "request_random_delay_seconds": 0.2,
             "max_concurrent_downloads": 1,
             "overwrite_existing_files": false,
             "skip_existing_files": true
+        }}
+        """,
+        encoding="utf-8",
+    )
+    settings_path = config_dir / "settings.json"
+    settings_path.write_text(
+        f"""
+        {{
+            "download_path": "{str(tmp_path / "downloads").replace("\\", "\\\\")}",
+            "refresh_token": "secret-token"
         }}
         """,
         encoding="utf-8",
