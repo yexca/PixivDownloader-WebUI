@@ -19,6 +19,12 @@ class Artist:
 
 
 @dataclass(frozen=True)
+class LocalTag:
+    id: int
+    name: str
+
+
+@dataclass(frozen=True)
 class ArtworkFile:
     artwork_id: str
     page_index: int

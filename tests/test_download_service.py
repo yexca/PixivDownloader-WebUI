@@ -6,8 +6,9 @@ from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
-from backend.services.download_service import DownloadService
+from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloadResult
+from backend.services.library_sync_service import LibrarySyncService
 
 
 class FakePixivClient:
@@ -138,6 +139,65 @@ def test_incremental_skip_uses_latest_downloaded_artwork_id(tmp_path):
     assert len(file_downloader.calls) == 1
     assert file_downloader.calls[0][2].endswith("101_p0.jpg")
     assert repository.get_by_id("123").last_download_id == "101"
+
+
+def test_retry_failed_ignores_latest_downloaded_artwork_id(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    repository.upsert(Artist(id="123", name="Existing", last_download_id="101"))
+    artwork_repository.upsert(Artwork(id="100", artist_id="123"))
+    file_repository.upsert(
+        ArtworkFile(
+            artwork_id="100",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+            file_name="100_p0.jpg",
+            status="failed",
+        )
+    )
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+        sleeper=lambda: None,
+    )
+
+    summary = service.download(user_id="123", options=DownloadOptions(retry_failed=True))
+
+    assert summary.skipped_files == 0
+    assert summary.downloaded_files == 1
+    assert len(file_downloader.calls) == 1
+    assert file_downloader.calls[0][2].endswith("100_p0.jpg")
+
+
+def test_library_sync_persists_remote_only_files_and_preserves_download_cursor(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Existing", last_download_id="100"))
+    pixiv_client = FakePixivClient()
+    service = LibrarySyncService(
+        pixiv_client=pixiv_client,
+        artist_repository=artist_repository,
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+    )
+
+    summary = service.sync_artist("123")
+
+    assert summary.artwork_count == 2
+    assert artist_repository.get_by_id("123").last_download_id == "100"
+    assert artwork_repository.count_by_artist("123") == 2
+    assert file_repository.list_by_artwork("101")[0].status == "remote_only"
 
 
 def test_cancellation_marks_active_file_failed(tmp_path):

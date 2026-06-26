@@ -69,6 +69,20 @@ class ArtworkFileRepository:
             raise DatabaseError(f"failed to upsert artwork file {file.file_name}") from exc
         return int(row["id"])
 
+    def upsert_remote(self, file: ArtworkFile) -> int:
+        existing = self._get_by_artwork_page(file.artwork_id, file.page_index)
+        if existing is not None:
+            return self._update_remote(existing.id, file)
+        return self.upsert(
+            ArtworkFile(
+                artwork_id=file.artwork_id,
+                page_index=file.page_index,
+                original_url=file.original_url,
+                file_name=file.file_name,
+                status="remote_only",
+            )
+        )
+
     def list_by_artwork(self, artwork_id: str) -> list[ArtworkFile]:
         try:
             rows = self.conn.execute(
@@ -91,6 +105,46 @@ class ArtworkFileRepository:
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to fetch artwork file {file_id}") from exc
         return artwork_file_from_row(row) if row is not None else None
+
+    def list_failed_by_artist(self, artist_id: str, *, limit: int = 500) -> list[ArtworkFile]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT artwork_files.* FROM artwork_files
+                JOIN artworks ON artworks.id = artwork_files.artwork_id
+                WHERE artworks.artist_id = ? AND artwork_files.status = 'failed'
+                ORDER BY artwork_files.updated_at DESC
+                LIMIT ?
+                """,
+                (artist_id, limit),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(
+                f"failed to list failed artwork files for artist {artist_id}"
+            ) from exc
+        return [artwork_file_from_row(row) for row in rows]
+
+    def mark_artist_failed_pending(self, artist_id: str) -> int:
+        try:
+            with self.conn:
+                cursor = self.conn.execute(
+                    """
+                    UPDATE artwork_files
+                    SET status = 'pending',
+                        error_message = NULL,
+                        updated_at = ?
+                    WHERE status = 'failed'
+                      AND artwork_id IN (
+                          SELECT id FROM artworks WHERE artist_id = ?
+                      )
+                    """,
+                    (utc_now(), artist_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(
+                f"failed to mark failed files pending for artist {artist_id}"
+            ) from exc
+        return cursor.rowcount
 
     def update_status(
         self,
@@ -142,6 +196,38 @@ class ArtworkFileRepository:
         except sqlite3.Error as exc:
             raise DatabaseError("failed to list failed artwork files") from exc
         return [artwork_file_from_row(row) for row in rows]
+
+    def _get_by_artwork_page(self, artwork_id: str, page_index: int) -> ArtworkFile | None:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT * FROM artwork_files
+                WHERE artwork_id = ? AND page_index = ?
+                """,
+                (artwork_id, page_index),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError(
+                f"failed to fetch artwork file {artwork_id} page {page_index}"
+            ) from exc
+        return artwork_file_from_row(row) if row is not None else None
+
+    def _update_remote(self, file_id: int, file: ArtworkFile) -> int:
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE artwork_files
+                    SET original_url = ?,
+                        file_name = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (file.original_url, file.file_name, utc_now(), file_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to update remote artwork file {file.file_name}") from exc
+        return file_id
 
     def close(self) -> None:
         self.conn.close()

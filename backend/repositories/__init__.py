@@ -5,11 +5,13 @@ from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.settings_repository import SettingsRepository
+from backend.repositories.tag_repository import LocalTagRepository
 
 __all__ = [
     "ArtistRepository",
     "ArtworkFileRepository",
     "ArtworkRepository",
     "JobRepository",
+    "LocalTagRepository",
     "SettingsRepository",
 ]

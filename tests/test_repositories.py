@@ -5,6 +5,7 @@ from backend.repositories import (
     ArtworkFileRepository,
     ArtworkRepository,
     JobRepository,
+    LocalTagRepository,
     SettingsRepository,
 )
 
@@ -68,6 +69,45 @@ def test_artwork_and_file_repositories_crud(tmp_path):
     assert files[0].id == file_id
     assert files[0].status == "downloaded"
     assert file_repository.get_by_id(file_id).file_name == "999_p0.jpg"
+
+
+def test_artist_delete_removes_library_records_only(tmp_path):
+    db_path = migrated_db(tmp_path)
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Artist"))
+    artwork_repository.upsert(Artwork(id="999", artist_id="123", title="Title"))
+    file_id = file_repository.upsert(
+        ArtworkFile(
+            artwork_id="999",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/999_p0.jpg",
+            file_name="999_p0.jpg",
+            status="downloaded",
+            local_path=tmp_path / "999_p0.jpg",
+        )
+    )
+
+    assert artist_repository.delete("123") is True
+
+    assert artist_repository.get_by_id("123") is None
+    assert artwork_repository.get_by_id("999") is None
+    assert file_repository.get_by_id(file_id) is None
+
+
+def test_local_tag_repository_sets_and_filters_artist_tags(tmp_path):
+    db_path = migrated_db(tmp_path)
+    artist_repository = ArtistRepository(db_path)
+    tag_repository = LocalTagRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Artist"))
+    artist_repository.upsert(Artist(id="456", name="Other"))
+
+    tags = tag_repository.set_artist_tags("123", ["favorite", " reference ", "favorite"])
+
+    assert [tag.name for tag in tags] == ["favorite", "reference"]
+    assert [artist.id for artist in artist_repository.list(local_tag="favorite")] == ["123"]
+    assert artist_repository.count(local_tag="favorite") == 1
 
 
 def test_job_repository_crud(tmp_path):

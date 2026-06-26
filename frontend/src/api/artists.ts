@@ -8,14 +8,17 @@ export type ArtistSummary = {
   avatar_url: string | null;
   artwork_count: number;
   downloaded_file_count: number;
+  remote_file_count: number;
+  pending_file_count: number;
   failed_file_count: number;
+  latest_downloaded_artwork_id: string | null;
   last_checked_at: string | null;
+  local_tags: LocalTag[];
 };
 
 export type ArtistDetail = ArtistSummary & {
   account: string | null;
   comment: string | null;
-  latest_downloaded_artwork_id: string | null;
 };
 
 export type ArtistListResponse = {
@@ -59,8 +62,19 @@ export type ArtworkFileListResponse = {
   total: number;
 };
 
+export type LocalTag = {
+  id: number;
+  name: string;
+};
+
+export type LocalTagListResponse = {
+  items: LocalTag[];
+  total: number;
+};
+
 export type ListArtistsParams = {
   q?: string;
+  local_tag?: string;
   sort?: string;
   limit?: number;
   offset?: number;
@@ -70,6 +84,9 @@ export function listArtists(params: ListArtistsParams = {}): Promise<ArtistListR
   const search = new URLSearchParams();
   if (params.q) {
     search.set("q", params.q);
+  }
+  if (params.local_tag) {
+    search.set("local_tag", params.local_tag);
   }
   if (params.sort) {
     search.set("sort", params.sort);
@@ -86,6 +103,45 @@ export function listArtists(params: ListArtistsParams = {}): Promise<ArtistListR
 
 export function getArtist(artistId: string): Promise<ArtistDetail> {
   return apiRequest<ArtistDetail>(`/artists/${artistId}`);
+}
+
+export function createArtist(userId: string): Promise<DownloadCreateResponse> {
+  return apiRequest<DownloadCreateResponse>("/artists", {
+    method: "POST",
+    body: { user_id: userId }
+  });
+}
+
+export function syncArtist(artistId: string): Promise<DownloadCreateResponse> {
+  return apiRequest<DownloadCreateResponse>(`/artists/${artistId}/sync`, {
+    method: "POST"
+  });
+}
+
+export function retryFailedArtist(artistId: string): Promise<DownloadCreateResponse> {
+  return apiRequest<DownloadCreateResponse>(`/artists/${artistId}/retry-failed`, {
+    method: "POST"
+  });
+}
+
+export function deleteArtist(artistId: string): Promise<void> {
+  return apiRequest<void>(`/artists/${artistId}`, {
+    method: "DELETE"
+  });
+}
+
+export function listLocalTags(): Promise<LocalTagListResponse> {
+  return apiRequest<LocalTagListResponse>("/artists/-/local-tags");
+}
+
+export function setArtistLocalTags(
+  artistId: string,
+  tags: string[]
+): Promise<LocalTagListResponse> {
+  return apiRequest<LocalTagListResponse>(`/artists/${artistId}/local-tags`, {
+    method: "PUT",
+    body: { tags }
+  });
 }
 
 export function listArtistArtworks(

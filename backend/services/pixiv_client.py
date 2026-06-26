@@ -100,6 +100,9 @@ def artist_from_pixiv_user(user: Any, fallback_id: str | None = None) -> Artist:
         id=artist_id,
         name=str(_get_value(user, "name", "")),
         profile_url=f"https://www.pixiv.net/users/{artist_id}",
+        account=str(_get_value(user, "account", "")) or None,
+        avatar_url=_image_url(_get_value(user, "profile_image_urls", None)),
+        comment=str(_get_value(user, "comment", "")) or None,
     )
 
 
@@ -120,6 +123,19 @@ def artwork_from_pixiv_illust(illust: Any) -> Artwork:
         id=artwork_id,
         artist_id=artist_id,
         title=str(_get_value(illust, "title", "")),
+        type=str(_get_value(illust, "type", "")) or None,
+        caption=str(_get_value(illust, "caption", "")) or None,
+        page_count=int(_get_value(illust, "page_count", len(pages)) or len(pages)),
+        width=_optional_int(_get_value(illust, "width", None)),
+        height=_optional_int(_get_value(illust, "height", None)),
+        sanity_level=_optional_int(_get_value(illust, "sanity_level", None)),
+        restrict_value=_optional_int(_get_value(illust, "restrict", None)),
+        tags=tuple(
+            str(_get_value(tag, "name", tag))
+            for tag in _get_value(illust, "tags", [])
+            if str(_get_value(tag, "name", tag)).strip()
+        ),
+        pixiv_created_at=str(_get_value(illust, "create_date", "")) or None,
         files=pages,
     )
 
@@ -167,6 +183,31 @@ def _is_invalid_grant(result: Any) -> bool:
     error = _get_value(result, "error", None)
     message = _get_value(error, "message", "")
     return "invalid_grant" in str(message)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _image_url(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        for key in ("medium", "px_170x170", "large"):
+            image = value.get(key)
+            if image:
+                return str(image)
+        return None
+    for key in ("medium", "px_170x170", "large"):
+        image = getattr(value, key, None)
+        if image:
+            return str(image)
+    return None
 
 
 class PixivClientProtocol(Protocol):

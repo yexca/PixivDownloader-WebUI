@@ -67,14 +67,31 @@ class ArtistRepository:
 
         return artist_from_row(row) if row is not None else None
 
-    def list(self, *, limit: int = 50, offset: int = 0, query: str | None = None) -> list[Artist]:
-        sql = "SELECT * FROM artists"
+    def list(
+        self,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+        query: str | None = None,
+        local_tag: str | None = None,
+    ) -> list[Artist]:
+        sql = "SELECT DISTINCT artists.* FROM artists"
         params: list[object] = []
+        where: list[str] = []
+        if local_tag:
+            sql += """
+                JOIN artist_local_tags ON artist_local_tags.artist_id = artists.id
+                JOIN local_tags ON local_tags.id = artist_local_tags.tag_id
+            """
+            where.append("local_tags.name = ?")
+            params.append(local_tag)
         if query:
-            sql += " WHERE id LIKE ? OR name LIKE ?"
+            where.append("(artists.id LIKE ? OR artists.name LIKE ?)")
             like_query = f"%{query}%"
             params.extend([like_query, like_query])
-        sql += " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY artists.updated_at DESC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         try:
@@ -83,13 +100,23 @@ class ArtistRepository:
             raise DatabaseError("failed to list artists") from exc
         return [artist_from_row(row) for row in rows]
 
-    def count(self, *, query: str | None = None) -> int:
-        sql = "SELECT COUNT(*) AS total FROM artists"
+    def count(self, *, query: str | None = None, local_tag: str | None = None) -> int:
+        sql = "SELECT COUNT(DISTINCT artists.id) AS total FROM artists"
         params: list[object] = []
+        where: list[str] = []
+        if local_tag:
+            sql += """
+                JOIN artist_local_tags ON artist_local_tags.artist_id = artists.id
+                JOIN local_tags ON local_tags.id = artist_local_tags.tag_id
+            """
+            where.append("local_tags.name = ?")
+            params.append(local_tag)
         if query:
-            sql += " WHERE id LIKE ? OR name LIKE ?"
+            where.append("(artists.id LIKE ? OR artists.name LIKE ?)")
             like_query = f"%{query}%"
             params.extend([like_query, like_query])
+        if where:
+            sql += " WHERE " + " AND ".join(where)
         try:
             row = self.conn.execute(sql, params).fetchone()
         except sqlite3.Error as exc:
@@ -104,6 +131,10 @@ class ArtistRepository:
                     COUNT(DISTINCT artworks.id) AS artwork_count,
                     SUM(CASE WHEN artwork_files.status = 'downloaded' THEN 1 ELSE 0 END)
                         AS downloaded_file_count,
+                    SUM(CASE WHEN artwork_files.status = 'remote_only' THEN 1 ELSE 0 END)
+                        AS remote_file_count,
+                    SUM(CASE WHEN artwork_files.status = 'pending' THEN 1 ELSE 0 END)
+                        AS pending_file_count,
                     SUM(CASE WHEN artwork_files.status = 'failed' THEN 1 ELSE 0 END)
                         AS failed_file_count
                 FROM artists
@@ -118,8 +149,33 @@ class ArtistRepository:
         return {
             "artwork_count": int(row["artwork_count"] or 0),
             "downloaded_file_count": int(row["downloaded_file_count"] or 0),
+            "remote_file_count": int(row["remote_file_count"] or 0),
+            "pending_file_count": int(row["pending_file_count"] or 0),
             "failed_file_count": int(row["failed_file_count"] or 0),
         }
+
+    def delete(self, artist_id: str) -> bool:
+        try:
+            with self.conn:
+                artwork_rows = self.conn.execute(
+                    "SELECT id FROM artworks WHERE artist_id = ?",
+                    (artist_id,),
+                ).fetchall()
+                artwork_ids = [str(row["id"]) for row in artwork_rows]
+                for artwork_id in artwork_ids:
+                    self.conn.execute(
+                        "DELETE FROM artwork_files WHERE artwork_id = ?",
+                        (artwork_id,),
+                    )
+                self.conn.execute(
+                    "DELETE FROM artist_local_tags WHERE artist_id = ?",
+                    (artist_id,),
+                )
+                self.conn.execute("DELETE FROM artworks WHERE artist_id = ?", (artist_id,))
+                cursor = self.conn.execute("DELETE FROM artists WHERE id = ?", (artist_id,))
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to delete artist {artist_id}") from exc
+        return cursor.rowcount > 0
 
     def close(self) -> None:
         self.conn.close()

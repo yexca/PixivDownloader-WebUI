@@ -14,6 +14,7 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
+from backend.services.library_sync_service import LibrarySyncService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.random_sleep import RandomSleep
 from backend.services.settings_service import AppSettingsService
@@ -53,6 +54,8 @@ class DownloadWorker:
                 return self._finish(repository, job, "cancelled", "Job cancelled before start")
 
             job = self._start(repository, job)
+            if job.type == "sync_artist":
+                return self._run_sync_job(repository, job)
             service = DownloadService(
                 pixiv_client=self.pixiv_client_factory(),
                 file_downloader=self.file_downloader_factory(),
@@ -63,7 +66,7 @@ class DownloadWorker:
             )
             options = DownloadOptions(
                 force_rescan=job.type == "rescan_artist",
-                retry_failed=job.type == "retry_failed",
+                retry_failed=job.type in {"retry_failed", "retry_failed_artist"},
             )
             summary = service.download(
                 user_id=job.input_user_id,
@@ -109,6 +112,40 @@ class DownloadWorker:
             )
         finally:
             repository.close()
+
+    def _run_sync_job(self, repository: JobRepository, job: Job) -> Job:
+        if not job.input_user_id:
+            raise ValueError("sync artist job requires user ID")
+        service = LibrarySyncService(
+            pixiv_client=self.pixiv_client_factory(),
+            artist_repository=ArtistRepository(self.db_path),
+            artwork_repository=ArtworkRepository(self.db_path),
+            file_repository=ArtworkFileRepository(self.db_path),
+        )
+        try:
+            repository.add_event(
+                JobEvent(job_id=job.id, level="info", message="Syncing Pixiv metadata")
+            )
+            summary = service.sync_artist(job.input_user_id)
+        finally:
+            service.close()
+        finished = replace(
+            repository.get_by_id(job.id) or job,
+            status="completed",
+            artist_id=summary.artist.id,
+            total_files=summary.file_count,
+            skipped_files=summary.file_count,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message=(f"Synced {summary.artwork_count} artworks and {summary.file_count} files"),
+            )
+        )
+        return repository.get_by_id(job.id) or finished
 
     def _start(self, repository: JobRepository, job: Job) -> Job:
         running = replace(job, status="running", started_at=utc_now())

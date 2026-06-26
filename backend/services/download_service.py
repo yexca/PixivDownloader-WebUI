@@ -109,7 +109,8 @@ class DownloadService:
                 )
                 current_download_id = artwork_id_from_url(file.original_url)
                 if (
-                    not resolved_options.force_rescan
+                    not resolved_options.retry_failed
+                    and not resolved_options.force_rescan
                     and artist.last_download_id
                     and current_download_id <= int(artist.last_download_id)
                 ):
@@ -215,7 +216,7 @@ class DownloadService:
             self.artwork_repository.upsert(artwork)
             for file in artwork.files:
                 existing = self._existing_file(file)
-                if retry_failed and existing is not None and existing.status != "failed":
+                if retry_failed and (existing is None or existing.status != "failed"):
                     continue
                 file_id = self.file_repository.upsert(
                     ArtworkFile(

@@ -6,8 +6,10 @@ from fastapi.testclient import TestClient
 from backend.api import routes_settings
 from backend.app import create_app
 from backend.db.migrate import migrate_database
-from backend.domain.entities import Job
+from backend.domain.entities import Artist, Job
+from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.tag_repository import LocalTagRepository
 from backend.services.settings_service import AppSettingsService
 
 
@@ -260,6 +262,65 @@ def test_create_download_job(tmp_path):
         assert job.input_user_id == "123"
     finally:
         repository.close()
+
+
+def test_create_artist_queues_sync_job(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    response = client.post("/api/artists", json={"user_id": "123"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "queued"
+    assert queue.wake_count == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["job_id"])
+        assert job is not None
+        assert job.type == "sync_artist"
+        assert job.input_user_id == "123"
+    finally:
+        repository.close()
+
+
+def test_artist_tags_and_filter_endpoint(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Tagged Artist"))
+        artist_repository.upsert(Artist(id="456", name="Other Artist"))
+    finally:
+        artist_repository.close()
+
+    update_response = client.put("/api/artists/123/local-tags", json={"tags": ["favorite"]})
+    list_response = client.get("/api/artists?local_tag=favorite")
+    tags_response = client.get("/api/artists/-/local-tags")
+
+    assert update_response.status_code == 200
+    assert update_response.json()["items"][0]["name"] == "favorite"
+    assert list_response.status_code == 200
+    assert [artist["id"] for artist in list_response.json()["items"]] == ["123"]
+    assert tags_response.json()["items"][0]["name"] == "favorite"
+
+
+def test_delete_artist_removes_database_records(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Delete Me"))
+    finally:
+        artist_repository.close()
+    tag_repository = LocalTagRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        tag_repository.set_artist_tags("123", ["old"])
+    finally:
+        tag_repository.close()
+
+    response = client.delete("/api/artists/123")
+
+    assert response.status_code == 204
+    assert client.get("/api/artists/123").status_code == 404
 
 
 def test_cancel_queued_job_marks_terminal(tmp_path):

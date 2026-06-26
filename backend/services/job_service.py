@@ -23,15 +23,21 @@ class JobService:
         artwork_id: str | None,
         force_rescan: bool = False,
         retry_failed: bool = False,
+        sync_only: bool = False,
+        retry_failed_artist: bool = False,
     ) -> Job:
         if bool(user_id) == bool(artwork_id):
             raise ValueError("exactly one of user_id or artwork_id is required")
+        if (sync_only or retry_failed_artist) and artwork_id is not None:
+            raise ValueError("artist-only job requires user_id")
 
         job_type = resolve_job_type(
             user_id=user_id,
             artwork_id=artwork_id,
             force_rescan=force_rescan,
             retry_failed=retry_failed,
+            sync_only=sync_only,
+            retry_failed_artist=retry_failed_artist,
         )
         job = Job(
             id=str(uuid4()),
@@ -49,6 +55,8 @@ class JobService:
                 payload={
                     "force_rescan": force_rescan,
                     "retry_failed": retry_failed,
+                    "sync_only": sync_only,
+                    "retry_failed_artist": retry_failed_artist,
                 },
             )
         )
@@ -118,7 +126,13 @@ def resolve_job_type(
     artwork_id: str | None,
     force_rescan: bool,
     retry_failed: bool,
+    sync_only: bool = False,
+    retry_failed_artist: bool = False,
 ) -> JobType:
+    if sync_only:
+        return "sync_artist"
+    if retry_failed_artist:
+        return "retry_failed_artist"
     del user_id
     if retry_failed:
         return "retry_failed"
