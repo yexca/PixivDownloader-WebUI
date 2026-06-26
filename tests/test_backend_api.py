@@ -377,6 +377,106 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     assert queue.wake_count == 2
 
 
+def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(
+            Artist(
+                id="123",
+                name="Stale",
+                last_checked_at="2023-01-01T00:00:00Z",
+            )
+        )
+        artist_repository.upsert(
+            Artist(
+                id="456",
+                name="Fresh",
+                last_checked_at="2999-01-01T00:00:00Z",
+            )
+        )
+    finally:
+        artist_repository.close()
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Stale sync",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+            "config": {
+                "target": {"type": "all_artists"},
+                "filters": [{"type": "last_checked_before_days", "days": 30}],
+                "actions": ["sync_artist"],
+                "max_artists_per_run": 25,
+            },
+        },
+    )
+
+    assert create_response.status_code == 200
+    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    assert body["created"] is True
+    assert len(body["job_ids"]) == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["job_ids"][0])
+        assert job is not None
+        assert job.type == "sync_artist"
+        assert job.input_user_id == "123"
+    finally:
+        repository.close()
+
+
+def test_scheduled_task_builder_targets_local_tag(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    tag_repository = LocalTagRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Tagged"))
+        artist_repository.upsert(Artist(id="456", name="Other"))
+        tag_repository.set_artist_tags("123", ["favorite"])
+    finally:
+        artist_repository.close()
+        tag_repository.close()
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Tagged download",
+            "interval_days": 7,
+            "enabled": True,
+            "run_after_startup": True,
+            "config": {
+                "target": {"type": "artists_with_tag", "tag": "favorite"},
+                "filters": [],
+                "actions": ["download_artist", "retry_failed_artist"],
+                "max_artists_per_run": 25,
+            },
+        },
+    )
+    assert create_response.status_code == 200
+
+    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    assert len(body["job_ids"]) == 2
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
+        assert [job.type for job in jobs if job is not None] == [
+            "download_artist",
+            "retry_failed_artist",
+        ]
+        assert {job.input_user_id for job in jobs if job is not None} == {"123"}
+    finally:
+        repository.close()
+
+
 def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     create_response = client.post(

@@ -5,9 +5,17 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from backend.core.errors import InsufficientDiskSpaceError, PixivDownloaderError
-from backend.domain.entities import Job, ScheduledTask
+from backend.domain.entities import (
+    Artist,
+    Job,
+    ScheduledTask,
+    ScheduledTaskConfig,
+    ScheduledTaskFilter,
+)
 from backend.domain.types import ScheduledTaskAction, ScheduledTaskStatus
 from backend.repositories._time import utc_now
+from backend.repositories.artist_repository import ArtistRepository
+from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.scheduled_task_repository import ScheduledTaskRepository
 from backend.services.job_service import JobService
@@ -33,6 +41,7 @@ class ScheduledTaskService:
         interval_days: int,
         enabled: bool = True,
         run_after_startup: bool = True,
+        config: ScheduledTaskConfig | None = None,
     ) -> ScheduledTask:
         if interval_days < 1:
             raise ValueError("interval_days must be at least 1")
@@ -46,6 +55,7 @@ class ScheduledTaskService:
             interval_days=interval_days,
             run_after_startup=run_after_startup,
             next_run_at=now,
+            config=config,
         )
         return self.repository.create(task)
 
@@ -65,6 +75,7 @@ class ScheduledTaskService:
         target_artist_id: str | None = None,
         interval_days: int | None = None,
         run_after_startup: bool | None = None,
+        config: ScheduledTaskConfig | None = None,
     ) -> ScheduledTask | None:
         task = self.repository.get_by_id(task_id)
         if task is None:
@@ -87,6 +98,7 @@ class ScheduledTaskService:
             run_after_startup=task.run_after_startup
             if run_after_startup is None
             else run_after_startup,
+            config=config or task.config,
             next_run_at=next_run_at,
             last_error_code=None if resolved_status == "active" else task.last_error_code,
             last_error_message=None if resolved_status == "active" else task.last_error_message,
@@ -125,18 +137,8 @@ class ScheduledTaskService:
             return ScheduledTaskRunResult(task=task, job=None, created=False, skipped=True)
 
         now = utc_now()
-        active_job = self._find_active_job(task)
-        if active_job is not None:
-            updated = self._mark_success(task, now=now, job=active_job)
-            return ScheduledTaskRunResult(
-                task=updated,
-                job=active_job,
-                created=False,
-                skipped=True,
-            )
-
         try:
-            job = self._create_job(task)
+            jobs = self._create_jobs(task)
         except InsufficientDiskSpaceError as exc:
             updated = replace(
                 task,
@@ -169,57 +171,126 @@ class ScheduledTaskService:
                 skipped=False,
             )
 
-        updated = self._mark_success(task, now=now, job=job)
-        return ScheduledTaskRunResult(task=updated, job=job, created=True, skipped=False)
+        updated = self._mark_success(task, now=now, jobs=jobs)
+        return ScheduledTaskRunResult(
+            task=updated,
+            jobs=jobs,
+            created=bool(jobs),
+            skipped=not jobs,
+        )
 
     def close(self) -> None:
         self.repository.close()
 
-    def _create_job(self, task: ScheduledTask) -> Job:
+    def _create_jobs(self, task: ScheduledTask) -> list[Job]:
+        config = task.config or legacy_config(task)
+        artists = self._resolve_artists(config)
+        jobs: list[Job] = []
+        for artist in artists[: config.max_artists_per_run]:
+            for action in config.actions:
+                active_job = self._find_active_job(action, artist.id)
+                if active_job is not None:
+                    continue
+                jobs.append(self._create_job(action, artist.id))
+        return jobs
+
+    def _create_job(self, action: ScheduledTaskAction, artist_id: str) -> Job:
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
-            if task.action == "sync_artist":
+            if action == "sync_artist":
                 return service.create_download_job(
-                    user_id=task.target_artist_id,
+                    user_id=artist_id,
                     artwork_id=None,
                     sync_only=True,
                 )
-            if task.action == "retry_failed_artist":
+            if action == "retry_failed_artist":
                 return service.create_download_job(
-                    user_id=task.target_artist_id,
+                    user_id=artist_id,
                     artwork_id=None,
                     retry_failed_artist=True,
                 )
             return service.create_download_job(
-                user_id=task.target_artist_id,
+                user_id=artist_id,
                 artwork_id=None,
             )
         finally:
             service.close()
 
-    def _find_active_job(self, task: ScheduledTask) -> Job | None:
+    def _find_active_job(self, action: ScheduledTaskAction, artist_id: str) -> Job | None:
         repository = JobRepository(self.db_path)
         try:
             return repository.find_active(
-                job_type=job_type_for_action(task.action),
-                user_id=task.target_artist_id,
+                job_type=job_type_for_action(action),
+                user_id=artist_id,
             )
         finally:
             repository.close()
 
-    def _mark_success(self, task: ScheduledTask, *, now: str, job: Job) -> ScheduledTask:
+    def _mark_success(self, task: ScheduledTask, *, now: str, jobs: list[Job]) -> ScheduledTask:
         updated = replace(
             task,
             status="active",
             last_run_at=now,
             last_success_at=now,
             next_run_at=next_time(now, task.interval_days),
-            last_job_id=job.id,
+            last_job_id=jobs[-1].id if jobs else task.last_job_id,
             last_error_code=None,
             last_error_message=None,
+            last_run_summary={
+                "created_jobs": len(jobs),
+                "job_ids": [job.id for job in jobs],
+            },
         )
         self.repository.update(updated)
         return self.repository.get_by_id(task.id or 0) or updated
+
+    def _resolve_artists(self, config: ScheduledTaskConfig) -> list[Artist]:
+        repository = ArtistRepository(self.db_path)
+        try:
+            target = config.target
+            if target.type == "single_artist":
+                if not target.artist_id:
+                    return []
+                artist = repository.get_by_id(target.artist_id)
+                return (
+                    [artist]
+                    if artist is not None
+                    else [Artist(id=target.artist_id, name=target.artist_id)]
+                )
+            if target.type == "artists_with_tag":
+                if not target.tag:
+                    return []
+                artists = repository.list(limit=1000, local_tag=target.tag)
+            else:
+                artists = repository.list(limit=1000)
+        finally:
+            repository.close()
+
+        if config.target.type == "artists_not_checked":
+            days = config.target.days or 30
+            artists = [artist for artist in artists if artist_is_stale(artist, days)]
+        for item in config.filters:
+            artists = self._apply_filter(artists, item)
+        return artists
+
+    def _apply_filter(
+        self,
+        artists: list[Artist],
+        item: ScheduledTaskFilter,
+    ) -> list[Artist]:
+        if item.type == "last_checked_before_days":
+            return [artist for artist in artists if artist_is_stale(artist, item.days or 30)]
+        if item.type == "has_failed_files":
+            repository = ArtworkFileRepository(self.db_path)
+            try:
+                return [
+                    artist
+                    for artist in artists
+                    if repository.list_failed_by_artist(artist.id, limit=1)
+                ]
+            finally:
+                repository.close()
+        return artists
 
     def _skip_startup_missed_task(self, task: ScheduledTask, *, now: str) -> ScheduledTask:
         updated = replace(
@@ -237,12 +308,14 @@ class ScheduledTaskRunResult:
         self,
         *,
         task: ScheduledTask,
-        job: Job | None,
         created: bool,
         skipped: bool,
+        job: Job | None = None,
+        jobs: list[Job] | None = None,
     ) -> None:
         self.task = task
-        self.job = job
+        self.jobs = jobs or ([] if job is None else [job])
+        self.job = self.jobs[-1] if self.jobs else None
         self.created = created
         self.skipped = skipped
 
@@ -262,6 +335,21 @@ def default_task_name(action: ScheduledTaskAction, artist_id: str) -> str:
         "retry_failed_artist": "Retry failed artist",
     }
     return f"{labels[action]} {artist_id}"
+
+
+def legacy_config(task: ScheduledTask) -> ScheduledTaskConfig:
+    from backend.domain.entities import ScheduledTaskTarget
+
+    return ScheduledTaskConfig(
+        target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
+        actions=(task.action,),
+    )
+
+
+def artist_is_stale(artist: Artist, days: int) -> bool:
+    if artist.last_checked_at is None:
+        return True
+    return parse_time(artist.last_checked_at) <= datetime.now(UTC) - timedelta(days=days)
 
 
 def next_time(from_time: str, interval_days: int) -> str:

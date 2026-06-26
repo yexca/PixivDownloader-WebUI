@@ -2,17 +2,47 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from backend.domain.entities import ScheduledTask
-from backend.domain.types import ScheduledTaskAction, ScheduledTaskStatus
+from backend.domain.entities import (
+    ScheduledTask,
+    ScheduledTaskConfig,
+    ScheduledTaskFilter,
+    ScheduledTaskTarget,
+)
+from backend.domain.types import (
+    ScheduledTaskAction,
+    ScheduledTaskFilterType,
+    ScheduledTaskStatus,
+    ScheduledTaskTargetType,
+)
+
+
+class ScheduledTaskTargetRequest(BaseModel):
+    type: ScheduledTaskTargetType
+    artist_id: str | None = None
+    tag: str | None = None
+    days: int | None = Field(default=None, ge=1)
+
+
+class ScheduledTaskFilterRequest(BaseModel):
+    type: ScheduledTaskFilterType
+    days: int | None = Field(default=None, ge=1)
+
+
+class ScheduledTaskConfigRequest(BaseModel):
+    target: ScheduledTaskTargetRequest
+    filters: list[ScheduledTaskFilterRequest] = Field(default_factory=list)
+    actions: list[ScheduledTaskAction] = Field(default_factory=lambda: ["download_artist"])
+    max_artists_per_run: int = Field(default=25, ge=1, le=500)
 
 
 class ScheduledTaskCreateRequest(BaseModel):
     name: str = ""
-    action: ScheduledTaskAction
-    target_artist_id: str = Field(min_length=1)
+    action: ScheduledTaskAction | None = None
+    target_artist_id: str | None = Field(default=None, min_length=1)
     interval_days: int = Field(ge=1)
     enabled: bool = True
     run_after_startup: bool = True
+    config: ScheduledTaskConfigRequest | None = None
 
 
 class ScheduledTaskUpdateRequest(BaseModel):
@@ -22,6 +52,7 @@ class ScheduledTaskUpdateRequest(BaseModel):
     target_artist_id: str | None = Field(default=None, min_length=1)
     interval_days: int | None = Field(default=None, ge=1)
     run_after_startup: bool | None = None
+    config: ScheduledTaskConfigRequest | None = None
 
 
 class ScheduledTaskResponse(BaseModel):
@@ -38,6 +69,8 @@ class ScheduledTaskResponse(BaseModel):
     last_job_id: str | None
     last_error_code: str | None
     last_error_message: str | None
+    config: dict[str, object]
+    last_run_summary: dict[str, object] | None
     created_at: str | None
     updated_at: str | None
 
@@ -50,6 +83,7 @@ class ScheduledTaskListResponse(BaseModel):
 class ScheduledTaskRunResponse(BaseModel):
     task: ScheduledTaskResponse
     job_id: str | None
+    job_ids: list[str]
     created: bool
     skipped: bool
 
@@ -71,6 +105,49 @@ def scheduled_task_response(task: ScheduledTask) -> ScheduledTaskResponse:
         last_job_id=task.last_job_id,
         last_error_code=task.last_error_code,
         last_error_message=task.last_error_message,
+        config=scheduled_task_config_to_dict(task.config),
+        last_run_summary=task.last_run_summary,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
+
+
+def scheduled_task_config_from_request(
+    request: ScheduledTaskConfigRequest,
+) -> ScheduledTaskConfig:
+    return ScheduledTaskConfig(
+        target=ScheduledTaskTarget(
+            type=request.target.type,
+            artist_id=request.target.artist_id,
+            tag=request.target.tag,
+            days=request.target.days,
+        ),
+        filters=tuple(
+            ScheduledTaskFilter(type=item.type, days=item.days)
+            for item in request.filters
+        ),
+        actions=tuple(request.actions) or ("download_artist",),
+        max_artists_per_run=request.max_artists_per_run,
+    )
+
+
+def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[str, object]:
+    if config is None:
+        return {}
+    return {
+        "target": {
+            "type": config.target.type,
+            "artist_id": config.target.artist_id,
+            "tag": config.target.tag,
+            "days": config.target.days,
+        },
+        "filters": [
+            {
+                "type": item.type,
+                "days": item.days,
+            }
+            for item in config.filters
+        ],
+        "actions": list(config.actions),
+        "max_artists_per_run": config.max_artists_per_run,
+    }

@@ -9,12 +9,15 @@ import {
   runScheduledTask,
   updateScheduledTask,
   type ScheduledTask,
-  type ScheduledTaskAction
+  type ScheduledTaskAction,
+  type ScheduledTaskConfig,
+  type ScheduledTaskFilterType,
+  type ScheduledTaskTargetType
 } from "@/api/scheduledTasks";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
@@ -22,20 +25,32 @@ import { formatDate } from "@/lib/utils";
 
 type FormState = {
   name: string;
-  action: ScheduledTaskAction;
-  target_artist_id: string;
   interval_days: number;
   enabled: boolean;
   run_after_startup: boolean;
+  target_type: ScheduledTaskTargetType;
+  artist_id: string;
+  tag: string;
+  stale_target_days: number;
+  filters: ScheduledTaskFilterType[];
+  stale_filter_days: number;
+  actions: ScheduledTaskAction[];
+  max_artists_per_run: number;
 };
 
 const initialForm: FormState = {
   name: "",
-  action: "download_artist",
-  target_artist_id: "",
   interval_days: 30,
   enabled: true,
-  run_after_startup: true
+  run_after_startup: true,
+  target_type: "single_artist",
+  artist_id: "",
+  tag: "",
+  stale_target_days: 30,
+  filters: [],
+  stale_filter_days: 30,
+  actions: ["download_artist"],
+  max_artists_per_run: 25
 };
 
 const actionLabels: Record<ScheduledTaskAction, string> = {
@@ -43,6 +58,20 @@ const actionLabels: Record<ScheduledTaskAction, string> = {
   download_artist: "Download updates",
   retry_failed_artist: "Retry failed files"
 };
+
+const targetLabels: Record<ScheduledTaskTargetType, string> = {
+  single_artist: "Single artist",
+  all_artists: "All artists",
+  artists_with_tag: "Artists with tag",
+  artists_not_checked: "Artists not checked"
+};
+
+const filterLabels: Record<ScheduledTaskFilterType, string> = {
+  last_checked_before_days: "Last checked before",
+  has_failed_files: "Has failed files"
+};
+
+const ACTION_ERROR = "Select at least one action.";
 
 export function ScheduledTasksPage(): JSX.Element {
   const queryClient = useQueryClient();
@@ -58,9 +87,13 @@ export function ScheduledTasksPage(): JSX.Element {
   const createMutation = useMutation({
     mutationFn: () =>
       createScheduledTask({
-        ...form,
-        target_artist_id: form.target_artist_id.trim(),
-        name: form.name.trim()
+        name: form.name.trim(),
+        action: form.actions[0],
+        target_artist_id: form.target_type === "single_artist" ? form.artist_id.trim() : "",
+        interval_days: form.interval_days,
+        enabled: form.enabled,
+        run_after_startup: form.run_after_startup,
+        config: formToConfig(form)
       }),
     onSuccess: () => {
       pushToast({ title: "Scheduled task created", tone: "success" });
@@ -68,17 +101,15 @@ export function ScheduledTasksPage(): JSX.Element {
       setFieldError(null);
       void queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
     },
-    onError: (error) => pushToast({ title: "Task could not be created", description: error.message, tone: "error" })
+    onError: (error) =>
+      pushToast({ title: "Task could not be created", description: error.message, tone: "error" })
   });
 
   const submit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!/^\d+$/.test(form.target_artist_id.trim())) {
-      setFieldError("Artist ID must contain digits only.");
-      return;
-    }
-    if (!Number.isInteger(form.interval_days) || form.interval_days < 1) {
-      setFieldError("Interval must be a whole number of at least 1.");
+    const error = validateForm(form);
+    if (error) {
+      setFieldError(error);
       return;
     }
     createMutation.mutate();
@@ -88,7 +119,7 @@ export function ScheduledTasksPage(): JSX.Element {
     <>
       <PageHeader
         title="Schedules"
-        description="Create recurring sync, download, and retry jobs for Pixiv artists."
+        description="Build recurring artist workflows from target, filter, and action modules."
         actions={
           <Button type="button" variant="outline" onClick={() => void tasks.refetch()} disabled={tasks.isFetching}>
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -96,70 +127,164 @@ export function ScheduledTasksPage(): JSX.Element {
           </Button>
         }
       />
-      <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-[420px_minmax(0,1fr)]">
-        <form className="surface space-y-4 p-4" onSubmit={submit}>
-          <div>
-            <h2 className="text-sm font-semibold">New Schedule</h2>
-          </div>
-          <Field label="Name">
-            <Input
-              value={form.name}
-              placeholder="Monthly artist updates"
-              onChange={(event) => setForm({ ...form, name: event.target.value })}
-            />
-          </Field>
-          <Field label="Action">
-            <Select
-              value={form.action}
-              onChange={(event) => setForm({ ...form, action: event.target.value as ScheduledTaskAction })}
-            >
-              {Object.entries(actionLabels).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Pixiv artist ID" error={fieldError ?? undefined}>
-            <Input
-              inputMode="numeric"
-              value={form.target_artist_id}
-              placeholder="123456"
-              aria-invalid={Boolean(fieldError)}
-              onChange={(event) => setForm({ ...form, target_artist_id: event.target.value })}
-            />
-          </Field>
-          <Field label="Interval days">
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              value={form.interval_days}
-              onChange={(event) => setForm({ ...form, interval_days: Math.max(1, Number(event.target.value)) })}
-            />
-          </Field>
-          <div className="space-y-3 rounded-md border bg-muted/30 p-3">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.enabled}
-                onChange={(event) => setForm({ ...form, enabled: event.target.checked })}
+      <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-[460px_minmax(0,1fr)]">
+        <form className="space-y-4" onSubmit={submit}>
+          <section className="surface space-y-4 p-4">
+            <div>
+              <h2 className="text-sm font-semibold">Workflow</h2>
+            </div>
+            <Field label="Name">
+              <Input
+                value={form.name}
+                placeholder="Monthly favorite updates"
+                onChange={(event) => setForm({ ...form, name: event.target.value })}
               />
-              Enabled
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={form.run_after_startup}
-                onChange={(event) => setForm({ ...form, run_after_startup: event.target.checked })}
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Interval days">
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.interval_days}
+                  onChange={(event) =>
+                    setForm({ ...form, interval_days: Math.max(1, Number(event.target.value)) })
+                  }
+                />
+              </Field>
+              <Field label="Max artists per run">
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.max_artists_per_run}
+                  onChange={(event) =>
+                    setForm({ ...form, max_artists_per_run: Math.max(1, Number(event.target.value)) })
+                  }
+                />
+              </Field>
+            </div>
+            <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.enabled}
+                  onChange={(event) => setForm({ ...form, enabled: event.target.checked })}
+                />
+                Enabled
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.run_after_startup}
+                  onChange={(event) => setForm({ ...form, run_after_startup: event.target.checked })}
+                />
+                Run on restart
+              </label>
+            </div>
+          </section>
+
+          <section className="surface space-y-4 p-4">
+            <h2 className="text-sm font-semibold">Target</h2>
+            <Field label="Target type">
+              <Select
+                value={form.target_type}
+                onChange={(event) =>
+                  setForm({ ...form, target_type: event.target.value as ScheduledTaskTargetType })
+                }
+              >
+                {Object.entries(targetLabels).map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {form.target_type === "single_artist" ? (
+              <Field label="Pixiv artist ID" error={fieldError ?? undefined}>
+                <Input
+                  inputMode="numeric"
+                  value={form.artist_id}
+                  placeholder="123456"
+                  aria-invalid={Boolean(fieldError)}
+                  onChange={(event) => setForm({ ...form, artist_id: event.target.value })}
+                />
+              </Field>
+            ) : null}
+            {form.target_type === "artists_with_tag" ? (
+              <Field label="Local tag" error={fieldError ?? undefined}>
+                <Input
+                  value={form.tag}
+                  placeholder="favorite"
+                  aria-invalid={Boolean(fieldError)}
+                  onChange={(event) => setForm({ ...form, tag: event.target.value })}
+                />
+              </Field>
+            ) : null}
+            {form.target_type === "artists_not_checked" ? (
+              <Field label="Not checked for days">
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.stale_target_days}
+                  onChange={(event) =>
+                    setForm({ ...form, stale_target_days: Math.max(1, Number(event.target.value)) })
+                  }
+                />
+              </Field>
+            ) : null}
+          </section>
+
+          <section className="surface space-y-4 p-4">
+            <h2 className="text-sm font-semibold">Filters</h2>
+            <ModuleCheckbox
+              checked={form.filters.includes("last_checked_before_days")}
+              label={filterLabels.last_checked_before_days}
+              onChange={(checked) => setForm({ ...form, filters: toggleItem(form.filters, "last_checked_before_days", checked) })}
+            />
+            {form.filters.includes("last_checked_before_days") ? (
+              <Field label="Older than days">
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={form.stale_filter_days}
+                  onChange={(event) =>
+                    setForm({ ...form, stale_filter_days: Math.max(1, Number(event.target.value)) })
+                  }
+                />
+              </Field>
+            ) : null}
+            <ModuleCheckbox
+              checked={form.filters.includes("has_failed_files")}
+              label={filterLabels.has_failed_files}
+              onChange={(checked) => setForm({ ...form, filters: toggleItem(form.filters, "has_failed_files", checked) })}
+            />
+          </section>
+
+          <section className={`surface space-y-4 p-4 ${fieldError === ACTION_ERROR ? "border-destructive" : ""}`}>
+            <h2 className="text-sm font-semibold">Actions</h2>
+            {(Object.keys(actionLabels) as ScheduledTaskAction[]).map((action) => (
+              <ModuleCheckbox
+                key={action}
+                checked={form.actions.includes(action)}
+                label={actionLabels[action]}
+                onChange={(checked) => setForm({ ...form, actions: toggleItem(form.actions, action, checked) })}
               />
-              Run missed schedule after startup
-            </label>
-          </div>
-          <Button type="submit" className="w-full" disabled={createMutation.isPending}>
-            <CalendarClock className="h-4 w-4" aria-hidden="true" />
-            Create Schedule
-          </Button>
+            ))}
+            {fieldError === ACTION_ERROR ? <p className="text-sm text-destructive">{ACTION_ERROR}</p> : null}
+          </section>
+
+          <section className="surface p-4">
+            <h2 className="text-sm font-semibold">Preview</h2>
+            <p className="mt-2 text-sm text-muted-foreground">{previewText(form)}</p>
+            {fieldError ? <p className="mt-3 text-sm text-destructive">{fieldError}</p> : null}
+            <Button type="submit" className="mt-4 w-full" disabled={createMutation.isPending}>
+              <CalendarClock className="h-4 w-4" aria-hidden="true" />
+              Create Schedule
+            </Button>
+          </section>
         </form>
 
         <section>
@@ -190,8 +315,8 @@ function TaskRow({ task }: { task: ScheduledTask }): JSX.Element {
     mutationFn: () => runScheduledTask(task.id),
     onSuccess: (response) => {
       pushToast({
-        title: response.created ? "Job queued" : response.skipped ? "Schedule skipped" : "Schedule checked",
-        description: response.job_id ?? response.task.last_error_message ?? undefined,
+        title: response.created ? "Jobs queued" : response.skipped ? "Schedule skipped" : "Schedule checked",
+        description: response.job_ids.length ? `${response.job_ids.length} job(s)` : response.task.last_error_message ?? undefined,
         tone: response.task.status === "blocked" ? "error" : "success"
       });
       invalidate();
@@ -223,7 +348,7 @@ function TaskRow({ task }: { task: ScheduledTask }): JSX.Element {
             <StatusPill status={task.status} />
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            {actionLabels[task.action]} · User {task.target_artist_id} · every {task.interval_days} days
+            {taskSummary(task)}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -252,7 +377,7 @@ function TaskRow({ task }: { task: ScheduledTask }): JSX.Element {
         <Detail label="Next run" value={formatDate(task.next_run_at)} />
         <Detail label="Last run" value={formatDate(task.last_run_at)} />
         <Detail label="Last success" value={formatDate(task.last_success_at)} />
-        <Detail label="Last job" value={task.last_job_id ?? "-"} />
+        <Detail label="Last jobs" value={lastJobCount(task)} />
       </dl>
       {blocked && task.last_error_message ? (
         <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
@@ -260,6 +385,83 @@ function TaskRow({ task }: { task: ScheduledTask }): JSX.Element {
         </p>
       ) : null}
     </article>
+  );
+}
+
+function formToConfig(form: FormState): ScheduledTaskConfig {
+  return {
+    target: {
+      type: form.target_type,
+      artist_id: form.target_type === "single_artist" ? form.artist_id.trim() : null,
+      tag: form.target_type === "artists_with_tag" ? form.tag.trim() : null,
+      days: form.target_type === "artists_not_checked" ? form.stale_target_days : null
+    },
+    filters: form.filters.map((filter) => ({
+      type: filter,
+      days: filter === "last_checked_before_days" ? form.stale_filter_days : null
+    })),
+    actions: form.actions,
+    max_artists_per_run: form.max_artists_per_run
+  };
+}
+
+function validateForm(form: FormState): string | null {
+  if (form.target_type === "single_artist" && !/^\d+$/.test(form.artist_id.trim())) {
+    return "Artist ID must contain digits only.";
+  }
+  if (form.target_type === "artists_with_tag" && !form.tag.trim()) {
+    return "Local tag is required.";
+  }
+  if (form.actions.length === 0) {
+    return ACTION_ERROR;
+  }
+  return null;
+}
+
+function previewText(form: FormState): string {
+  const target = targetLabels[form.target_type];
+  const filters = form.filters.length ? form.filters.map((filter) => filterLabels[filter]).join(", ") : "no filters";
+  const actions = form.actions.map((action) => actionLabels[action]).join(" then ");
+  return `${target}, ${filters}, ${actions || "no actions"}, every ${form.interval_days} days.`;
+}
+
+function taskSummary(task: ScheduledTask): string {
+  const config = task.config;
+  const target = targetLabels[config.target.type] ?? config.target.type;
+  const actions = config.actions.map((action) => actionLabels[action]).join(" then ");
+  return `${target} · ${actions} · every ${task.interval_days} days`;
+}
+
+function lastJobCount(task: ScheduledTask): string {
+  const count = task.last_run_summary?.created_jobs;
+  return typeof count === "number" ? String(count) : task.last_job_id ?? "-";
+}
+
+function toggleItem<T>(items: T[], item: T, checked: boolean): T[] {
+  if (checked) {
+    return items.includes(item) ? items : [...items, item];
+  }
+  return items.filter((value) => value !== item);
+}
+
+function ModuleCheckbox({
+  checked,
+  label,
+  onChange
+}: {
+  checked: boolean;
+  label: string;
+  onChange: (checked: boolean) => void;
+}): JSX.Element {
+  return (
+    <label className="flex min-h-9 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+      {label}
+    </label>
   );
 }
 

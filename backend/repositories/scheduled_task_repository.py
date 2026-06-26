@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
 from backend.core.errors import DatabaseError
 from backend.db.connection import connect
-from backend.domain.entities import ScheduledTask
+from backend.domain.entities import (
+    ScheduledTask,
+    ScheduledTaskConfig,
+    ScheduledTaskFilter,
+    ScheduledTaskTarget,
+)
 from backend.repositories._time import utc_now
 
 
@@ -34,10 +40,12 @@ class ScheduledTaskRepository:
                         last_job_id,
                         last_error_code,
                         last_error_message,
+                        config_json,
+                        last_run_summary_json,
                         created_at,
                         updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     scheduled_task_values(created, include_id=False),
                 )
@@ -66,6 +74,8 @@ class ScheduledTaskRepository:
                         last_job_id = ?,
                         last_error_code = ?,
                         last_error_message = ?,
+                        config_json = ?,
+                        last_run_summary_json = ?,
                         updated_at = ?
                     WHERE id = ?
                     """,
@@ -143,6 +153,8 @@ def scheduled_task_values(
         task.last_job_id,
         task.last_error_code,
         task.last_error_message,
+        task_config_json(task),
+        json.dumps(task.last_run_summary) if task.last_run_summary is not None else None,
     ]
     if include_created_at:
         values.append(task.created_at)
@@ -167,6 +179,125 @@ def scheduled_task_from_row(row: sqlite3.Row) -> ScheduledTask:
         last_job_id=str(row["last_job_id"]) if row["last_job_id"] else None,
         last_error_code=str(row["last_error_code"]) if row["last_error_code"] else None,
         last_error_message=str(row["last_error_message"]) if row["last_error_message"] else None,
+        config=task_config_from_row(row),
+        last_run_summary=json.loads(row["last_run_summary_json"])
+        if row["last_run_summary_json"]
+        else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
+
+
+def task_config_json(task: ScheduledTask) -> str:
+    config = task.config or legacy_task_config(task)
+    return json.dumps(scheduled_task_config_to_dict(config), ensure_ascii=False)
+
+
+def task_config_from_row(row: sqlite3.Row) -> ScheduledTaskConfig:
+    try:
+        config_json = row["config_json"]
+    except IndexError:
+        config_json = None
+    if config_json:
+        return scheduled_task_config_from_dict(json.loads(config_json))
+    return legacy_task_config(
+        ScheduledTask(
+            id=int(row["id"]),
+            name=str(row["name"]),
+            action=row["action"],
+            status=row["status"],
+            target_artist_id=str(row["target_artist_id"]),
+            interval_days=int(row["interval_days"]),
+        )
+    )
+
+
+def legacy_task_config(task: ScheduledTask) -> ScheduledTaskConfig:
+    return ScheduledTaskConfig(
+        target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
+        actions=(task.action,),
+    )
+
+
+def scheduled_task_config_to_dict(config: ScheduledTaskConfig) -> dict[str, object]:
+    return {
+        "target": {
+            "type": config.target.type,
+            "artist_id": config.target.artist_id,
+            "tag": config.target.tag,
+            "days": config.target.days,
+        },
+        "filters": [
+            {
+                "type": item.type,
+                "days": item.days,
+            }
+            for item in config.filters
+        ],
+        "actions": list(config.actions),
+        "max_artists_per_run": config.max_artists_per_run,
+    }
+
+
+def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskConfig:
+    target_data = data.get("target", {})
+    if not isinstance(target_data, dict):
+        target_data = {}
+    filter_values = data.get("filters", [])
+    filters: list[ScheduledTaskFilter] = []
+    if isinstance(filter_values, list):
+        for value in filter_values:
+            if not isinstance(value, dict):
+                continue
+            filter_type = value.get("type")
+            if filter_type not in {"last_checked_before_days", "has_failed_files"}:
+                continue
+            filters.append(
+                ScheduledTaskFilter(
+                    type=filter_type,
+                    days=optional_int(value.get("days")),
+                )
+            )
+    action_values = data.get("actions", ["download_artist"])
+    actions = tuple(
+        action
+        for action in action_values
+        if action in {"sync_artist", "download_artist", "retry_failed_artist"}
+    )
+    if not actions:
+        actions = ("download_artist",)
+    target_type = target_data.get("type")
+    if target_type not in {
+        "single_artist",
+        "all_artists",
+        "artists_with_tag",
+        "artists_not_checked",
+    }:
+        target_type = "single_artist"
+    return ScheduledTaskConfig(
+        target=ScheduledTaskTarget(
+            type=target_type,
+            artist_id=optional_str(target_data.get("artist_id")),
+            tag=optional_str(target_data.get("tag")),
+            days=optional_int(target_data.get("days")),
+        ),
+        filters=tuple(filters),
+        actions=actions,
+        max_artists_per_run=max(1, optional_int(data.get("max_artists_per_run")) or 25),
+    )
+
+
+def optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None

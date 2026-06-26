@@ -2,6 +2,23 @@ import { apiRequest } from "./client";
 
 export type ScheduledTaskAction = "sync_artist" | "download_artist" | "retry_failed_artist";
 export type ScheduledTaskStatus = "active" | "paused" | "blocked";
+export type ScheduledTaskTargetType = "single_artist" | "all_artists" | "artists_with_tag" | "artists_not_checked";
+export type ScheduledTaskFilterType = "last_checked_before_days" | "has_failed_files";
+
+export type ScheduledTaskConfig = {
+  target: {
+    type: ScheduledTaskTargetType;
+    artist_id?: string | null;
+    tag?: string | null;
+    days?: number | null;
+  };
+  filters: Array<{
+    type: ScheduledTaskFilterType;
+    days?: number | null;
+  }>;
+  actions: ScheduledTaskAction[];
+  max_artists_per_run: number;
+};
 
 export type ScheduledTask = {
   id: number;
@@ -17,6 +34,8 @@ export type ScheduledTask = {
   last_job_id: string | null;
   last_error_code: string | null;
   last_error_message: string | null;
+  config: ScheduledTaskConfig;
+  last_run_summary: Record<string, unknown> | null;
   created_at: string | null;
   updated_at: string | null;
 };
@@ -33,6 +52,7 @@ export type ScheduledTaskCreateRequest = {
   interval_days: number;
   enabled: boolean;
   run_after_startup: boolean;
+  config?: ScheduledTaskConfig;
 };
 
 export type ScheduledTaskUpdateRequest = Partial<{
@@ -42,11 +62,13 @@ export type ScheduledTaskUpdateRequest = Partial<{
   target_artist_id: string;
   interval_days: number;
   run_after_startup: boolean;
+  config: ScheduledTaskConfig;
 }>;
 
 export type ScheduledTaskRunResponse = {
   task: ScheduledTask;
   job_id: string | null;
+  job_ids: string[];
   created: boolean;
   skipped: boolean;
 };

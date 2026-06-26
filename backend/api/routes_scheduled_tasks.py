@@ -10,6 +10,7 @@ from backend.schemas.scheduled_tasks import (
     ScheduledTaskResponse,
     ScheduledTaskRunResponse,
     ScheduledTaskUpdateRequest,
+    scheduled_task_config_from_request,
     scheduled_task_response,
 )
 from backend.services.scheduled_task_service import ScheduledTaskService
@@ -42,14 +43,24 @@ def create_scheduled_task(
     queue: Queue,
 ) -> ScheduledTaskResponse:
     service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    config = (
+        scheduled_task_config_from_request(request.config)
+        if request.config is not None
+        else None
+    )
+    action = request.action or (config.actions[0] if config is not None else "download_artist")
+    target_artist_id = request.target_artist_id or (
+        config.target.artist_id if config is not None and config.target.artist_id else ""
+    )
     try:
         task = service.create_task(
             name=request.name,
-            action=request.action,
-            target_artist_id=request.target_artist_id,
+            action=action,
+            target_artist_id=target_artist_id,
             interval_days=request.interval_days,
             enabled=request.enabled,
             run_after_startup=request.run_after_startup,
+            config=config,
         )
     finally:
         service.close()
@@ -66,6 +77,11 @@ def update_scheduled_task(
     settings_json_path: SettingsJsonPath,
 ) -> ScheduledTaskResponse:
     service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    config = (
+        scheduled_task_config_from_request(request.config)
+        if request.config is not None
+        else None
+    )
     try:
         task = service.update_task(
             task_id,
@@ -75,6 +91,7 @@ def update_scheduled_task(
             target_artist_id=request.target_artist_id,
             interval_days=request.interval_days,
             run_after_startup=request.run_after_startup,
+            config=config,
         )
         if task is None:
             raise JobNotFoundError(f"scheduled task {task_id} was not found")
@@ -100,6 +117,7 @@ def run_scheduled_task(
     return ScheduledTaskRunResponse(
         task=scheduled_task_response(result.task),
         job_id=result.job.id if result.job is not None else None,
+        job_ids=[job.id for job in result.jobs],
         created=result.created,
         skipped=result.skipped,
     )

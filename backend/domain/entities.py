@@ -9,7 +9,9 @@ from backend.domain.types import (
     JobStatus,
     JobType,
     ScheduledTaskAction,
+    ScheduledTaskFilterType,
     ScheduledTaskStatus,
+    ScheduledTaskTargetType,
 )
 
 
@@ -115,5 +117,29 @@ class ScheduledTask:
     last_job_id: str | None = None
     last_error_code: str | None = None
     last_error_message: str | None = None
+    config: ScheduledTaskConfig | None = None
+    last_run_summary: dict[str, object] | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduledTaskTarget:
+    type: ScheduledTaskTargetType
+    artist_id: str | None = None
+    tag: str | None = None
+    days: int | None = None
+
+
+@dataclass(frozen=True)
+class ScheduledTaskFilter:
+    type: ScheduledTaskFilterType
+    days: int | None = None
+
+
+@dataclass(frozen=True)
+class ScheduledTaskConfig:
+    target: ScheduledTaskTarget
+    filters: tuple[ScheduledTaskFilter, ...] = ()
+    actions: tuple[ScheduledTaskAction, ...] = ("download_artist",)
+    max_artists_per_run: int = 25

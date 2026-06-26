@@ -17,7 +17,7 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
 
     applied = migrate_database(db_path, settings_json_path=tmp_path / "ignored.json")
 
-    assert [migration.version for migration in applied] == ["001", "002", "003", "004"]
+    assert [migration.version for migration in applied] == ["001", "002", "003", "004", "005"]
     assert {
         "schema_migrations",
         "artists",
@@ -45,6 +45,6 @@ def test_migration_is_idempotent(tmp_path):
     finally:
         conn.close()
 
-    assert len(first_applied) == 4
+    assert len(first_applied) == 5
     assert second_applied == []
-    assert migration_count == 4
+    assert migration_count == 5
