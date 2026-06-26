@@ -113,10 +113,12 @@ npm run build
 
 ## 文档
 
-- [项目概览](docs/project-overview.md)
-- [WebUI 架构](docs/webui-architecture.md)
-- [数据库迁移](docs/database-migrations.md)
-- [UI 验证说明](docs/ui-verification.md)
+- [文档入口](docs/README.md)
+- [快速开始](docs/getting-started.md)
+- [架构](docs/architecture.md)
+- [部署](docs/deployment.md)
+- [数据库](docs/database.md)
+- [开发指南](docs/development.md)
 
 ## 打包说明
 

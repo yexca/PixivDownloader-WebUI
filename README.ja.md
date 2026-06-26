@@ -113,10 +113,12 @@ npm run build
 
 ## ドキュメント
 
-- [Project overview](docs/project-overview.md)
-- [WebUI architecture](docs/webui-architecture.md)
-- [Database migrations](docs/database-migrations.md)
-- [UI verification notes](docs/ui-verification.md)
+- [Documentation index](docs/README.md)
+- [Getting Started](docs/getting-started.md)
+- [Architecture](docs/architecture.md)
+- [Deployment](docs/deployment.md)
+- [Database](docs/database.md)
+- [Development Guide](docs/development.md)
 
 ## パッケージングメモ
 
