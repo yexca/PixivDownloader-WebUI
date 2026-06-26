@@ -85,6 +85,7 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         "request_base_delay_seconds": settings.request_base_delay_seconds,
         "request_random_delay_seconds": settings.request_random_delay_seconds,
         "max_concurrent_downloads": settings.max_concurrent_downloads,
+        "min_free_space_gb": settings.min_free_space_gb,
         "overwrite_existing_files": settings.overwrite_existing_files,
         "skip_existing_files": settings.skip_existing_files,
     }

@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from backend.domain.types import ArtworkFileStatus, JobEventLevel, JobStatus, JobType
+from backend.domain.types import (
+    ArtworkFileStatus,
+    JobEventLevel,
+    JobStatus,
+    JobType,
+    ScheduledTaskAction,
+    ScheduledTaskStatus,
+)
 
 
 @dataclass(frozen=True)
@@ -91,3 +98,22 @@ class JobEvent:
     payload: dict[str, object] | None = None
     id: int | None = None
     created_at: str | None = None
+
+
+@dataclass(frozen=True)
+class ScheduledTask:
+    id: int | None
+    name: str
+    action: ScheduledTaskAction
+    status: ScheduledTaskStatus
+    target_artist_id: str
+    interval_days: int
+    run_after_startup: bool = True
+    last_run_at: str | None = None
+    last_success_at: str | None = None
+    next_run_at: str | None = None
+    last_job_id: str | None = None
+    last_error_code: str | None = None
+    last_error_message: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None

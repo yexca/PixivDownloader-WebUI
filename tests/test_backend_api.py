@@ -46,6 +46,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
             "request_base_delay_seconds": 0.2,
             "request_random_delay_seconds": 0.3,
             "max_concurrent_downloads": 2,
+            "min_free_space_gb": 10.0,
             "overwrite_existing_files": False,
             "skip_existing_files": True,
         },
@@ -56,6 +57,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["download_path"].endswith("new-downloads")
     assert body["download_path_editable"] is True
     assert body["runtime_mode"] == "local"
+    assert body["min_free_space_gb"] == 10.0
     assert body["refresh_token_configured"] is True
     assert body["refresh_token_preview"] == "secr...oken"
 
@@ -86,6 +88,7 @@ def test_settings_download_path_is_fixed_in_docker_runtime(tmp_path, monkeypatch
             "request_base_delay_seconds": 0.2,
             "request_random_delay_seconds": 0.3,
             "max_concurrent_downloads": 2,
+            "min_free_space_gb": 10.0,
             "overwrite_existing_files": False,
             "skip_existing_files": True,
         },
@@ -320,6 +323,89 @@ def test_create_download_job(tmp_path):
         repository.close()
 
 
+def test_create_download_job_rejects_low_disk_space(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+
+    monkeypatch.setattr(
+        "backend.services.storage_service.shutil.disk_usage",
+        lambda _path: SimpleNamespace(free=1024, total=2048, used=1024),
+    )
+
+    response = client.post(
+        "/api/downloads",
+        json={
+            "user_id": "123",
+            "artwork_id": None,
+            "mode": "artist",
+            "force_rescan": False,
+            "retry_failed": False,
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "insufficient_disk_space"
+
+
+def test_scheduled_task_create_and_run_queues_job(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Artist updates",
+            "action": "download_artist",
+            "target_artist_id": "123",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+
+    assert create_response.status_code == 200
+    task = create_response.json()
+    assert task["status"] == "active"
+    assert queue.wake_count == 1
+
+    run_response = client.post(f"/api/scheduled-tasks/{task['id']}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    assert body["created"] is True
+    assert body["job_id"]
+    assert body["task"]["last_job_id"] == body["job_id"]
+    assert queue.wake_count == 2
+
+
+def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Artist updates",
+            "action": "download_artist",
+            "target_artist_id": "123",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+    task_id = create_response.json()["id"]
+
+    monkeypatch.setattr(
+        "backend.services.storage_service.shutil.disk_usage",
+        lambda _path: SimpleNamespace(free=1024, total=2048, used=1024),
+    )
+
+    run_response = client.post(f"/api/scheduled-tasks/{task_id}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    assert body["created"] is False
+    assert body["task"]["status"] == "blocked"
+    assert body["task"]["last_error_code"] == "insufficient_disk_space"
+
+
 def test_create_artist_queues_sync_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
@@ -425,6 +511,7 @@ def make_client(tmp_path, queue=None):
             "request_base_delay_seconds": 0.1,
             "request_random_delay_seconds": 0.2,
             "max_concurrent_downloads": 1,
+            "min_free_space_gb": 10.0,
             "overwrite_existing_files": false,
             "skip_existing_files": true
         }}

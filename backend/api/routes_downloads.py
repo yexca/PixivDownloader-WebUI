@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from backend.api.dependencies import DbPath, Queue
+from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.downloads import DownloadCreateRequest, DownloadCreateResponse
 from backend.services.job_service import JobService
 
@@ -13,9 +13,10 @@ router = APIRouter(prefix="/api/downloads", tags=["downloads"])
 def create_download(
     request: DownloadCreateRequest,
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
-    service = JobService(db_path)
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         job = service.create_download_job(
             user_id=request.user_id,

@@ -131,6 +131,36 @@ class JobRepository:
             raise DatabaseError("failed to fetch next queued job") from exc
         return job_from_row(row) if row is not None else None
 
+    def find_active(
+        self,
+        *,
+        job_type: str,
+        user_id: str | None = None,
+        artwork_id: str | None = None,
+    ) -> Job | None:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE type = ?
+                  AND status IN ('queued', 'running')
+                  AND (
+                    (? IS NULL AND input_user_id IS NULL)
+                    OR input_user_id = ?
+                  )
+                  AND (
+                    (? IS NULL AND input_artwork_id IS NULL)
+                    OR input_artwork_id = ?
+                  )
+                ORDER BY created_at
+                LIMIT 1
+                """,
+                (job_type, user_id, user_id, artwork_id, artwork_id),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to find active job") from exc
+        return job_from_row(row) if row is not None else None
+
     def list(self, *, status: str | None = None, limit: int = 50, offset: int = 0) -> list[Job]:
         sql = "SELECT * FROM jobs"
         params: list[object] = []

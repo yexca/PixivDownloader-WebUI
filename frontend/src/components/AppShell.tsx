@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, Briefcase, Download, Home, Library, Menu, ScrollText, Settings, X } from "lucide-react";
+import { Activity, Briefcase, CalendarClock, Download, Home, Library, Menu, ScrollText, Settings, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getHealth } from "@/api/health";
@@ -14,6 +14,7 @@ const navItems = [
   { to: "/download", label: "Download", icon: Download },
   { to: "/library", label: "Library", icon: Library },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
+  { to: "/jobs/schedules", label: "Schedules", icon: CalendarClock },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/logs", label: "Logs", icon: ScrollText }
 ];
@@ -127,7 +128,7 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }): JSX.Element {
         <NavLink
           key={item.to}
           to={item.to}
-          end={item.to === "/"}
+          end
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(

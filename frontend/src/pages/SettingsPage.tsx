@@ -48,6 +48,7 @@ type BasicForm = Pick<
   | "request_base_delay_seconds"
   | "request_random_delay_seconds"
   | "max_concurrent_downloads"
+  | "min_free_space_gb"
   | "overwrite_existing_files"
   | "skip_existing_files"
 >;
@@ -478,7 +479,7 @@ function BasicSettingsTab({
 
       <SettingsSection title="Requests and performance" description="Tune Pixiv request pacing and download concurrency.">
         <div className="space-y-3">
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
               label="Base delay seconds"
               value={form.request_base_delay_seconds}
@@ -493,6 +494,11 @@ function BasicSettingsTab({
               tooltip="Extra random wait from 0 up to this many seconds, added on top of the base delay."
               onChange={(value) => onChange({ ...form, request_random_delay_seconds: value })}
             />
+          </div>
+          <p className="text-xs leading-5 text-muted-foreground">
+            Each request waits base delay + random(0, random delay) seconds before running.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
               label="Max concurrent"
               value={form.max_concurrent_downloads}
@@ -502,10 +508,16 @@ function BasicSettingsTab({
               tooltip="Maximum number of downloads allowed to run at the same time. Minimum is 1."
               onChange={(value) => onChange({ ...form, max_concurrent_downloads: Math.max(1, value) })}
             />
+            <NumberField
+              label="Minimum free GB"
+              value={form.min_free_space_gb}
+              error={errors.min_free_space_gb}
+              min={0}
+              step={0.5}
+              tooltip="Download jobs are not created when the download disk has less free space than this value."
+              onChange={(value) => onChange({ ...form, min_free_space_gb: Math.max(0, value) })}
+            />
           </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            Each request waits base delay + random(0, random delay) seconds before running.
-          </p>
         </div>
       </SettingsSection>
 
@@ -886,6 +898,7 @@ function toBasicForm(settings: SettingsResponse): BasicForm {
     request_base_delay_seconds: settings.request_base_delay_seconds,
     request_random_delay_seconds: settings.request_random_delay_seconds,
     max_concurrent_downloads: settings.max_concurrent_downloads,
+    min_free_space_gb: settings.min_free_space_gb,
     overwrite_existing_files: settings.overwrite_existing_files,
     skip_existing_files: settings.skip_existing_files
   };
@@ -904,6 +917,9 @@ function validateBasic(form: BasicForm, downloadPathEditable: boolean): Record<s
   }
   if (form.max_concurrent_downloads < 1 || !Number.isInteger(form.max_concurrent_downloads)) {
     errors.max_concurrent_downloads = "Must be a whole number of at least 1.";
+  }
+  if (form.min_free_space_gb < 0) {
+    errors.min_free_space_gb = "Must be zero or greater.";
   }
   return errors;
 }

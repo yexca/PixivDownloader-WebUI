@@ -9,6 +9,7 @@ export type SettingsResponse = {
   request_base_delay_seconds: number;
   request_random_delay_seconds: number;
   max_concurrent_downloads: number;
+  min_free_space_gb: number;
   overwrite_existing_files: boolean;
   skip_existing_files: boolean;
 };
@@ -19,6 +20,7 @@ export type SettingsUpdateRequest = {
   request_base_delay_seconds?: number;
   request_random_delay_seconds?: number;
   max_concurrent_downloads?: number;
+  min_free_space_gb?: number;
   overwrite_existing_files?: boolean;
   skip_existing_files?: boolean;
 };

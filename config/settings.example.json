@@ -4,6 +4,7 @@
     "request_base_delay_seconds": 0.0,
     "request_random_delay_seconds": 2.0,
     "max_concurrent_downloads": 1,
+    "min_free_space_gb": 10.0,
     "overwrite_existing_files": false,
     "skip_existing_files": true
 }

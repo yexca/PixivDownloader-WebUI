@@ -19,11 +19,13 @@ from backend.api import (
     routes_imports,
     routes_jobs,
     routes_logs,
+    routes_scheduled_tasks,
     routes_settings,
 )
 from backend.core.errors import (
     ConfigError,
     DatabaseError,
+    InsufficientDiskSpaceError,
     JobNotCancellableError,
     JobNotFoundError,
     PixivApiError,
@@ -34,6 +36,7 @@ from backend.db.migrate import migrate_database
 from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
 from backend.services.pixiv_oauth import PixivOAuthFlowStore
 from backend.workers.job_queue import JobQueue
+from backend.workers.scheduled_task_runner import ScheduledTaskRunner
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +52,15 @@ def create_app(
     async def lifespan(app: FastAPI):
         migrate_database(db_path, settings_json_path=settings_json_path)
         queue = app.state.job_queue
+        scheduler = app.state.scheduled_task_runner
         if start_queue:
             await queue.start()
+            await scheduler.start()
         try:
             yield
         finally:
             if start_queue:
+                await scheduler.stop()
                 await queue.stop()
 
     app = FastAPI(title="PixivDownloader API", version="1.0.0", lifespan=lifespan)
@@ -66,6 +72,11 @@ def create_app(
         db_path=db_path,
         settings_json_path=settings_json_path,
     )
+    app.state.scheduled_task_runner = ScheduledTaskRunner(
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+        queue=app.state.job_queue,
+    )
     app.state.pixiv_oauth_flow_store = PixivOAuthFlowStore()
     app.state.pixiv_browser_auth_store = PixivBrowserAuthStore()
     app.include_router(routes_health.router)
@@ -73,6 +84,7 @@ def create_app(
     app.include_router(routes_downloads.router)
     app.include_router(routes_imports.router)
     app.include_router(routes_jobs.router)
+    app.include_router(routes_scheduled_tasks.router)
     app.include_router(routes_artists.router)
     app.include_router(routes_artwork_files.router)
     app.include_router(routes_logs.router)
@@ -109,6 +121,13 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(DatabaseError)
     async def database_exception_handler(_request: Request, exc: DatabaseError) -> JSONResponse:
         return error_response("database_error", str(exc), status_code=500)
+
+    @app.exception_handler(InsufficientDiskSpaceError)
+    async def disk_space_exception_handler(
+        _request: Request,
+        exc: InsufficientDiskSpaceError,
+    ) -> JSONResponse:
+        return error_response("insufficient_disk_space", str(exc), status_code=409)
 
     @app.exception_handler(JobNotFoundError)
     async def job_not_found_exception_handler(

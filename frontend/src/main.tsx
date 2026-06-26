@@ -11,6 +11,7 @@ import { DownloadPage } from "@/pages/DownloadPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { LibraryPage } from "@/pages/LibraryPage";
 import { LogsPage } from "@/pages/LogsPage";
+import { ScheduledTasksPage } from "@/pages/ScheduledTasksPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import "./index.css";
 
@@ -33,6 +34,7 @@ const router = createBrowserRouter([
       { path: "library", element: <LibraryPage /> },
       { path: "artists/:artistId", element: <ArtistDetailPage /> },
       { path: "jobs", element: <JobsPage /> },
+      { path: "jobs/schedules", element: <ScheduledTasksPage /> },
       { path: "settings", element: <SettingsPage /> },
       { path: "logs", element: <LogsPage /> }
     ]

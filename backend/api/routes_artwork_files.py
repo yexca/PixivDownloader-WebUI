@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from backend.api.dependencies import DbPath, Queue
+from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.schemas.downloads import DownloadCreateResponse
 from backend.schemas.files import ArtworkFileListResponse, artwork_file_response
@@ -28,6 +28,7 @@ def list_artwork_files(artwork_id: str, db_path: DbPath) -> ArtworkFileListRespo
 def retry_artwork_file(
     file_id: int,
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
     file_repository = ArtworkFileRepository(db_path)
@@ -38,7 +39,7 @@ def retry_artwork_file(
     finally:
         file_repository.close()
 
-    service = JobService(db_path)
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         job = service.create_download_job(
             user_id=None,

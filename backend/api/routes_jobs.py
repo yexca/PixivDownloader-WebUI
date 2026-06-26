@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from backend.api.dependencies import DbPath, Queue
+from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.core.errors import JobNotFoundError
 from backend.domain.types import JobStatus
 from backend.schemas.jobs import (
@@ -26,11 +26,12 @@ TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 @router.get("", response_model=JobListResponse)
 def list_jobs(
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     status: JobStatus | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> JobListResponse:
-    service = JobService(db_path)
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         jobs, total = service.list_jobs(status=status, limit=limit, offset=offset)
         return JobListResponse(items=[job_response(job) for job in jobs], total=total)
@@ -39,8 +40,12 @@ def list_jobs(
 
 
 @router.get("/{job_id}", response_model=JobDetailResponse)
-def get_job(job_id: str, db_path: DbPath) -> JobDetailResponse:
-    service = JobService(db_path)
+def get_job(
+    job_id: str,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> JobDetailResponse:
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         job = service.get_job(job_id)
         if job is None:

@@ -18,6 +18,7 @@ class Settings:
     request_base_delay_seconds: float = 0.0
     request_random_delay_seconds: float = 2.0
     max_concurrent_downloads: int = 1
+    min_free_space_gb: float = 10.0
     overwrite_existing_files: bool = False
     skip_existing_files: bool = True
 
@@ -36,12 +37,17 @@ class Settings:
         if request_base_delay_seconds < 0 or request_random_delay_seconds < 0:
             raise ConfigError("request delays must be non-negative")
 
+        min_free_space_gb = float(data.get("min_free_space_gb", 10.0))
+        if min_free_space_gb < 0:
+            raise ConfigError("minimum free space must be non-negative")
+
         return cls(
             download_path=download_path,
             refresh_token=str(data.get("refresh_token", "")),
             request_base_delay_seconds=request_base_delay_seconds,
             request_random_delay_seconds=request_random_delay_seconds,
             max_concurrent_downloads=max_concurrent_downloads,
+            min_free_space_gb=min_free_space_gb,
             overwrite_existing_files=bool(data.get("overwrite_existing_files", False)),
             skip_existing_files=bool(data.get("skip_existing_files", True)),
         )
@@ -53,6 +59,7 @@ class Settings:
             "request_base_delay_seconds": self.request_base_delay_seconds,
             "request_random_delay_seconds": self.request_random_delay_seconds,
             "max_concurrent_downloads": self.max_concurrent_downloads,
+            "min_free_space_gb": self.min_free_space_gb,
             "overwrite_existing_files": self.overwrite_existing_files,
             "skip_existing_files": self.skip_existing_files,
         }
@@ -123,6 +130,7 @@ class SettingsService:
             "request_base_delay_seconds": settings.request_base_delay_seconds,
             "request_random_delay_seconds": settings.request_random_delay_seconds,
             "max_concurrent_downloads": settings.max_concurrent_downloads,
+            "min_free_space_gb": settings.min_free_space_gb,
             "overwrite_existing_files": settings.overwrite_existing_files,
             "skip_existing_files": settings.skip_existing_files,
         }

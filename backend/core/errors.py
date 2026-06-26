@@ -18,6 +18,10 @@ class DownloadError(PixivDownloaderError):
     """Raised when a file download fails."""
 
 
+class InsufficientDiskSpaceError(PixivDownloaderError):
+    """Raised when downloads are blocked by the configured free-space floor."""
+
+
 class DatabaseError(PixivDownloaderError):
     """Raised when database access fails."""
 

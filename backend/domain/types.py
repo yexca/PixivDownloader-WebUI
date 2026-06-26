@@ -14,3 +14,5 @@ JobType = Literal[
     "retry_failed",
     "retry_failed_artist",
 ]
+ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
+ScheduledTaskStatus = Literal["active", "paused", "blocked"]

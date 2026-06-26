@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.api.dependencies import DbPath, Queue
+from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.tag_repository import LocalTagRepository
@@ -63,9 +63,10 @@ def list_artists(
 def create_artist(
     request: ArtistCreateRequest,
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
-    service = JobService(db_path)
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         job = service.create_download_job(
             user_id=request.user_id,
@@ -119,9 +120,10 @@ def delete_artist(artist_id: str, db_path: DbPath) -> None:
 def sync_artist(
     artist_id: str,
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
-    service = JobService(db_path)
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         job = service.create_download_job(
             user_id=artist_id,
@@ -138,6 +140,7 @@ def sync_artist(
 def retry_failed_artist(
     artist_id: str,
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
     artist_repository = ArtistRepository(db_path)
@@ -147,7 +150,7 @@ def retry_failed_artist(
     finally:
         artist_repository.close()
 
-    service = JobService(db_path)
+    service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         job = service.create_download_job(
             user_id=artist_id,

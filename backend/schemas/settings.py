@@ -12,6 +12,7 @@ class SettingsResponse(BaseModel):
     request_base_delay_seconds: float
     request_random_delay_seconds: float
     max_concurrent_downloads: int
+    min_free_space_gb: float
     overwrite_existing_files: bool
     skip_existing_files: bool
 
@@ -22,6 +23,7 @@ class SettingsUpdateRequest(BaseModel):
     request_base_delay_seconds: float | None = Field(default=None, ge=0)
     request_random_delay_seconds: float | None = Field(default=None, ge=0)
     max_concurrent_downloads: int | None = Field(default=None, ge=1)
+    min_free_space_gb: float | None = Field(default=None, ge=0)
     overwrite_existing_files: bool | None = None
     skip_existing_files: bool | None = None
 

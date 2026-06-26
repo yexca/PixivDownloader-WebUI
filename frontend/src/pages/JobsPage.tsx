@@ -1,7 +1,7 @@
 import * as React from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, XCircle } from "lucide-react";
+import { CalendarClock, RefreshCw, XCircle } from "lucide-react";
 
 import { cancelJob, getJob, listJobs, type Job, type JobStatus } from "@/api/jobs";
 import { Button } from "@/components/ui/button";
@@ -86,6 +86,12 @@ export function JobsPage(): JSX.Element {
             <Button type="button" variant="outline" onClick={() => void jobs.refetch()} disabled={jobs.isFetching}>
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
               Refresh
+            </Button>
+            <Button type="button" variant="outline" asChild>
+              <Link to="/jobs/schedules">
+                <CalendarClock className="h-4 w-4" aria-hidden="true" />
+                Schedules
+              </Link>
             </Button>
           </>
         }

@@ -8,13 +8,22 @@ from backend.domain.entities import Job, JobEvent
 from backend.domain.types import JobStatus, JobType
 from backend.repositories._time import utc_now
 from backend.repositories.job_repository import JobRepository
+from backend.services.settings_service import AppSettingsService
+from backend.services.storage_service import check_free_space
 
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
 
 
 class JobService:
-    def __init__(self, db_path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        db_path: Path | str | None = None,
+        *,
+        settings_json_path: Path | str | None = None,
+    ) -> None:
         self.repository = JobRepository(db_path)
+        self.db_path = db_path
+        self.settings_json_path = settings_json_path
 
     def create_download_job(
         self,
@@ -39,6 +48,8 @@ class JobService:
             sync_only=sync_only,
             retry_failed_artist=retry_failed_artist,
         )
+        if job_type in DOWNLOAD_JOB_TYPES:
+            self._ensure_download_space()
         job = Job(
             id=str(uuid4()),
             type=job_type,
@@ -119,6 +130,17 @@ class JobService:
     def close(self) -> None:
         self.repository.close()
 
+    def _ensure_download_space(self) -> None:
+        settings_service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            settings = settings_service.load()
+        finally:
+            settings_service.close()
+        check_free_space(settings.download_path, settings.min_free_space_gb)
+
 
 def resolve_job_type(
     *,
@@ -141,3 +163,12 @@ def resolve_job_type(
     if artwork_id is not None:
         return "download_from_artwork"
     return "download_artist"
+
+
+DOWNLOAD_JOB_TYPES = {
+    "download_artist",
+    "download_from_artwork",
+    "rescan_artist",
+    "retry_failed",
+    "retry_failed_artist",
+}
