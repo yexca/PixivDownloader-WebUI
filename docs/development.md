@@ -81,6 +81,14 @@ frontend/src/api/
 
 Avoid scattering raw `fetch()` calls inside pages.
 
+The archived PyQt desktop application lives under:
+
+```text
+legacy/pyqt/
+```
+
+Do not add new features or default verification requirements there. It is kept outside the maintained backend/frontend runtime.
+
 ## Python Standards
 
 - Python 3.12.

@@ -1,45 +1,8 @@
 # Deployment
 
-PixivDownloader-SQLite supports two local deployment paths:
-
-- Windows scripts using a local Python environment.
-- Docker Compose using the published/local-build image.
-
-## Windows Script Runtime
-
-Install:
-
-```bat
-run-install.bat
-```
-
-Run WebUI:
-
-```bat
-run-webui.bat
-```
-
-Run legacy PyQt GUI:
-
-```bat
-run-gui.bat
-```
-
-The script runtime uses:
-
-- `%UserProfile%\Miniconda3` as the Miniconda installation.
-- `env/` as the project-local Python environment.
-- `frontend/dist` as the built WebUI.
-- `config/` as the local WebUI configuration folder.
-- `resources/` as the local database and resource folder.
+PixivDownloader-SQLite is deployed primarily with Docker Compose. Windows scripts remain available for local development or users who do not want to run Docker.
 
 ## Docker Compose
-
-Build:
-
-```bat
-docker compose build
-```
 
 Run:
 
@@ -67,6 +30,12 @@ Stop:
 
 ```bat
 docker compose down
+```
+
+Build locally:
+
+```bat
+docker compose build
 ```
 
 The compose service uses:
@@ -103,9 +72,31 @@ Compose mounts:
 
 `downloads/` is intended for downloaded files when the container configuration points downloads there.
 
+## Windows Script Runtime
+
+Install:
+
+```bat
+run-install.bat
+```
+
+Run WebUI:
+
+```bat
+run-webui.bat
+```
+
+The script runtime uses:
+
+- `%UserProfile%\Miniconda3` as the Miniconda installation.
+- `env/` as the project-local Python environment.
+- `frontend/dist` as the built WebUI.
+- `config/` as the local WebUI configuration folder.
+- `resources/` as the local database and resource folder.
+
 ## Ports
 
-Default port:
+Default WebUI port:
 
 ```text
 7653
@@ -147,6 +138,10 @@ The image entrypoint is:
 ```text
 python -m backend.app
 ```
+
+## Legacy PyQt Archive
+
+The old PyQt desktop application is archived under `legacy/pyqt/`. It is not copied into the Docker image and is not part of the default installation or deployment flow.
 
 ## Packaged Executable Expectations
 

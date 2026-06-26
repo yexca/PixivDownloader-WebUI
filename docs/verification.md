@@ -13,7 +13,7 @@ env\python.exe -m pytest
 Expected current baseline:
 
 ```text
-24 passed
+34 passed
 ```
 
 There may be a third-party Starlette/FastAPI deprecation warning from `TestClient`.
@@ -98,3 +98,5 @@ Use `run-webui.bat`, then verify:
 Do not run Pixiv network tests unless a valid local refresh token is configured and the user expects real API access.
 
 Automated regression tests should mock Pixiv and file download boundaries.
+
+The archived PyQt application under `legacy/pyqt/` is outside the default verification flow.

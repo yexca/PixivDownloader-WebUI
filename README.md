@@ -2,9 +2,9 @@
 
 > Languages: [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-PixivDownloader-SQLite is a Windows-first, local WebUI downloader for Pixiv artwork backup and management. It runs a FastAPI backend from the local `env` folder, serves a React + TypeScript frontend, and stores metadata in a local SQLite database.
+PixivDownloader-SQLite is a local WebUI downloader for Pixiv artwork backup and management. It runs a FastAPI backend, serves a React + TypeScript frontend, and stores metadata in a local SQLite database.
 
-The project was originally a PyQt6 desktop application and is being refactored into a local-first WebUI while preserving the existing SQLite data.
+The maintained runtime is the WebUI. The old PyQt desktop application has been archived under `legacy/pyqt/` and is no longer updated.
 
 ## Features
 
@@ -12,48 +12,47 @@ The project was originally a PyQt6 desktop application and is being refactored i
 - Manage download settings, including download path and Pixiv refresh token.
 - Track jobs, progress, history, artists, artworks, and file status in SQLite.
 - Migrate legacy `resources/pixiv.db` data from the old `pic` table.
-- Run the WebUI locally through `run-webui.bat`; no separate database server is required.
-- Keep the legacy PyQt desktop GUI available through `run-gui.bat`.
+- Run the WebUI with Docker Compose or local Windows scripts.
 
-## Runtime Architecture
+## Recommended: Docker Compose
 
-```text
-run-webui.bat
-  -> env\python.exe -m backend.app
-  -> FastAPI on http://127.0.0.1:7653
-  -> serves frontend\dist
-  -> opens the WebUI in the browser
+Start the WebUI:
+
+```bat
+docker compose up -d
 ```
 
-Main components:
+Open:
 
-- `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
-- `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
-- `config/`: WebUI configuration; `settings.example.json` is committed and `settings.json` stores local user settings.
-- `resources/`: SQLite database and static resources.
-- `app/`: legacy PyQt code available through `run-gui.bat`; the WebUI is the current user-facing interface.
+```text
+http://127.0.0.1:7653
+```
 
-## Install
+Docker Compose also starts the `pixiv-auth-browser` sidecar and exposes noVNC:
 
-Run from the project folder:
+```text
+http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
+```
+
+After clicking Pixiv sign-in in WebUI Settings, complete Pixiv login in the noVNC browser. The backend captures the callback and saves the `refresh_token` automatically.
+
+Stop:
+
+```bat
+docker compose down
+```
+
+The compose file can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
+
+## Local Windows Runtime
+
+Install from the project folder:
 
 ```bat
 run-install.bat
 ```
 
-The installer:
-
-1. Installs Miniconda to `%UserProfile%\Miniconda3` if it is missing.
-2. Creates the local `env` folder.
-3. Installs Python dependencies into `env`.
-4. Installs frontend dependencies with `npm`.
-5. Builds frontend assets into `frontend\dist`.
-
-The installer does not rely on global Python. Node.js is currently detected from the system PATH; install the Windows LTS version from <https://nodejs.org/> if `npm` is missing.
-
-## Run
-
-WebUI:
+Run:
 
 ```bat
 run-webui.bat
@@ -61,31 +60,25 @@ run-webui.bat
 
 The script checks that `env\python.exe` and `frontend\dist\index.html` exist, starts the backend, and opens <http://127.0.0.1:7653>.
 
-Legacy PyQt GUI:
+Set `PIXIVDOWNLOADER_PORT` before running the script if you need a different local port.
 
-```bat
-run-gui.bat
+## Runtime Architecture
+
+```text
+Browser WebUI
+  -> FastAPI backend on http://127.0.0.1:7653
+  -> SQLite database in resources/
+  -> downloaded files in the configured download directory
 ```
 
-The script starts the original PyQt desktop interface through `main.py`.
+Main components:
 
-Set `PIXIVDOWNLOADER_PORT` before running the scripts if you need a different local port.
-
-## Docker Compose
-
-Run the published image on the same local port:
-
-```bat
-docker compose up -d
-```
-
-The compose file uses and can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
-
-Docker Compose also starts the `pixiv-auth-browser` sidecar and maps noVNC on `6080:6080`. After clicking Pixiv sign-in in WebUI Settings, complete Pixiv login in <http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale>; the backend captures the callback and saves the `refresh_token` automatically.
-
-```bat
-docker compose build
-```
+- `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
+- `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
+- `auth-browser/`: Docker sidecar for Pixiv browser authentication.
+- `config/`: WebUI configuration; `settings.example.json` is committed and `settings.json` stores local user settings.
+- `resources/`: SQLite database and static resources.
+- `legacy/pyqt/`: archived PyQt desktop application; not part of the maintained runtime.
 
 ## Configuration Migration
 

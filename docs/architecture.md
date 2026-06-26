@@ -56,8 +56,8 @@ frontend/
   src/hooks/        WebSocket streaming and local UI state.
   src/pages/        Dashboard, Download, Library, Jobs, Settings, Logs.
 
-app/
-  legacy PyQt code available through run-gui.bat.
+auth-browser/
+  Docker sidecar for Pixiv browser authentication.
 
 config/
   settings.example.json
@@ -66,6 +66,9 @@ config/
 resources/
   pixiv.db
   static application assets
+
+legacy/pyqt/
+  archived PyQt desktop application, outside the maintained runtime.
 ```
 
 ## Backend Startup
@@ -145,10 +148,15 @@ queued -> running -> cancelled
 
 Job progress and events are stored in SQLite and exposed to the WebUI by API/WebSocket endpoints.
 
-## Legacy PyQt Entry
+## Legacy PyQt Archive
 
-The project began as a PyQt6 GUI. The `app/` tree remains available through `run-gui.bat`, but the maintained architecture is:
+The project began as a PyQt6 GUI. That desktop application is archived under `legacy/pyqt/` together with its old entry script and related tests.
+
+The maintained architecture is:
 
 - `backend/` for behavior.
 - `frontend/` for user interaction.
+- `auth-browser/` for Docker browser authentication.
 - `resources/` and migrations for local data.
+
+Do not add new features to the PyQt archive. New work should target the WebUI and backend.

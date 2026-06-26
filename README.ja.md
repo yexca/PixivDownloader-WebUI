@@ -2,7 +2,9 @@
 
 > Languages: [English](README.md) | [简体中文](README.zh-CN.md)
 
-PixivDownloader-SQLite は、Windows でローカル実行する Pixiv ダウンロード管理ツールです。現在は旧 PyQt6 デスクトップアプリからローカル WebUI へ移行中で、FastAPI バックエンド、React + TypeScript フロントエンド、SQLite データベースを使用します。
+PixivDownloader-SQLite は、Pixiv 作品のバックアップと管理を行うローカル WebUI です。現在メンテナンスされている実行環境は、FastAPI バックエンド、React + TypeScript フロントエンド、ローカル SQLite データベースで構成されています。
+
+旧 PyQt デスクトップアプリは `legacy/pyqt/` にアーカイブされており、現在のメンテナンス対象ではありません。
 
 ## 主な機能
 
@@ -10,47 +12,47 @@ PixivDownloader-SQLite は、Windows でローカル実行する Pixiv ダウン
 - WebUI でダウンロード先と Pixiv `refresh_token` を管理。
 - SQLite にジョブ、アーティスト、作品、ファイル状態を保存。
 - 旧 `resources/pixiv.db` の `pic` テーブルを新しいスキーマへ移行。
-- `run-webui.bat` から WebUI をローカル起動。外部データベースサーバーは不要です。
-- `run-gui.bat` から旧 PyQt デスクトップ GUI も起動できます。
+- Docker Compose を優先し、必要に応じて Windows ローカルスクリプトでも WebUI を実行可能。
 
-## 実行アーキテクチャ
+## 推奨: Docker Compose
 
-```text
-run-webui.bat
-  -> env\python.exe -m backend.app
-  -> http://127.0.0.1:7653 で FastAPI を起動
-  -> frontend\dist を配信
-  -> ブラウザーで WebUI を開く
+WebUI を起動します:
+
+```bat
+docker compose up -d
 ```
 
-主なディレクトリ:
+開きます:
 
-- `backend/`: FastAPI API、サービス、リポジトリ、SQLite マイグレーション、ダウンロードワーカー。
-- `frontend/`: React、TypeScript、Vite、Tailwind CSS の WebUI。
-- `resources/`: ローカル設定と SQLite データベース。
-- `app/`: `run-gui.bat` から起動できる旧 PyQt コード。現在の主なユーザー向け画面は WebUI です。
+```text
+http://127.0.0.1:7653
+```
 
-## インストール
+Docker Compose は `pixiv-auth-browser` サイドカーも起動し、noVNC を公開します:
 
-プロジェクトフォルダーで実行します:
+```text
+http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
+```
+
+WebUI の Settings で Pixiv サインインを開始し、noVNC ブラウザーで Pixiv ログインを完了してください。バックエンドがコールバックを受け取り、`refresh_token` を保存します。
+
+停止:
+
+```bat
+docker compose down
+```
+
+Compose ファイルは `yexca/pixivdownloader:v0.2.0` をビルドでき、`7653:7653` を公開し、永続化のためにローカルの `config/`、`resources/`、`downloads/` をマウントします。
+
+## Windows ローカル実行
+
+プロジェクトフォルダーでインストールします:
 
 ```bat
 run-install.bat
 ```
 
-インストーラーの処理:
-
-1. Miniconda がない場合は `%UserProfile%\Miniconda3` にインストール。
-2. ローカル `env` 環境を作成。
-3. Python 依存関係を `env` にインストール。
-4. `npm` でフロントエンド依存関係をインストール。
-5. フロントエンドを `frontend\dist` にビルド。
-
-インストーラーはグローバル Python を使用しません。Node.js は現在、システム PATH 上の `npm` を検出します。見つからない場合は <https://nodejs.org/> から Windows LTS 版をインストールしてください。
-
-## 起動
-
-WebUI:
+WebUI を起動します:
 
 ```bat
 run-webui.bat
@@ -58,29 +60,47 @@ run-webui.bat
 
 スクリプトは `env\python.exe` と `frontend\dist\index.html` を確認し、バックエンドを起動して <http://127.0.0.1:7653> を開きます。
 
-旧 PyQt GUI:
-
-```bat
-run-gui.bat
-```
-
-スクリプトは `main.py` から旧 PyQt デスクトップ画面を起動します。
-
 別のローカルポートを使う場合は、スクリプト実行前に `PIXIVDOWNLOADER_PORT` を設定してください。
 
-## Docker Compose
+## 実行アーキテクチャ
 
-公開済みイメージを同じローカルポートで起動します:
-
-```bat
-docker compose up -d
+```text
+Browser WebUI
+  -> FastAPI backend on http://127.0.0.1:7653
+  -> SQLite database in resources/
+  -> configured download directory
 ```
 
-Compose ファイルは `yexca/pixivdownloader:v0.2.0` を使用およびビルドでき、`7653:7653` を公開し、永続化のためにローカルの `resources/` と `downloads/` をマウントします。
+主なディレクトリ:
+
+- `backend/`: FastAPI API、サービス、リポジトリ、SQLite マイグレーション、ダウンロードワーカー。
+- `frontend/`: React、TypeScript、Vite、Tailwind CSS の WebUI。
+- `auth-browser/`: Docker で Pixiv ブラウザーログインを行うサイドカー。
+- `config/`: WebUI 設定。`settings.example.json` はコミットされ、`settings.json` はローカル設定を保存します。
+- `resources/`: SQLite データベースと静的リソース。
+- `legacy/pyqt/`: アーカイブ済み PyQt デスクトップアプリ。現在の実行環境には含まれません。
+
+## 設定移行
+
+WebUI のデフォルト設定:
+
+```text
+config\settings.example.json
+```
+
+ローカル設定とシークレット:
+
+```text
+config\settings.json
+```
+
+旧 `resources\conf\settings.json` は自動では読み込まれません。必要な場合は明示的に移行してください:
 
 ```bat
-docker compose build
+env\python.exe tools\migrate_settings_to_config.py
 ```
+
+`config\settings.json` がすでに存在する場合は `--overwrite` を使用できます。
 
 ## 開発
 
@@ -124,7 +144,8 @@ npm run build
 
 ソースチェックアウトで実行する場合、バックエンドはリポジトリルートからリソースを解決します:
 
-- `resources\conf\settings.json`
+- `config\settings.example.json`
+- `config\settings.json`
 - `resources\pixiv.db`
 - `frontend\dist`
 

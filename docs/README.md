@@ -8,8 +8,8 @@ This documentation is organized for three common readers:
 
 ## Start Here
 
-- [Getting Started](getting-started.md): install, run, and first configuration.
-- [Deployment](deployment.md): local scripts, Docker Compose, ports, volumes, and packaging notes.
+- [Getting Started](getting-started.md): Docker Compose, local script runtime, and first configuration.
+- [Deployment](deployment.md): Docker Compose, local scripts, ports, volumes, and packaging notes.
 - [Configuration](configuration.md): settings storage, refresh token handling, and runtime environment variables.
 
 ## Architecture
