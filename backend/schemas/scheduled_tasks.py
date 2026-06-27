@@ -215,4 +215,29 @@ def clean_download_options(options: dict[str, object]) -> dict[str, object]:
         if value is None or value == "":
             continue
         cleaned[key] = value
+    if options.get("only_new_artworks") is True:
+        cleaned["only_new_artworks"] = True
+    stop_if_artwork_count_above = options.get("stop_if_artwork_count_above")
+    if stop_if_artwork_count_above is not None and stop_if_artwork_count_above != "":
+        cleaned["stop_if_artwork_count_above"] = stop_if_artwork_count_above
+    naming_rule = options.get("naming_rule")
+    if isinstance(naming_rule, str) and naming_rule.strip():
+        cleaned["naming_rule"] = naming_rule.strip()
+    naming_tag_variants = options.get("naming_tag_variants")
+    if isinstance(naming_tag_variants, list):
+        cleaned_variants: list[dict[str, str]] = []
+        for item in naming_tag_variants:
+            if not isinstance(item, dict):
+                continue
+            tag = item.get("tag")
+            variant_rule = item.get("naming_rule")
+            if (
+                isinstance(tag, str)
+                and isinstance(variant_rule, str)
+                and tag.strip()
+                and variant_rule.strip()
+            ):
+                cleaned_variants.append({"tag": tag.strip(), "naming_rule": variant_rule.strip()})
+        if cleaned_variants:
+            cleaned["naming_tag_variants"] = cleaned_variants
     return cleaned

@@ -40,7 +40,7 @@ import { useToast } from "@/components/ToastProvider";
 import { cn, formatDate } from "@/lib/utils";
 
 type WorkflowTab = "active" | "inactive" | "failed" | "completed";
-type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "advanced";
+type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "rule";
 type WorkflowTarget =
   | "single_artist"
   | "single_artwork"
@@ -48,7 +48,18 @@ type WorkflowTarget =
   | "artists_with_tag"
   | "artists_not_checked";
 type WorkflowAction = "download_artist" | "sync_artist" | "retry_failed_artist";
-type DownloadScope = "incremental" | "full" | "retry_failed";
+type DownloadScope = "incremental" | "full";
+
+type RuleConfig = {
+  only_new_artworks: boolean;
+  stop_if_artwork_count_above: boolean;
+  artwork_count_limit: string;
+  skip_if_last_run_failed: boolean;
+  tag_variant_enabled: boolean;
+  tag_variant_tag: string;
+  tag_variant_action: WorkflowAction;
+  tag_variant_naming_rule: string;
+};
 
 type WorkflowForm = {
   name: string;
@@ -75,16 +86,52 @@ type WorkflowForm = {
   max_artworks: string;
   min_artwork_id: string;
   max_artwork_id: string;
+  naming_rule: string;
+  rules: RuleConfig;
 };
 
 type DraftWorkflow = {
   id: string;
   form: WorkflowForm;
   createdAt: string;
+  updatedAt?: string;
+};
+
+type WorkflowBatchItem = {
+  draftId: string;
+  title: string;
+  status: "completed" | "failed" | "skipped";
+  jobIds: string[];
+  error?: string;
+};
+
+type WorkflowBatch = {
+  id: string;
+  createdAt: string;
+  total: number;
+  completed: number;
+  failed: number;
+  skipped: number;
+  concurrency: number;
+  items: WorkflowBatchItem[];
 };
 
 const requiredModules: ModuleKey[] = ["target", "actions"];
-const moduleOrder: ModuleKey[] = ["schedule", "target", "filters", "actions", "options", "naming", "advanced"];
+const moduleOrder: ModuleKey[] = ["schedule", "target", "filters", "actions", "options", "naming", "rule"];
+const draftsStorageKey = "pixivdownloader.workflowDrafts.v1";
+const defaultNamingRule = "{artist}-{artist_id}/{original_filename}";
+const namingTokens = [
+  "{artist}",
+  "{artist_id}",
+  "{artwork_id}",
+  "{title}",
+  "{page}",
+  "{original_filename}",
+  "{ext}",
+  "{type}",
+  "{download_date}",
+  "{ai}"
+];
 
 const initialForm: WorkflowForm = {
   name: "",
@@ -95,7 +142,7 @@ const initialForm: WorkflowForm = {
     actions: true,
     options: false,
     naming: false,
-    advanced: false
+    rule: false
   },
   interval_days: 30,
   enabled: true,
@@ -118,7 +165,18 @@ const initialForm: WorkflowForm = {
   force_rescan: false,
   max_artworks: "",
   min_artwork_id: "",
-  max_artwork_id: ""
+  max_artwork_id: "",
+  naming_rule: defaultNamingRule,
+  rules: {
+    only_new_artworks: false,
+    stop_if_artwork_count_above: false,
+    artwork_count_limit: "",
+    skip_if_last_run_failed: false,
+    tag_variant_enabled: false,
+    tag_variant_tag: "",
+    tag_variant_action: "download_artist",
+    tag_variant_naming_rule: "{artist}-{artist_id}/{ai}/{original_filename}"
+  }
 };
 
 const tabItems: Array<{ value: WorkflowTab; label: string }> = [
@@ -135,7 +193,7 @@ const moduleLabels: Record<ModuleKey, string> = {
   actions: "Actions",
   options: "Options",
   naming: "Naming",
-  advanced: "Advanced"
+  rule: "Rule"
 };
 
 const actionLabels: Record<WorkflowAction, string> = {
@@ -170,6 +228,20 @@ export function WorkflowsPage(): JSX.Element {
   const [tab, setTab] = React.useState<WorkflowTab>("active");
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
+  const [oneOffConcurrency, setOneOffConcurrency] = React.useState(1);
+  const [batches, setBatches] = React.useState<WorkflowBatch[]>([]);
+
+  React.useEffect(() => {
+    const storedDrafts = loadStoredDrafts();
+    if (storedDrafts.length) {
+      setDrafts(storedDrafts);
+      setSelectedDraftId(storedDrafts[0].id);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    window.localStorage.setItem(draftsStorageKey, JSON.stringify(drafts));
+  }, [drafts]);
 
   const jobs = useQuery({
     queryKey: ["jobs", "workflows", 100],
@@ -204,17 +276,31 @@ export function WorkflowsPage(): JSX.Element {
   });
 
   const runAllMutation = useMutation({
-    mutationFn: async (items: DraftWorkflow[]) => {
-      for (const draft of items) {
-        await submitDraft(draft.form);
-      }
-      return items;
+    mutationFn: async (request: { items: DraftWorkflow[]; concurrency: number }) => {
+      const items = await runDraftBatch(request.items, request.concurrency, batches);
+      return {
+        id: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        total: request.items.length,
+        completed: items.filter((item) => item.status === "completed").length,
+        failed: items.filter((item) => item.status === "failed").length,
+        skipped: items.filter((item) => item.status === "skipped").length,
+        concurrency: request.concurrency,
+        items
+      } satisfies WorkflowBatch;
     },
-    onSuccess: (items) => {
-      const ids = new Set(items.map((item) => item.id));
+    onSuccess: (batch) => {
+      const ids = new Set(
+        batch.items.filter((item) => item.status === "completed").map((item) => item.draftId)
+      );
       setDrafts((current) => current.filter((item) => !ids.has(item.id)));
       setSelectedDraftId(null);
-      pushToast({ title: "Draft queue submitted", description: `${items.length} workflow(s)`, tone: "success" });
+      setBatches((current) => [batch, ...current].slice(0, 5));
+      pushToast({
+        title: "Draft queue submitted",
+        description: `${batch.completed}/${batch.total} completed, ${batch.skipped} skipped`,
+        tone: batch.failed ? "error" : "success"
+      });
       invalidateRuntimeQueries(queryClient);
     },
     onError: (error) => pushToast({ title: "Draft queue stopped", description: error.message, tone: "error" })
@@ -251,7 +337,9 @@ export function WorkflowsPage(): JSX.Element {
     }
     if (editingDraftId) {
       setDrafts((current) =>
-        current.map((draft) => (draft.id === editingDraftId ? { ...draft, form } : draft))
+        current.map((draft) =>
+          draft.id === editingDraftId ? { ...draft, form, updatedAt: new Date().toISOString() } : draft
+        )
       );
       setSelectedDraftId(editingDraftId);
       pushToast({ title: "Draft updated", tone: "success" });
@@ -344,7 +432,7 @@ export function WorkflowsPage(): JSX.Element {
                 type="button"
                 variant="outline"
                 disabled={drafts.length === 0 || runAllMutation.isPending}
-                onClick={() => runAllMutation.mutate(drafts)}
+                onClick={() => runAllMutation.mutate({ items: drafts, concurrency: oneOffConcurrency })}
               >
                 <Play className="h-4 w-4" aria-hidden="true" />
                 Run All
@@ -361,7 +449,37 @@ export function WorkflowsPage(): JSX.Element {
                 Clear
               </Button>
             </div>
+            <div className="mt-3 rounded-md border bg-muted/20 p-3">
+              <Field label="One-off workflow concurrency">
+                <Input
+                  type="number"
+                  min={1}
+                  max={6}
+                  value={oneOffConcurrency}
+                  onChange={(event) => setOneOffConcurrency(clampConcurrency(Number(event.target.value)))}
+                />
+              </Field>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Scheduled drafts are created immediately; one-off drafts are submitted in parallel up to this limit.
+              </p>
+            </div>
           </section>
+
+          {batches.length ? (
+            <section className="surface p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Run Batches</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">Recent Run All submissions</p>
+                </div>
+              </div>
+              <div className="mt-4 space-y-3">
+                {batches.map((batch) => (
+                  <BatchSummary key={batch.id} batch={batch} />
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {selectedDraft ? (
             <DraftDetail draft={selectedDraft} onEdit={() => openEditBuilder(selectedDraft)} />
@@ -401,7 +519,8 @@ export function WorkflowsPage(): JSX.Element {
         open={dialogOpen}
         title={editingDraftId ? "Edit workflow draft" : "Add workflow draft"}
         description="Select modules to insert their cards into the workflow."
-        className="max-h-[92vh] max-w-5xl overflow-hidden"
+        className="flex h-[92vh] max-w-5xl flex-col overflow-hidden"
+        bodyClassName="min-h-0 flex-1 overflow-hidden"
         onOpenChange={(open) => (open ? setDialogOpen(true) : closeBuilder())}
         footer={
           <>
@@ -413,15 +532,18 @@ export function WorkflowsPage(): JSX.Element {
           </>
         }
       >
-        <form id="workflow-builder" className="max-h-[72vh] space-y-4 overflow-auto pr-1" onSubmit={saveDraft}>
-          <ModuleToggleBar form={form} setForm={setForm} />
-          {submitted && firstError ? (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-              {firstError}
-            </p>
-          ) : null}
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="space-y-4">
+        <form id="workflow-builder" className="flex h-full min-h-0 flex-col gap-4" onSubmit={saveDraft}>
+          <div className="shrink-0 space-y-4">
+            <ModuleToggleBar form={form} setForm={setForm} />
+            {submitted && firstError ? (
+              <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                {firstError}
+              </p>
+            ) : null}
+          </div>
+          <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="min-h-0 overflow-y-auto overscroll-contain pr-1">
+              <div className="space-y-4">
               {moduleOrder.filter((module) => form.modules[module]).map((module) => (
                 <ModuleCard key={module} module={module}>
                   {module === "schedule" ? <ScheduleCard form={form} setForm={setForm} /> : null}
@@ -439,12 +561,13 @@ export function WorkflowsPage(): JSX.Element {
                   {module === "filters" ? <FiltersCard form={form} setForm={setForm} /> : null}
                   {module === "actions" ? <ActionsCard form={form} setForm={setForm} /> : null}
                   {module === "options" ? <OptionsCard form={form} setForm={setForm} /> : null}
-                  {module === "naming" ? <NamingCard /> : null}
-                  {module === "advanced" ? <AdvancedCard /> : null}
+                  {module === "naming" ? <NamingCard form={form} setForm={setForm} /> : null}
+                  {module === "rule" ? <RuleCard form={form} setForm={setForm} /> : null}
                 </ModuleCard>
               ))}
+              </div>
             </div>
-            <aside className="space-y-3">
+            <aside className="min-h-0 space-y-3 overflow-y-auto overscroll-contain pr-1">
               <div className="rounded-md border bg-muted/20 p-3 text-sm">
                 <p className="font-medium">Preview</p>
                 <p className="mt-2 text-muted-foreground">{canSubmit ? previewText(form) : firstError}</p>
@@ -464,15 +587,15 @@ export function WorkflowsPage(): JSX.Element {
 
 function ModuleToggleBar({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
   return (
-    <div className="flex flex-wrap gap-2 rounded-md border bg-muted/20 p-2">
+    <div className="flex flex-wrap gap-x-5 gap-y-2">
       {moduleOrder.map((module) => {
         const required = requiredModules.includes(module);
         return (
           <label
             key={module}
             className={cn(
-              "flex min-h-9 items-center gap-2 rounded-md border bg-background px-3 text-sm",
-              form.modules[module] && "border-primary/40 bg-primary/10 text-primary",
+              "flex min-h-8 items-center gap-2 text-sm",
+              form.modules[module] && "text-primary",
               required && "cursor-not-allowed opacity-80"
             )}
           >
@@ -523,7 +646,7 @@ function ScheduleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: W
             onChange={(event) => setForm({ ...form, interval_days: Number(event.target.value) })}
           />
         </Field>
-        <label className="flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+        <label className="flex min-h-10 items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={form.enabled}
@@ -531,7 +654,7 @@ function ScheduleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: W
           />
           Enabled
         </label>
-        <label className="flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+        <label className="flex min-h-10 items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={form.run_after_startup}
@@ -564,23 +687,32 @@ function TargetCard({
   const multiArtistTarget = isMultiArtistTarget(form.target_type);
   return (
     <>
-      <Field label="Target type">
-        <Select
-          value={form.target_type}
-          onChange={(event) => {
-            const target_type = event.target.value as WorkflowTarget;
-            setForm({
-              ...form,
-              target_type,
-              actions: target_type === "single_artwork" ? ["download_artist"] : form.actions
-            });
-          }}
-        >
-          {Object.entries(targetLabels).map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
+      <div>
+        <p className="mb-2 text-sm font-medium">Target type</p>
+        <div className="flex flex-wrap gap-2">
+          {(Object.keys(targetLabels) as WorkflowTarget[]).map((target) => (
+            <button
+              key={target}
+              type="button"
+              className={cn(
+                "min-h-9 rounded-md border px-3 text-sm",
+                form.target_type === target
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "bg-background hover:bg-muted"
+              )}
+              onClick={() =>
+                setForm({
+                  ...form,
+                  target_type: target,
+                  actions: target === "single_artwork" ? ["download_artist"] : form.actions
+                })
+              }
+            >
+              {targetLabels[target]}
+            </button>
           ))}
-        </Select>
-      </Field>
+        </div>
+      </div>
       {form.target_type === "single_artist" ? (
         <Field label="Pixiv artist ID">
           <Input
@@ -657,7 +789,7 @@ function TargetCard({
               ))}
             </Select>
           </Field>
-          <label className="flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+          <label className="flex min-h-10 items-center gap-2 text-sm">
             <input
               type="checkbox"
               checked={form.skip_unavailable_artists}
@@ -674,7 +806,7 @@ function TargetCard({
 function FiltersCard({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
   return (
     <>
-      <label className="flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+      <label className="flex min-h-10 items-center gap-2 text-sm">
         <input
           type="checkbox"
           checked={form.filters.last_checked_before_days}
@@ -697,7 +829,7 @@ function FiltersCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
           />
         </Field>
       ) : null}
-      <label className="flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+      <label className="flex min-h-10 items-center gap-2 text-sm">
         <input
           type="checkbox"
           checked={form.filters.has_failed_files}
@@ -747,7 +879,7 @@ function ActionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
           <label
             key={action}
             className={cn(
-              "flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm",
+              "flex min-h-10 items-center gap-2 text-sm",
               disabled && "opacity-50"
             )}
           >
@@ -760,7 +892,7 @@ function ActionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
                 setForm({
                   ...form,
                   actions,
-                  download_scope: actions.includes("retry_failed_artist") ? "retry_failed" : form.download_scope
+                  download_scope: actions.includes("retry_failed_artist") ? "incremental" : form.download_scope
                 });
               }}
             />
@@ -773,26 +905,28 @@ function ActionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
 }
 
 function OptionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
+  const retryOnly = form.actions.includes("retry_failed_artist");
   return (
     <>
       <Field label="Download scope">
         <Select
           value={form.download_scope}
+          disabled={retryOnly}
           onChange={(event) => {
             const download_scope = event.target.value as DownloadScope;
-            const actions =
-              download_scope === "retry_failed"
-                ? uniqueActions([...form.actions.filter((action) => action !== "download_artist"), "retry_failed_artist"])
-                : form.actions.filter((action) => action !== "retry_failed_artist");
-            setForm({ ...form, download_scope, actions: actions.length ? actions : ["download_artist"] });
+            setForm({ ...form, download_scope });
           }}
         >
           <option value="incremental">New works only</option>
           <option value="full">All discovered works</option>
-          <option value="retry_failed">Failed files only</option>
         </Select>
       </Field>
-      <label className="flex min-h-10 items-center gap-2 rounded-md border bg-muted/20 px-3 text-sm">
+      {retryOnly ? (
+        <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
+          Retry failed files is controlled by the Actions module.
+        </p>
+      ) : null}
+      <label className="flex min-h-10 items-center gap-2 text-sm">
         <input
           type="checkbox"
           checked={form.force_rescan}
@@ -805,23 +939,167 @@ function OptionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
   );
 }
 
-function NamingCard(): JSX.Element {
+function NamingCard({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
+  const rule = form.naming_rule || defaultNamingRule;
   return (
-    <div className="rounded-md border bg-muted/20 p-4">
-      <p className="text-sm font-medium">Naming rule override is reserved for the next workflow pass.</p>
-      <p className="mt-2 text-sm text-muted-foreground">Drafts currently inherit the global naming behavior.</p>
-    </div>
+    <>
+      <Field label="Path and filename rule">
+        <Input
+          value={rule}
+          placeholder={defaultNamingRule}
+          onChange={(event) => setForm({ ...form, naming_rule: event.target.value })}
+        />
+      </Field>
+      <div className="rounded-md border bg-muted/20 p-3 text-sm">
+        <p className="font-medium">Preview</p>
+        <p className="mt-2 break-all text-muted-foreground">
+          {previewNamingRule(rule)}
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {namingTokens.map((token) => (
+          <button
+            key={token}
+            type="button"
+            className="rounded-md border bg-background px-2 py-1 text-xs hover:bg-muted"
+            onClick={() => setForm({ ...form, naming_rule: `${rule}${token}` })}
+          >
+            {token}
+          </button>
+        ))}
+      </div>
+    </>
   );
 }
 
-function AdvancedCard(): JSX.Element {
+function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
   return (
-    <div className="rounded-md border bg-muted/20 p-4">
-      <p className="text-sm font-medium">Rules and visual programming are reserved for a later workflow engine.</p>
-      <p className="mt-2 text-sm text-muted-foreground">
-        Future rules can pause long jobs, branch on update counts, and decide whether actions should run.
-      </p>
-    </div>
+    <>
+      <label className="flex min-h-10 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.rules.only_new_artworks}
+          onChange={(event) =>
+            setForm({ ...form, rules: { ...form.rules, only_new_artworks: event.target.checked } })
+          }
+        />
+        Only run if found new artworks
+      </label>
+      <label className="flex min-h-10 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.rules.stop_if_artwork_count_above}
+          onChange={(event) =>
+            setForm({ ...form, rules: { ...form.rules, stop_if_artwork_count_above: event.target.checked } })
+          }
+        />
+        Stop if artwork count is above
+      </label>
+      {form.rules.stop_if_artwork_count_above ? (
+        <Field label="Artwork count limit">
+          <Input
+            inputMode="numeric"
+            value={form.rules.artwork_count_limit}
+            placeholder="500"
+            onChange={(event) =>
+              setForm({ ...form, rules: { ...form.rules, artwork_count_limit: event.target.value } })
+            }
+          />
+        </Field>
+      ) : null}
+      <label className="flex min-h-10 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.rules.skip_if_last_run_failed}
+          onChange={(event) =>
+            setForm({ ...form, rules: { ...form.rules, skip_if_last_run_failed: event.target.checked } })
+          }
+        />
+        Skip if last run failed
+      </label>
+      <label className="flex min-h-10 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={form.rules.tag_variant_enabled}
+          onChange={(event) =>
+            setForm({ ...form, rules: { ...form.rules, tag_variant_enabled: event.target.checked } })
+          }
+        />
+        Run naming/action variant when tag matches
+      </label>
+      {form.rules.tag_variant_enabled ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Matching tag">
+            <Input
+              value={form.rules.tag_variant_tag}
+              placeholder="AI生成"
+              onChange={(event) =>
+                setForm({ ...form, rules: { ...form.rules, tag_variant_tag: event.target.value } })
+              }
+            />
+          </Field>
+          <Field label="Variant action">
+            <Select
+              value={form.rules.tag_variant_action}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  rules: { ...form.rules, tag_variant_action: event.target.value as WorkflowAction }
+                })
+              }
+            >
+              {Object.entries(actionLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Variant naming">
+            <Input
+              value={form.rules.tag_variant_naming_rule}
+              placeholder="{artist}-{artist_id}/{ai}/{original_filename}"
+              onChange={(event) =>
+                setForm({ ...form, rules: { ...form.rules, tag_variant_naming_rule: event.target.value } })
+              }
+            />
+          </Field>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function BatchSummary({ batch }: { batch: WorkflowBatch }): JSX.Element {
+  return (
+    <article className="rounded-md border bg-card p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold">{formatDate(batch.createdAt)}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">Concurrency {batch.concurrency}</p>
+        </div>
+        <Badge tone={batch.failed ? "danger" : batch.skipped ? "muted" : "success"}>
+          {batch.completed}/{batch.total}
+        </Badge>
+      </div>
+      <div className="mt-3 space-y-2">
+        {batch.items.map((item) => (
+          <div key={item.draftId} className="rounded-md border bg-muted/20 p-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-medium">{item.title}</span>
+              <Badge tone={item.status === "completed" ? "success" : item.status === "skipped" ? "muted" : "danger"}>
+                {item.status}
+              </Badge>
+            </div>
+            {item.jobIds.length ? (
+              <p className="mt-1 break-all text-muted-foreground">{item.jobIds.length} job(s): {item.jobIds.join(", ")}</p>
+            ) : item.error ? (
+              <p className="mt-1 break-words text-destructive">{item.error}</p>
+            ) : (
+              <p className="mt-1 text-muted-foreground">No job was created.</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </article>
   );
 }
 
@@ -1084,11 +1362,15 @@ async function submitDraft(form: WorkflowForm): Promise<{ jobIds: string[] }> {
       artwork_id: null,
       mode: "artist",
       force_rescan: form.force_rescan,
-      retry_failed: form.download_scope === "retry_failed",
+      retry_failed: form.actions.includes("retry_failed_artist"),
       full_download: form.download_scope === "full",
       max_artworks: numberOrNull(form.max_artworks),
       min_artwork_id: form.min_artwork_id.trim() || null,
-      max_artwork_id: form.max_artwork_id.trim() || null
+      max_artwork_id: form.max_artwork_id.trim() || null,
+      naming_rule: namingRuleOrNull(form),
+      only_new_artworks: ruleOnlyNewArtworks(form),
+      stop_if_artwork_count_above: ruleArtworkCountLimit(form),
+      naming_tag_variants: ruleNamingVariants(form)
     });
     return { jobIds: [response.job_id] };
   }
@@ -1102,7 +1384,11 @@ async function submitDraft(form: WorkflowForm): Promise<{ jobIds: string[] }> {
       full_download: form.download_scope === "full",
       max_artworks: numberOrNull(form.max_artworks),
       min_artwork_id: form.min_artwork_id.trim() || null,
-      max_artwork_id: form.max_artwork_id.trim() || null
+      max_artwork_id: form.max_artwork_id.trim() || null,
+      naming_rule: namingRuleOrNull(form),
+      only_new_artworks: ruleOnlyNewArtworks(form),
+      stop_if_artwork_count_above: ruleArtworkCountLimit(form),
+      naming_tag_variants: ruleNamingVariants(form)
     });
     return { jobIds: [response.job_id] };
   }
@@ -1146,7 +1432,12 @@ function workflowToConfig(form: WorkflowForm): ScheduledTaskConfig {
       full_download: form.modules.options && form.download_scope === "full",
       max_artworks: form.modules.filters ? numberOrNull(form.max_artworks) : null,
       min_artwork_id: form.modules.filters ? form.min_artwork_id.trim() || null : null,
-      max_artwork_id: form.modules.filters ? form.max_artwork_id.trim() || null : null
+      max_artwork_id: form.modules.filters ? form.max_artwork_id.trim() || null : null,
+      naming_rule: namingRuleOrNull(form),
+      only_new_artworks: ruleOnlyNewArtworks(form),
+      stop_if_artwork_count_above: ruleArtworkCountLimit(form),
+      tag_variant_action: ruleTagVariantAction(form),
+      naming_tag_variants: ruleNamingVariants(form)
     },
     max_artists_per_run: form.max_artists_per_run,
     artist_selection: form.artist_selection,
@@ -1190,11 +1481,18 @@ function validateForm(form: WorkflowForm): string[] {
   for (const [label, value] of [
     ["Max artworks", form.max_artworks],
     ["Artwork ID from", form.min_artwork_id],
-    ["Artwork ID to", form.max_artwork_id]
+    ["Artwork ID to", form.max_artwork_id],
+    ["Artwork count limit", form.rules.artwork_count_limit]
   ] as const) {
     if (value.trim() && !/^\d+$/.test(value.trim())) {
       errors.push(`${label} must contain digits only.`);
     }
+  }
+  if (form.modules.rule && form.rules.stop_if_artwork_count_above && !form.rules.artwork_count_limit.trim()) {
+    errors.push("Artwork count limit is required.");
+  }
+  if (form.modules.rule && form.rules.tag_variant_enabled && !form.rules.tag_variant_tag.trim()) {
+    errors.push("Variant matching tag is required.");
   }
   return errors;
 }
@@ -1227,11 +1525,183 @@ function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>
   void queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
 }
 
+async function runDraftBatch(
+  drafts: DraftWorkflow[],
+  concurrency: number,
+  previousBatches: WorkflowBatch[]
+): Promise<WorkflowBatchItem[]> {
+  const results: WorkflowBatchItem[] = [];
+  let nextIndex = 0;
+  const workerCount = Math.min(clampConcurrency(concurrency), drafts.length);
+  async function runNext(): Promise<void> {
+    const index = nextIndex;
+    nextIndex += 1;
+    const draft = drafts[index];
+    if (!draft) {
+      return;
+    }
+    if (draft.form.modules.rule && draft.form.rules.skip_if_last_run_failed && lastBatchStatus(draft.id, previousBatches) === "failed") {
+      results[index] = {
+        draftId: draft.id,
+        title: draftTitle(draft.form),
+        status: "skipped",
+        jobIds: [],
+        error: "Skipped because the last run failed"
+      };
+      await runNext();
+      return;
+    }
+    try {
+      const response = await submitDraft(draft.form);
+      results[index] = {
+        draftId: draft.id,
+        title: draftTitle(draft.form),
+        status: "completed",
+        jobIds: response.jobIds
+      };
+    } catch (error) {
+      results[index] = {
+        draftId: draft.id,
+        title: draftTitle(draft.form),
+        status: "failed",
+        jobIds: [],
+        error: error instanceof Error ? error.message : "Workflow failed"
+      };
+    }
+    await runNext();
+  }
+  await Promise.all(Array.from({ length: workerCount }, () => runNext()));
+  return results;
+}
+
+function loadStoredDrafts(): DraftWorkflow[] {
+  try {
+    const text = window.localStorage.getItem(draftsStorageKey);
+    if (!text) {
+      return [];
+    }
+    const parsed = JSON.parse(text) as DraftWorkflow[];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((draft) => draft && typeof draft.id === "string" && draft.form)
+      .map((draft) => ({
+        ...draft,
+        form: normalizeStoredForm(draft.form)
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function normalizeStoredForm(form: WorkflowForm): WorkflowForm {
+  const modules = { ...initialForm.modules, ...form.modules };
+  const legacyModules = modules as Record<string, boolean>;
+  if (legacyModules.advanced) {
+    modules.rule = true;
+  }
+  return {
+    ...initialForm,
+    ...form,
+    modules,
+    naming_rule: form.naming_rule || defaultNamingRule,
+    rules: { ...initialForm.rules, ...form.rules }
+  };
+}
+
 function previewText(form: WorkflowForm): string {
   const mode = form.modules.schedule ? `every ${form.interval_days} days` : "staged";
   const actions = form.actions.map((action) => actionLabels[action]).join(" then ");
-  const scope = form.download_scope === "full" ? "all discovered works" : form.download_scope === "retry_failed" ? "failed files only" : "new works only";
-  return `${targetLabels[form.target_type]}, ${actions}, ${scope}, ${mode}.`;
+  const scope = form.actions.includes("retry_failed_artist")
+    ? "failed files only"
+    : form.download_scope === "full"
+      ? "all discovered works"
+      : "new works only";
+  const rules = ruleSummary(form);
+  return `${targetLabels[form.target_type]}, ${actions}, ${scope}, ${mode}${rules ? `, ${rules}` : ""}.`;
+}
+
+function ruleSummary(form: WorkflowForm): string {
+  if (!form.modules.rule) {
+    return "";
+  }
+  const rules: string[] = [];
+  if (form.rules.only_new_artworks) {
+    rules.push("only with new works");
+  }
+  if (form.rules.stop_if_artwork_count_above && form.rules.artwork_count_limit.trim()) {
+    rules.push(`stop above ${form.rules.artwork_count_limit.trim()} works`);
+  }
+  if (form.rules.skip_if_last_run_failed) {
+    rules.push("skip after failed run");
+  }
+  if (form.rules.tag_variant_enabled && form.rules.tag_variant_tag.trim()) {
+    rules.push(`variant for ${form.rules.tag_variant_tag.trim()}`);
+  }
+  return rules.join(", ");
+}
+
+function previewNamingRule(rule: string): string {
+  return rule
+    .replaceAll("{artist}", "Artist")
+    .replaceAll("{artist_id}", "123456")
+    .replaceAll("{artwork_id}", "987654321")
+    .replaceAll("{title}", "Artwork title")
+    .replaceAll("{page}", "0")
+    .replaceAll("{original_filename}", "987654321_p0.jpg")
+    .replaceAll("{ext}", "jpg")
+    .replaceAll("{type}", "illust")
+    .replaceAll("{download_date}", "2026-06-28")
+    .replaceAll("{ai}", "AI");
+}
+
+function namingRuleOrNull(form: WorkflowForm): string | null {
+  if (!form.modules.naming) {
+    return null;
+  }
+  const rule = form.naming_rule.trim();
+  return rule && rule !== defaultNamingRule ? rule : null;
+}
+
+function ruleOnlyNewArtworks(form: WorkflowForm): boolean {
+  return form.modules.rule && form.rules.only_new_artworks;
+}
+
+function ruleArtworkCountLimit(form: WorkflowForm): number | null {
+  if (!form.modules.rule || !form.rules.stop_if_artwork_count_above) {
+    return null;
+  }
+  return numberOrNull(form.rules.artwork_count_limit);
+}
+
+function ruleTagVariantAction(form: WorkflowForm): string | null {
+  if (!form.modules.rule || !form.rules.tag_variant_enabled || !form.rules.tag_variant_tag.trim()) {
+    return null;
+  }
+  return form.rules.tag_variant_action;
+}
+
+function ruleNamingVariants(form: WorkflowForm): Array<Record<string, string>> {
+  if (!form.modules.rule || !form.rules.tag_variant_enabled) {
+    return [];
+  }
+  const tag = form.rules.tag_variant_tag.trim();
+  const namingRule = form.rules.tag_variant_naming_rule.trim();
+  if (!tag || !namingRule) {
+    return [];
+  }
+  return [{ tag, naming_rule: namingRule }];
+}
+
+function lastBatchStatus(draftId: string, batches: WorkflowBatch[]): WorkflowBatchItem["status"] | null {
+  for (const batch of batches) {
+    const item = batch.items.find((entry) => entry.draftId === draftId);
+    if (item) {
+      return item.status;
+    }
+  }
+  return null;
 }
 
 function draftTitle(form: WorkflowForm): string {
@@ -1307,10 +1777,6 @@ function toggleItem<T>(items: T[], item: T, checked: boolean): T[] {
   return items.filter((value) => value !== item);
 }
 
-function uniqueActions(actions: WorkflowAction[]): WorkflowAction[] {
-  return actions.filter((action, index) => actions.indexOf(action) === index);
-}
-
 function isMultiArtistTarget(target: WorkflowTarget): boolean {
   return target === "all_artists" || target === "artists_with_tag" || target === "artists_not_checked";
 }
@@ -1318,4 +1784,11 @@ function isMultiArtistTarget(target: WorkflowTarget): boolean {
 function numberOrNull(value: string): number | null {
   const text = value.trim();
   return text ? Number(text) : null;
+}
+
+function clampConcurrency(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(1, Math.min(6, Math.floor(value)));
 }

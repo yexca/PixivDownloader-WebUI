@@ -326,11 +326,22 @@ def clean_download_options(value: object) -> dict[str, object]:
     full_download = value.get("full_download")
     if isinstance(full_download, bool):
         cleaned["full_download"] = full_download
-    for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
+    for key in ("max_artworks", "min_artwork_id", "max_artwork_id", "tag_variant_action"):
         item = value.get(key)
         if item is None or item == "":
             continue
         cleaned[key] = item
+    if value.get("only_new_artworks") is True:
+        cleaned["only_new_artworks"] = True
+    stop_if_artwork_count_above = value.get("stop_if_artwork_count_above")
+    if stop_if_artwork_count_above is not None and stop_if_artwork_count_above != "":
+        cleaned["stop_if_artwork_count_above"] = stop_if_artwork_count_above
+    naming_rule = value.get("naming_rule")
+    if isinstance(naming_rule, str) and naming_rule.strip():
+        cleaned["naming_rule"] = naming_rule.strip()
+    naming_tag_variants = value.get("naming_tag_variants")
+    if isinstance(naming_tag_variants, list):
+        cleaned["naming_tag_variants"] = naming_tag_variants
     return cleaned
     try:
         return int(value)

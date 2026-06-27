@@ -1,6 +1,6 @@
 import pytest
 
-from backend.core.errors import JobCancelledError
+from backend.core.errors import DownloadSkippedError, JobCancelledError
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
@@ -72,6 +72,29 @@ class FakeFileDownloader:
         )
 
 
+class NamingFileDownloader:
+    def __init__(self, tmp_path):
+        self.tmp_path = tmp_path
+        self.calls = []
+
+    def download(
+        self,
+        artist_name: str,
+        artist_id: str,
+        url: str,
+        *,
+        relative_path: str | None = None,
+    ) -> FileDownloadResult:
+        self.calls.append((artist_name, artist_id, url, relative_path))
+        file_name = (relative_path or url.split("/")[-1]).split("/")[-1]
+        return FileDownloadResult(
+            url=url,
+            file_name=file_name,
+            local_path=self.tmp_path / file_name,
+            size_bytes=12,
+        )
+
+
 def test_download_user_id_path_downloads_and_updates_artist(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
@@ -96,6 +119,132 @@ def test_download_user_id_path_downloads_and_updates_artist(tmp_path):
     assert len(file_downloader.calls) == 2
     assert repository.get_by_id("123").last_download_id == "101"
     assert progress_messages[0] == "Getting user info..."
+
+
+def test_download_uses_naming_rule_with_ai_token(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    pixiv_client = FakePixivClient()
+    file_downloader = NamingFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        sleeper=lambda: None,
+    )
+    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+        Artwork(
+            id="100",
+            artist_id=user_id,
+            title="Title",
+            tags=("AI生成",),
+            files=(
+                ArtworkFile(
+                    artwork_id="100",
+                    page_index=0,
+                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                    file_name="100_p0.jpg",
+                ),
+            ),
+        )
+    ]
+
+    summary = service.download(
+        user_id="123",
+        options=DownloadOptions(naming_rule="{artist}-{artist_id}/{artwork_id}-{ai}.{ext}"),
+    )
+
+    assert summary.downloaded_files == 1
+    assert file_downloader.calls[0][3] == "Artist-123/100-AI.jpg"
+
+
+def test_download_uses_tag_variant_naming_rule(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    pixiv_client = FakePixivClient()
+    file_downloader = NamingFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        sleeper=lambda: None,
+    )
+    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+        Artwork(
+            id="100",
+            artist_id=user_id,
+            title="Title",
+            tags=("AI生成",),
+            files=(
+                ArtworkFile(
+                    artwork_id="100",
+                    page_index=0,
+                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                    file_name="100_p0.jpg",
+                ),
+            ),
+        )
+    ]
+
+    service.download(
+        user_id="123",
+        options=DownloadOptions(
+            naming_rule="{artist}-{artist_id}/{original_filename}",
+            naming_tag_variants=(
+                {
+                    "tag": "AI生成",
+                    "naming_rule": "{artist}-{artist_id}/AI/{original_filename}",
+                },
+            ),
+        ),
+    )
+
+    assert file_downloader.calls[0][3] == "Artist-123/AI/100_p0.jpg"
+
+
+def test_only_new_artworks_filters_before_download(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    repository.upsert(Artist(id="123", name="Existing", last_download_id="100"))
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        sleeper=lambda: None,
+    )
+
+    summary = service.download(user_id="123", options=DownloadOptions(only_new_artworks=True))
+
+    assert summary.total_files == 1
+    assert file_downloader.calls[0][2].endswith("101_p0.jpg")
+
+
+def test_stop_if_artwork_count_above_raises_rule_error(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        sleeper=lambda: None,
+    )
+
+    with pytest.raises(DownloadSkippedError):
+        service.download(user_id="123", options=DownloadOptions(stop_if_artwork_count_above=1))
+
+    assert file_downloader.calls == []
 
 
 def test_download_artwork_id_path_resolves_artist_then_downloads_artist(tmp_path):

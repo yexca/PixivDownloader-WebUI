@@ -73,6 +73,12 @@ class DownloadWorker:
                 max_artworks=positive_int_option(job.options.get("max_artworks")),
                 min_artwork_id=string_option(job.options.get("min_artwork_id")),
                 max_artwork_id=string_option(job.options.get("max_artwork_id")),
+                naming_rule=string_option(job.options.get("naming_rule")),
+                only_new_artworks=bool(job.options.get("only_new_artworks", False)),
+                stop_if_artwork_count_above=positive_int_option(
+                    job.options.get("stop_if_artwork_count_above")
+                ),
+                naming_tag_variants=tuple_dict_option(job.options.get("naming_tag_variants")),
             )
             summary = service.download(
                 user_id=job.input_user_id,
@@ -272,3 +278,17 @@ def string_option(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def tuple_dict_option(value: object) -> tuple[dict[str, str], ...]:
+    if not isinstance(value, list):
+        return ()
+    result: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        naming_rule = item.get("naming_rule")
+        if isinstance(tag, str) and isinstance(naming_rule, str):
+            result.append({"tag": tag, "naming_rule": naming_rule})
+    return tuple(result)

@@ -18,6 +18,10 @@ class DownloadError(PixivDownloaderError):
     """Raised when a file download fails."""
 
 
+class DownloadSkippedError(PixivDownloaderError):
+    """Raised when workflow rules intentionally stop a download."""
+
+
 class InsufficientDiskSpaceError(PixivDownloaderError):
     """Raised when downloads are blocked by the configured free-space floor."""
 

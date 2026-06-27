@@ -11,6 +11,7 @@ type DialogProps = {
   children?: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
+  bodyClassName?: string;
   onOpenChange: (open: boolean) => void;
 };
 
@@ -21,6 +22,7 @@ export function Dialog({
   children,
   footer,
   className,
+  bodyClassName,
   onOpenChange
 }: DialogProps): JSX.Element | null {
   React.useEffect(() => {
@@ -70,7 +72,7 @@ export function Dialog({
             <X className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
-        {children ? <div className="mt-4">{children}</div> : null}
+        {children ? <div className={cn("mt-4", bodyClassName)}>{children}</div> : null}
         {footer ? <div className={cn("mt-5 flex flex-wrap justify-end gap-2")}>{footer}</div> : null}
       </section>
     </div>

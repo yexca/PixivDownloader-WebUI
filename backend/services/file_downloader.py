@@ -58,15 +58,27 @@ class FileDownloader:
         except OSError as exc:
             raise DownloadError(f"download path is not writable: {self.download_path}") from exc
 
-    def download(self, artist_name: str, artist_id: str, url: str) -> FileDownloadResult:
-        artist_dir = self.download_path / f"{clean_path(artist_name)} - {artist_id}"
+    def download(
+        self,
+        artist_name: str,
+        artist_id: str,
+        url: str,
+        *,
+        relative_path: str | None = None,
+    ) -> FileDownloadResult:
+        if relative_path:
+            local_path = safe_download_path(self.download_path, relative_path)
+            file_name = local_path.name
+            parent_dir = local_path.parent
+        else:
+            parent_dir = self.download_path / f"{clean_path(artist_name)} - {artist_id}"
+            file_name = url.split("/")[-1]
+            local_path = parent_dir / file_name
         try:
-            artist_dir.mkdir(parents=True, exist_ok=True)
+            parent_dir.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            raise DownloadError(f"download path is not writable: {artist_dir}") from exc
+            raise DownloadError(f"download path is not writable: {parent_dir}") from exc
 
-        file_name = url.split("/")[-1]
-        local_path = artist_dir / file_name
         if self.skip_existing and local_path.exists():
             return FileDownloadResult(
                 url=url,
@@ -108,3 +120,11 @@ class FileDownloader:
 
 def clean_path(path: str) -> str:
     return re.sub(r'[<>:"/\\|?*]', "", path)
+
+
+def safe_download_path(base_path: Path, relative_path: str) -> Path:
+    parts = [clean_path(part).strip() for part in re.split(r"[/\\]+", relative_path)]
+    cleaned_parts = [part for part in parts if part and part not in {".", ".."}]
+    if not cleaned_parts:
+        raise DownloadError("download file name is empty")
+    return base_path.joinpath(*cleaned_parts)

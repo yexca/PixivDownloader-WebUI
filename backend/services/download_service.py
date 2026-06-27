@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.core.errors import JobCancelledError
+from backend.core.errors import DownloadSkippedError, JobCancelledError
 from backend.domain.entities import Artist, Artwork, ArtworkFile, DownloadProgress
 from backend.domain.types import ArtworkFileStatus
 from backend.repositories._time import utc_now
@@ -43,6 +44,10 @@ class DownloadOptions:
     max_artworks: int | None = None
     min_artwork_id: str | None = None
     max_artwork_id: str | None = None
+    naming_rule: str | None = None
+    only_new_artworks: bool = False
+    stop_if_artwork_count_above: int | None = None
+    naming_tag_variants: tuple[dict[str, str], ...] = ()
 
 
 class DownloadService:
@@ -93,6 +98,22 @@ class DownloadService:
             else list(self.pixiv_client.get_artworks_by_user_id(artist.id))
         )
         artworks = filter_artworks(artworks, resolved_options)
+        if (
+            resolved_options.stop_if_artwork_count_above is not None
+            and len(artworks) > resolved_options.stop_if_artwork_count_above
+        ):
+            raise DownloadSkippedError(
+                "workflow rule stopped download: artwork count "
+                f"{len(artworks)} is above {resolved_options.stop_if_artwork_count_above}"
+            )
+        last_downloaded_artwork_id = optional_artwork_id(artist.last_download_id)
+        if resolved_options.only_new_artworks and last_downloaded_artwork_id is not None:
+            artworks = [
+                artwork
+                for artwork in artworks
+                if optional_artwork_id(artwork.id) is not None
+                and optional_artwork_id(artwork.id) > last_downloaded_artwork_id
+            ]
         self._check_cancelled(cancel_callback)
 
         self._report(progress_callback, "Got artworks info. Getting download links...")
@@ -146,11 +167,30 @@ class DownloadService:
                 self._mark_file(file, status="downloading", error_message=None)
                 self._check_cancelled(cancel_callback)
                 try:
-                    result = self.file_downloader.download(
-                        artist.name,
-                        artist.id,
-                        file.original_url,
+                    artwork = next(
+                        (artwork for artwork in artworks if artwork.id == file.artwork_id),
+                        None,
                     )
+                    relative_path = render_naming_rule(
+                        resolved_options.naming_rule,
+                        artist=artist,
+                        artwork=artwork,
+                        file=file,
+                        variants=resolved_options.naming_tag_variants,
+                    )
+                    if relative_path is None:
+                        result = self.file_downloader.download(
+                            artist.name,
+                            artist.id,
+                            file.original_url,
+                        )
+                    else:
+                        result = self.file_downloader.download(
+                            artist.name,
+                            artist.id,
+                            file.original_url,
+                            relative_path=relative_path,
+                        )
                 except Exception as exc:
                     failed_files += 1
                     self._mark_file(file, status="failed", error_message=str(exc))
@@ -396,6 +436,68 @@ def artwork_id_in_range(artwork_id: str, *, min_id: int | None, max_id: int | No
     if min_id is not None and value < min_id:
         return False
     return not (max_id is not None and value > max_id)
+
+
+def render_naming_rule(
+    rule: str | None,
+    *,
+    artist: Artist,
+    artwork: Artwork | None,
+    file: ArtworkFile,
+    variants: tuple[dict[str, str], ...] = (),
+) -> str | None:
+    if artwork is not None:
+        for variant in variants:
+            tag = (variant.get("tag") or "").casefold()
+            variant_rule = variant.get("naming_rule") or ""
+            if tag and variant_rule and any(item.casefold() == tag for item in artwork.tags):
+                rule = variant_rule
+                break
+    if not rule:
+        return None
+    original_filename = file.original_url.split("/")[-1]
+    ext = original_filename.rsplit(".", 1)[-1] if "." in original_filename else ""
+    tokens = {
+        "artist": artist.name,
+        "artist_id": artist.id,
+        "artwork_id": file.artwork_id,
+        "title": artwork.title if artwork is not None else "",
+        "page": str(file.page_index),
+        "original_filename": original_filename,
+        "ext": ext,
+        "type": artwork.type if artwork is not None and artwork.type else "",
+        "download_date": utc_now()[:10],
+        "ai": "AI" if artwork is not None and is_ai_artwork(artwork) else "",
+    }
+    result = rule
+    for key, value in tokens.items():
+        if value == "":
+            result = remove_empty_token_prefix(result, key)
+        result = result.replace(f"{{{key}}}", value)
+    result = result.strip().strip("/\\")
+    if not result:
+        return None
+    if "{ext}" not in rule and "." not in result.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] and ext:
+        result = f"{result}.{ext}"
+    return result
+
+
+def remove_empty_token_prefix(rule: str, token: str) -> str:
+    return re.sub(rf"[-_\s]*\{{{re.escape(token)}\}}", "", rule)
+
+
+def is_ai_artwork(artwork: Artwork) -> bool:
+    ai_tags = {
+        "ai",
+        "ai-generated",
+        "ai生成",
+        "ai生成作品",
+        "aiイラスト",
+        "ai生成イラスト",
+        "ai 画作",
+        "ai 생성",
+    }
+    return any(tag.strip().casefold() in ai_tags for tag in artwork.tags)
 
 
 def merge_fetched_artist(existing: Artist, fetched: Artist, *, now: str) -> Artist:
