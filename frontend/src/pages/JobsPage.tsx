@@ -135,7 +135,7 @@ export function JobsPage(): JSX.Element {
       pushToast({
         title: "Bulk cancel finished",
         description: `${response.cancelled.length} cancelled, ${response.errors.length} skipped.`,
-        tone: response.errors.length ? "warning" : "success"
+        tone: response.errors.length ? "info" : "success"
       });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["job"] });
@@ -198,9 +198,9 @@ export function JobsPage(): JSX.Element {
               </Button>
             )}
             <Button type="button" variant="outline" asChild>
-              <Link to="/jobs/schedules">
+              <Link to="/workflows">
                 <CalendarClock className="h-4 w-4" aria-hidden="true" />
-                Schedules
+                Workflows
               </Link>
             </Button>
           </>

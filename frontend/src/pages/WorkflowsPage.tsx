@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Copy,
   ListPlus,
+  Pause,
   Pencil,
   Play,
   Plus,
@@ -20,12 +21,15 @@ import { createDownloadJob } from "@/api/downloads";
 import { listJobs, type Job } from "@/api/jobs";
 import {
   createScheduledTask,
+  deleteScheduledTask,
   listScheduledTasks,
+  runScheduledTask,
   type ScheduledTask,
   type ScheduledTaskAction,
   type ScheduledTaskArtistSelection,
   type ScheduledTaskConfig,
-  type ScheduledTaskTargetType
+  type ScheduledTaskTargetType,
+  updateScheduledTask
 } from "@/api/scheduledTasks";
 import { runWorkflow } from "@/api/workflows";
 import { Badge } from "@/components/ui/badge";
@@ -1182,6 +1186,39 @@ function DraftDetail({ draft, onEdit }: { draft: DraftWorkflow; onEdit: () => vo
 }
 
 function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
+  const queryClient = useQueryClient();
+  const { pushToast } = useToast();
+  const invalidate = () => invalidateRuntimeQueries(queryClient);
+  const runMutation = useMutation({
+    mutationFn: () => runScheduledTask(task.id),
+    onSuccess: (response) => {
+      pushToast({
+        title: response.created ? "Jobs queued" : response.skipped ? "Schedule skipped" : "Schedule checked",
+        description: response.job_ids.length ? response.job_ids.join(", ") : undefined,
+        tone: response.skipped ? "info" : "success"
+      });
+      invalidate();
+    },
+    onError: (error) => pushToast({ title: "Schedule could not run", description: error.message, tone: "error" })
+  });
+  const statusMutation = useMutation({
+    mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
+    onSuccess: () => {
+      pushToast({ title: task.status === "active" ? "Schedule paused" : "Schedule activated", tone: "success" });
+      invalidate();
+    },
+    onError: (error) => pushToast({ title: "Schedule could not be updated", description: error.message, tone: "error" })
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteScheduledTask(task.id),
+    onSuccess: () => {
+      pushToast({ title: "Schedule deleted", tone: "success" });
+      invalidate();
+    },
+    onError: (error) => pushToast({ title: "Schedule could not be deleted", description: error.message, tone: "error" })
+  });
+  const busy = runMutation.isPending || statusMutation.isPending || deleteMutation.isPending;
+
   return (
     <article className="surface p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1195,15 +1232,38 @@ function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{scheduleSummary(task)}</p>
         </div>
-        <Button type="button" size="sm" variant="outline" asChild>
-          <Link to="/jobs/schedules">Manage</Link>
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => runMutation.mutate()}>
+            <Play className="h-4 w-4" aria-hidden="true" />
+            Run
+          </Button>
+          {task.status === "active" ? (
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("paused")}>
+              <Pause className="h-4 w-4" aria-hidden="true" />
+              Pause
+            </Button>
+          ) : (
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("active")}>
+              <Play className="h-4 w-4" aria-hidden="true" />
+              Activate
+            </Button>
+          )}
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => deleteMutation.mutate()}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Delete
+          </Button>
+        </div>
       </div>
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <Detail label="Next run" value={formatDate(task.next_run_at)} />
         <Detail label="Last run" value={formatDate(task.last_run_at)} />
         <Detail label="Last jobs" value={lastJobCount(task)} />
       </dl>
+      {task.last_error_message ? (
+        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          {task.last_error_message}
+        </p>
+      ) : null}
     </article>
   );
 }

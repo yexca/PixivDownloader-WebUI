@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
-import { Download, RefreshCw } from "lucide-react";
+import { RefreshCw, Workflow } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { listArtists } from "@/api/artists";
@@ -36,9 +36,9 @@ export function DashboardPage(): JSX.Element {
         description="Current queue, library totals, and recent activity."
         actions={
           <Button asChild>
-            <Link to="/download">
-              <Download className="h-4 w-4" aria-hidden="true" />
-              New Download
+            <Link to="/workflows">
+              <Workflow className="h-4 w-4" aria-hidden="true" />
+              New Workflow
             </Link>
           </Button>
         }
@@ -56,10 +56,10 @@ export function DashboardPage(): JSX.Element {
         ) : (
           <DataState
             title="No active download"
-            description="Start a user or artwork download when you are ready."
-            actionLabel="Open Download"
+            description="Start a workflow when you are ready."
+            actionLabel="Open Workflows"
             onAction={() => {
-              window.location.href = "/download";
+              navigate("/workflows");
             }}
           />
         )}

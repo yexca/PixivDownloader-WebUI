@@ -4,7 +4,6 @@ import { AlertTriangle, Check, ExternalLink, Info, Plus, RefreshCw, RotateCcw, S
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  createArtist,
   deleteArtist,
   getArtist,
   listArtists,
@@ -42,9 +41,6 @@ export function LibraryPage(): JSX.Element {
     searchParams.get("artist")
   );
   const [query, setQuery] = React.useState(submittedQuery);
-  const [newArtistId, setNewArtistId] = React.useState("");
-  const queryClient = useQueryClient();
-  const { pushToast } = useToast();
   const artists = useQuery({
     queryKey: [
       "artists",
@@ -76,15 +72,6 @@ export function LibraryPage(): JSX.Element {
     queryKey: ["artist", selectedArtistId],
     queryFn: () => getArtist(selectedArtistId!),
     enabled: Boolean(selectedArtistId)
-  });
-  const addArtist = useMutation({
-    mutationFn: (userId: string) => createArtist(userId),
-    onSuccess: (response) => {
-      setNewArtistId("");
-      pushToast({ title: "Sync queued", description: response.job_id, tone: "success" });
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    },
-    onError: (error) => pushToast({ title: "Artist could not be added", description: error.message, tone: "error" })
   });
   React.useEffect(() => {
     setQuery(submittedQuery);
@@ -135,31 +122,6 @@ export function LibraryPage(): JSX.Element {
     <>
       <PageHeader title="Library" description="Browse artists already known to the local database." />
       <div className="space-y-4 p-4 sm:p-6">
-        <form
-          className="surface flex flex-col gap-3 p-3 sm:flex-row"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const userId = newArtistId.trim();
-            if (!/^\d+$/.test(userId)) {
-              pushToast({ title: "Invalid user ID", description: "Pixiv user ID must contain digits only.", tone: "error" });
-              return;
-            }
-            addArtist.mutate(userId);
-          }}
-        >
-          <Input
-            value={newArtistId}
-            onChange={(event) => setNewArtistId(event.target.value)}
-            placeholder="Pixiv user ID"
-            inputMode="numeric"
-            aria-label="Pixiv user ID"
-          />
-          <Button type="submit" disabled={addArtist.isPending}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            Add Artist
-          </Button>
-        </form>
-
         <form
           className="surface flex flex-col gap-3 p-3 sm:flex-row"
           onSubmit={(event) => {

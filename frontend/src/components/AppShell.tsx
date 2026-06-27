@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Activity, Briefcase, CalendarClock, Download, Home, Library, Menu, ScrollText, Settings, Workflow, X } from "lucide-react";
+import { Activity, Briefcase, Home, Library, Menu, ScrollText, Settings, Workflow, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getHealth } from "@/api/health";
@@ -12,10 +12,8 @@ import { cn, percent } from "@/lib/utils";
 const navItems = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/workflows", label: "Workflows", icon: Workflow },
-  { to: "/download", label: "Download", icon: Download },
   { to: "/library", label: "Library", icon: Library },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
-  { to: "/jobs/schedules", label: "Schedules", icon: CalendarClock },
   { to: "/settings", label: "Settings", icon: Settings },
   { to: "/logs", label: "Logs", icon: ScrollText }
 ];
