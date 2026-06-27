@@ -897,6 +897,64 @@ def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     assert body["task"]["last_error_code"] == "insufficient_disk_space"
 
 
+def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Artist"))
+    finally:
+        artist_repository.close()
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 2,
+            "items": [
+                {
+                    "draft_id": "draft-1",
+                    "title": "Sync artist",
+                    "config": {
+                        "target": {"type": "single_artist", "artist_id": "123"},
+                        "filters": [],
+                        "actions": ["sync_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+                {
+                    "draft_id": "draft-2",
+                    "title": "Download missing artist",
+                    "config": {
+                        "target": {"type": "single_artist", "artist_id": "404"},
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "completed"
+    assert body["total"] == 2
+    assert body["completed"] == 2
+    assert body["concurrency"] == 2
+    assert [item["draft_id"] for item in body["items"]] == ["draft-1", "draft-2"]
+    assert all(item["status"] == "completed" for item in body["items"])
+    assert len(body["items"][0]["job_ids"]) == 1
+    assert queue.wake_count == 1
+
+    list_response = client.get("/api/workflows/runs")
+
+    assert list_response.status_code == 200
+    list_body = list_response.json()
+    assert list_body["total"] == 1
+    assert list_body["items"][0]["id"] == body["id"]
+    assert list_body["items"][0]["items"][0]["title"] == "Sync artist"
+
+
 def test_create_artist_queues_sync_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)

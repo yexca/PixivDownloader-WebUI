@@ -31,7 +31,13 @@ import {
   type ScheduledTaskTargetType,
   updateScheduledTask
 } from "@/api/scheduledTasks";
-import { runWorkflow } from "@/api/workflows";
+import {
+  createWorkflowRun,
+  listWorkflowRuns,
+  runWorkflow,
+  type WorkflowBatchRun,
+  type WorkflowBatchRunItem
+} from "@/api/workflows";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -100,25 +106,6 @@ type DraftWorkflow = {
   form: WorkflowForm;
   createdAt: string;
   updatedAt?: string;
-};
-
-type WorkflowBatchItem = {
-  draftId: string;
-  title: string;
-  status: "completed" | "failed" | "skipped";
-  jobIds: string[];
-  error?: string;
-};
-
-type WorkflowBatch = {
-  id: string;
-  createdAt: string;
-  total: number;
-  completed: number;
-  failed: number;
-  skipped: number;
-  concurrency: number;
-  items: WorkflowBatchItem[];
 };
 
 const requiredModules: ModuleKey[] = ["target", "actions"];
@@ -240,7 +227,6 @@ export function WorkflowsPage(): JSX.Element {
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
   const [oneOffConcurrency, setOneOffConcurrency] = React.useState(1);
-  const [batches, setBatches] = React.useState<WorkflowBatch[]>([]);
 
   React.useEffect(() => {
     const storedDrafts = loadStoredDrafts();
@@ -262,6 +248,11 @@ export function WorkflowsPage(): JSX.Element {
   const schedules = useQuery({
     queryKey: ["scheduled-tasks"],
     queryFn: listScheduledTasks,
+    refetchInterval: 15000
+  });
+  const workflowRuns = useQuery({
+    queryKey: ["workflow-runs", 5],
+    queryFn: () => listWorkflowRuns(5),
     refetchInterval: 15000
   });
   const localTags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
@@ -287,32 +278,37 @@ export function WorkflowsPage(): JSX.Element {
   });
 
   const runAllMutation = useMutation({
-    mutationFn: async (request: { items: DraftWorkflow[]; concurrency: number }) => {
-      const items = await runDraftBatch(request.items, request.concurrency, batches);
-      return {
-        id: crypto.randomUUID(),
-        createdAt: new Date().toISOString(),
-        total: request.items.length,
-        completed: items.filter((item) => item.status === "completed").length,
-        failed: items.filter((item) => item.status === "failed").length,
-        skipped: items.filter((item) => item.status === "skipped").length,
+    mutationFn: (request: { items: DraftWorkflow[]; concurrency: number }) =>
+      createWorkflowRun({
         concurrency: request.concurrency,
-        items
-      } satisfies WorkflowBatch;
-    },
+        items: request.items.map((draft) => ({
+          draft_id: draft.id,
+          title: draftTitle(draft.form),
+          config: workflowToConfig(draft.form),
+          skip_if_last_run_failed:
+            draft.form.modules.rule &&
+            draft.form.rules.skip_if_last_run_failed &&
+            lastRunItemStatus(draft.id, workflowRuns.data?.items ?? []) === "failed",
+          schedule: draft.form.modules.schedule,
+          name: draft.form.name.trim(),
+          interval_days: draft.form.interval_days,
+          enabled: draft.form.enabled,
+          run_after_startup: draft.form.run_after_startup
+        }))
+      }),
     onSuccess: (batch) => {
       const ids = new Set(
-        batch.items.filter((item) => item.status === "completed").map((item) => item.draftId)
+        batch.items.filter((item) => item.status === "completed").map((item) => item.draft_id)
       );
       setDrafts((current) => current.filter((item) => !ids.has(item.id)));
       setSelectedDraftId(null);
-      setBatches((current) => [batch, ...current].slice(0, 5));
       pushToast({
         title: "Draft queue submitted",
         description: `${batch.completed}/${batch.total} completed, ${batch.skipped} skipped`,
         tone: batch.failed ? "error" : "success"
       });
       invalidateRuntimeQueries(queryClient);
+      void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
     },
     onError: (error) => pushToast({ title: "Draft queue stopped", description: error.message, tone: "error" })
   });
@@ -378,6 +374,7 @@ export function WorkflowsPage(): JSX.Element {
               onClick={() => {
                 void jobs.refetch();
                 void schedules.refetch();
+                void workflowRuns.refetch();
               }}
             >
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -476,7 +473,7 @@ export function WorkflowsPage(): JSX.Element {
             </div>
           </section>
 
-          {batches.length ? (
+          {workflowRuns.data?.items.length ? (
             <section className="surface p-4">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -485,7 +482,7 @@ export function WorkflowsPage(): JSX.Element {
                 </div>
               </div>
               <div className="mt-4 space-y-3">
-                {batches.map((batch) => (
+                {workflowRuns.data.items.map((batch) => (
                   <BatchSummary key={batch.id} batch={batch} />
                 ))}
               </div>
@@ -1079,12 +1076,12 @@ function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Workf
   );
 }
 
-function BatchSummary({ batch }: { batch: WorkflowBatch }): JSX.Element {
+function BatchSummary({ batch }: { batch: WorkflowBatchRun }): JSX.Element {
   return (
     <article className="rounded-md border bg-card p-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold">{formatDate(batch.createdAt)}</h3>
+          <h3 className="text-sm font-semibold">{formatDate(batch.created_at)}</h3>
           <p className="mt-1 text-xs text-muted-foreground">Concurrency {batch.concurrency}</p>
         </div>
         <Badge tone={batch.failed ? "danger" : batch.skipped ? "muted" : "success"}>
@@ -1093,17 +1090,17 @@ function BatchSummary({ batch }: { batch: WorkflowBatch }): JSX.Element {
       </div>
       <div className="mt-3 space-y-2">
         {batch.items.map((item) => (
-          <div key={item.draftId} className="rounded-md border bg-muted/20 p-2 text-xs">
+          <div key={item.id ?? item.draft_id} className="rounded-md border bg-muted/20 p-2 text-xs">
             <div className="flex items-center justify-between gap-2">
               <span className="truncate font-medium">{item.title}</span>
               <Badge tone={item.status === "completed" ? "success" : item.status === "skipped" ? "muted" : "danger"}>
                 {item.status}
               </Badge>
             </div>
-            {item.jobIds.length ? (
-              <p className="mt-1 break-all text-muted-foreground">{item.jobIds.length} job(s): {item.jobIds.join(", ")}</p>
-            ) : item.error ? (
-              <p className="mt-1 break-words text-destructive">{item.error}</p>
+            {item.job_ids.length ? (
+              <p className="mt-1 break-all text-muted-foreground">{item.job_ids.length} job(s): {item.job_ids.join(", ")}</p>
+            ) : item.error_message ? (
+              <p className="mt-1 break-words text-destructive">{item.error_message}</p>
             ) : (
               <p className="mt-1 text-muted-foreground">No job was created.</p>
             )}
@@ -1591,55 +1588,6 @@ function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>
   void queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
 }
 
-async function runDraftBatch(
-  drafts: DraftWorkflow[],
-  concurrency: number,
-  previousBatches: WorkflowBatch[]
-): Promise<WorkflowBatchItem[]> {
-  const results: WorkflowBatchItem[] = [];
-  let nextIndex = 0;
-  const workerCount = Math.min(clampConcurrency(concurrency), drafts.length);
-  async function runNext(): Promise<void> {
-    const index = nextIndex;
-    nextIndex += 1;
-    const draft = drafts[index];
-    if (!draft) {
-      return;
-    }
-    if (draft.form.modules.rule && draft.form.rules.skip_if_last_run_failed && lastBatchStatus(draft.id, previousBatches) === "failed") {
-      results[index] = {
-        draftId: draft.id,
-        title: draftTitle(draft.form),
-        status: "skipped",
-        jobIds: [],
-        error: "Skipped because the last run failed"
-      };
-      await runNext();
-      return;
-    }
-    try {
-      const response = await submitDraft(draft.form);
-      results[index] = {
-        draftId: draft.id,
-        title: draftTitle(draft.form),
-        status: "completed",
-        jobIds: response.jobIds
-      };
-    } catch (error) {
-      results[index] = {
-        draftId: draft.id,
-        title: draftTitle(draft.form),
-        status: "failed",
-        jobIds: [],
-        error: error instanceof Error ? error.message : "Workflow failed"
-      };
-    }
-    await runNext();
-  }
-  await Promise.all(Array.from({ length: workerCount }, () => runNext()));
-  return results;
-}
-
 function loadStoredDrafts(): DraftWorkflow[] {
   try {
     const text = window.localStorage.getItem(draftsStorageKey);
@@ -1775,9 +1723,9 @@ function legacyActionToBehavior(action: WorkflowAction | undefined): TagVariantB
   return "download";
 }
 
-function lastBatchStatus(draftId: string, batches: WorkflowBatch[]): WorkflowBatchItem["status"] | null {
-  for (const batch of batches) {
-    const item = batch.items.find((entry) => entry.draftId === draftId);
+function lastRunItemStatus(draftId: string, runs: WorkflowBatchRun[]): WorkflowBatchRunItem["status"] | null {
+  for (const run of runs) {
+    const item = run.items.find((entry) => entry.draft_id === draftId);
     if (item) {
       return item.status;
     }
