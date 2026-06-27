@@ -206,6 +206,144 @@ def test_download_uses_tag_variant_naming_rule(tmp_path):
     assert file_downloader.calls[0][3] == "Artist-123/AI/100_p0.jpg"
 
 
+def test_download_uses_tag_variant_behavior_skip(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    pixiv_client = FakePixivClient()
+    file_downloader = NamingFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        artwork_repository=ArtworkRepository(db_path),
+        file_repository=ArtworkFileRepository(db_path),
+        sleeper=lambda: None,
+    )
+    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+        Artwork(
+            id="100",
+            artist_id=user_id,
+            tags=("AI生成",),
+            files=(
+                ArtworkFile(
+                    artwork_id="100",
+                    page_index=0,
+                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                    file_name="100_p0.jpg",
+                ),
+            ),
+        ),
+        Artwork(
+            id="101",
+            artist_id=user_id,
+            files=(
+                ArtworkFile(
+                    artwork_id="101",
+                    page_index=0,
+                    original_url="https://i.pximg.net/img-original/img/101_p0.jpg",
+                    file_name="101_p0.jpg",
+                ),
+            ),
+        ),
+    ]
+
+    summary = service.download(
+        user_id="123",
+        options=DownloadOptions(
+            tag_variants=(
+                {
+                    "tag": "AI生成",
+                    "behavior": "skip",
+                    "naming_rule": "{artist}-{artist_id}/AI/{original_filename}",
+                },
+            ),
+        ),
+    )
+
+    assert summary.downloaded_files == 1
+    assert summary.skipped_files == 1
+    assert len(file_downloader.calls) == 1
+    assert file_downloader.calls[0][2].endswith("101_p0.jpg")
+    assert repository.get_by_id("123").last_download_id == "101"
+
+
+def test_download_uses_tag_variant_behavior_retry_failed_only(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Artist"))
+    artwork_repository.upsert(Artwork(id="100", artist_id="123", tags=("AI生成",)))
+    failed_id = file_repository.upsert(
+        ArtworkFile(
+            artwork_id="100",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+            file_name="100_p0.jpg",
+            status="failed",
+            error_message="network",
+        )
+    )
+    file_repository.upsert(
+        ArtworkFile(
+            artwork_id="100",
+            page_index=1,
+            original_url="https://i.pximg.net/img-original/img/100_p1.jpg",
+            file_name="100_p1.jpg",
+            status="pending",
+        )
+    )
+    pixiv_client = FakePixivClient()
+    file_downloader = NamingFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=artist_repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+        sleeper=lambda: None,
+    )
+    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+        Artwork(
+            id="100",
+            artist_id=user_id,
+            tags=("AI生成",),
+            files=(
+                ArtworkFile(
+                    artwork_id="100",
+                    page_index=0,
+                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                    file_name="100_p0.jpg",
+                ),
+                ArtworkFile(
+                    artwork_id="100",
+                    page_index=1,
+                    original_url="https://i.pximg.net/img-original/img/100_p1.jpg",
+                    file_name="100_p1.jpg",
+                ),
+            ),
+        )
+    ]
+
+    summary = service.download(
+        user_id="123",
+        options=DownloadOptions(
+            full_download=True,
+            tag_variants=({"tag": "AI生成", "behavior": "retry_failed"},),
+        ),
+    )
+
+    assert summary.downloaded_files == 1
+    assert summary.skipped_files == 1
+    assert len(file_downloader.calls) == 1
+    assert file_downloader.calls[0][2].endswith("100_p0.jpg")
+    assert file_repository.get_by_id(failed_id).status == "downloaded"
+
+
 def test_only_new_artworks_filters_before_download(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")

@@ -36,6 +36,7 @@ def create_download(
                 "only_new_artworks": request.only_new_artworks,
                 "stop_if_artwork_count_above": request.stop_if_artwork_count_above,
                 "naming_tag_variants": request.naming_tag_variants or [],
+                "tag_variants": request.tag_variants or [],
             },
         )
     finally:

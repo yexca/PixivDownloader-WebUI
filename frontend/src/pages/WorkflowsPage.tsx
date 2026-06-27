@@ -53,6 +53,7 @@ type WorkflowTarget =
   | "artists_not_checked";
 type WorkflowAction = "download_artist" | "sync_artist" | "retry_failed_artist";
 type DownloadScope = "incremental" | "full";
+type TagVariantBehavior = "download" | "skip" | "retry_failed";
 
 type RuleConfig = {
   only_new_artworks: boolean;
@@ -61,7 +62,7 @@ type RuleConfig = {
   skip_if_last_run_failed: boolean;
   tag_variant_enabled: boolean;
   tag_variant_tag: string;
-  tag_variant_action: WorkflowAction;
+  tag_variant_behavior: TagVariantBehavior;
   tag_variant_naming_rule: string;
 };
 
@@ -178,7 +179,7 @@ const initialForm: WorkflowForm = {
     skip_if_last_run_failed: false,
     tag_variant_enabled: false,
     tag_variant_tag: "",
-    tag_variant_action: "download_artist",
+    tag_variant_behavior: "download",
     tag_variant_naming_rule: "{artist}-{artist_id}/{ai}/{original_filename}"
   }
 };
@@ -204,6 +205,12 @@ const actionLabels: Record<WorkflowAction, string> = {
   download_artist: "Download",
   sync_artist: "Sync metadata",
   retry_failed_artist: "Retry failed files"
+};
+
+const tagVariantBehaviorLabels: Record<TagVariantBehavior, string> = {
+  download: "Download normally",
+  skip: "Skip download",
+  retry_failed: "Retry failed files only"
 };
 
 const targetLabels: Record<WorkflowTarget, string> = {
@@ -1029,7 +1036,7 @@ function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Workf
             setForm({ ...form, rules: { ...form.rules, tag_variant_enabled: event.target.checked } })
           }
         />
-        Run naming/action variant when tag matches
+        Run tag behavior variant when artwork tag matches
       </label>
       {form.rules.tag_variant_enabled ? (
         <div className="grid gap-3 sm:grid-cols-3">
@@ -1042,17 +1049,17 @@ function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Workf
               }
             />
           </Field>
-          <Field label="Variant action">
+          <Field label="Matching tag behavior">
             <Select
-              value={form.rules.tag_variant_action}
+              value={form.rules.tag_variant_behavior}
               onChange={(event) =>
                 setForm({
                   ...form,
-                  rules: { ...form.rules, tag_variant_action: event.target.value as WorkflowAction }
+                  rules: { ...form.rules, tag_variant_behavior: event.target.value as TagVariantBehavior }
                 })
               }
             >
-              {Object.entries(actionLabels).map(([value, label]) => (
+              {Object.entries(tagVariantBehaviorLabels).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
             </Select>
@@ -1430,7 +1437,7 @@ async function submitDraft(form: WorkflowForm): Promise<{ jobIds: string[] }> {
       naming_rule: namingRuleOrNull(form),
       only_new_artworks: ruleOnlyNewArtworks(form),
       stop_if_artwork_count_above: ruleArtworkCountLimit(form),
-      naming_tag_variants: ruleNamingVariants(form)
+      tag_variants: ruleTagVariants(form)
     });
     return { jobIds: [response.job_id] };
   }
@@ -1448,7 +1455,7 @@ async function submitDraft(form: WorkflowForm): Promise<{ jobIds: string[] }> {
       naming_rule: namingRuleOrNull(form),
       only_new_artworks: ruleOnlyNewArtworks(form),
       stop_if_artwork_count_above: ruleArtworkCountLimit(form),
-      naming_tag_variants: ruleNamingVariants(form)
+      tag_variants: ruleTagVariants(form)
     });
     return { jobIds: [response.job_id] };
   }
@@ -1496,8 +1503,7 @@ function workflowToConfig(form: WorkflowForm): ScheduledTaskConfig {
       naming_rule: namingRuleOrNull(form),
       only_new_artworks: ruleOnlyNewArtworks(form),
       stop_if_artwork_count_above: ruleArtworkCountLimit(form),
-      tag_variant_action: ruleTagVariantAction(form),
-      naming_tag_variants: ruleNamingVariants(form)
+      tag_variants: ruleTagVariants(form)
     },
     max_artists_per_run: form.max_artists_per_run,
     artist_selection: form.artist_selection,
@@ -1661,12 +1667,18 @@ function normalizeStoredForm(form: WorkflowForm): WorkflowForm {
   if (legacyModules.advanced) {
     modules.rule = true;
   }
+  const legacyRules = form.rules as RuleConfig & { tag_variant_action?: WorkflowAction };
   return {
     ...initialForm,
     ...form,
     modules,
     naming_rule: form.naming_rule || defaultNamingRule,
-    rules: { ...initialForm.rules, ...form.rules }
+    rules: {
+      ...initialForm.rules,
+      ...form.rules,
+      tag_variant_behavior:
+        form.rules.tag_variant_behavior ?? legacyActionToBehavior(legacyRules.tag_variant_action)
+    }
   };
 }
 
@@ -1697,7 +1709,7 @@ function ruleSummary(form: WorkflowForm): string {
     rules.push("skip after failed run");
   }
   if (form.rules.tag_variant_enabled && form.rules.tag_variant_tag.trim()) {
-    rules.push(`variant for ${form.rules.tag_variant_tag.trim()}`);
+    rules.push(`${tagVariantBehaviorLabels[form.rules.tag_variant_behavior]} for ${form.rules.tag_variant_tag.trim()}`);
   }
   return rules.join(", ");
 }
@@ -1735,23 +1747,32 @@ function ruleArtworkCountLimit(form: WorkflowForm): number | null {
   return numberOrNull(form.rules.artwork_count_limit);
 }
 
-function ruleTagVariantAction(form: WorkflowForm): string | null {
-  if (!form.modules.rule || !form.rules.tag_variant_enabled || !form.rules.tag_variant_tag.trim()) {
-    return null;
-  }
-  return form.rules.tag_variant_action;
-}
-
-function ruleNamingVariants(form: WorkflowForm): Array<Record<string, string>> {
+function ruleTagVariants(form: WorkflowForm): Array<Record<string, string>> {
   if (!form.modules.rule || !form.rules.tag_variant_enabled) {
     return [];
   }
   const tag = form.rules.tag_variant_tag.trim();
   const namingRule = form.rules.tag_variant_naming_rule.trim();
-  if (!tag || !namingRule) {
+  if (!tag) {
     return [];
   }
-  return [{ tag, naming_rule: namingRule }];
+  return [
+    {
+      tag,
+      behavior: form.rules.tag_variant_behavior,
+      ...(namingRule ? { naming_rule: namingRule } : {})
+    }
+  ];
+}
+
+function legacyActionToBehavior(action: WorkflowAction | undefined): TagVariantBehavior {
+  if (action === "retry_failed_artist") {
+    return "retry_failed";
+  }
+  if (action === "sync_artist") {
+    return "skip";
+  }
+  return "download";
 }
 
 function lastBatchStatus(draftId: string, batches: WorkflowBatch[]): WorkflowBatchItem["status"] | null {

@@ -16,6 +16,7 @@ export type DownloadCreateRequest = {
   only_new_artworks?: boolean;
   stop_if_artwork_count_above?: number | null;
   naming_tag_variants?: Array<Record<string, string>>;
+  tag_variants?: Array<Record<string, string>>;
 };
 
 export type DownloadCreateResponse = {

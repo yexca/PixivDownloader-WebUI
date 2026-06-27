@@ -48,6 +48,7 @@ class DownloadOptions:
     only_new_artworks: bool = False
     stop_if_artwork_count_above: int | None = None
     naming_tag_variants: tuple[dict[str, str], ...] = ()
+    tag_variants: tuple[dict[str, str], ...] = ()
 
 
 class DownloadService:
@@ -122,6 +123,7 @@ class DownloadService:
             artworks=artworks,
             retry_failed=resolved_options.retry_failed,
         )
+        artwork_by_id = {artwork.id: artwork for artwork in artworks}
 
         downloaded_files = 0
         skipped_files = 0
@@ -134,6 +136,9 @@ class DownloadService:
             for file in files:
                 active_file = file
                 self._check_cancelled(cancel_callback)
+                artwork = artwork_by_id.get(file.artwork_id)
+                variant = matching_tag_variant(artwork, resolved_options)
+                behavior = variant.get("behavior", "download")
                 self._report(
                     progress_callback,
                     DownloadProgress(
@@ -144,6 +149,22 @@ class DownloadService:
                         failed_files=failed_files,
                     ),
                 )
+                if behavior == "skip":
+                    skipped_files += 1
+                    self._mark_file(file, status="skipped", error_message=None)
+                    current_download_id = artwork_id_from_url(file.original_url)
+                    if last_download_id < current_download_id:
+                        last_download_id = current_download_id
+                    active_file = None
+                    continue
+                if behavior == "retry_failed" and file.status != "failed":
+                    skipped_files += 1
+                    self._mark_file(file, status="skipped", error_message=None)
+                    current_download_id = artwork_id_from_url(file.original_url)
+                    if last_download_id < current_download_id:
+                        last_download_id = current_download_id
+                    active_file = None
+                    continue
                 current_download_id = artwork_id_from_url(file.original_url)
                 if (
                     not resolved_options.retry_failed
@@ -167,16 +188,13 @@ class DownloadService:
                 self._mark_file(file, status="downloading", error_message=None)
                 self._check_cancelled(cancel_callback)
                 try:
-                    artwork = next(
-                        (artwork for artwork in artworks if artwork.id == file.artwork_id),
-                        None,
-                    )
                     relative_path = render_naming_rule(
                         resolved_options.naming_rule,
                         artist=artist,
                         artwork=artwork,
                         file=file,
                         variants=resolved_options.naming_tag_variants,
+                        tag_variants=resolved_options.tag_variants,
                     )
                     if relative_path is None:
                         result = self.file_downloader.download(
@@ -301,6 +319,7 @@ class DownloadService:
                         page_index=file.page_index,
                         original_url=file.original_url,
                         file_name=file.file_name,
+                        status=existing.status if existing is not None else "pending",
                     )
                 )
         return selected_files
@@ -445,8 +464,12 @@ def render_naming_rule(
     artwork: Artwork | None,
     file: ArtworkFile,
     variants: tuple[dict[str, str], ...] = (),
+    tag_variants: tuple[dict[str, str], ...] = (),
 ) -> str | None:
-    if artwork is not None:
+    variant = matching_tag_variant(artwork, DownloadOptions(tag_variants=tag_variants))
+    if variant.get("naming_rule"):
+        rule = variant["naming_rule"]
+    elif artwork is not None:
         for variant in variants:
             tag = (variant.get("tag") or "").casefold()
             variant_rule = variant.get("naming_rule") or ""
@@ -480,6 +503,16 @@ def render_naming_rule(
     if "{ext}" not in rule and "." not in result.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] and ext:
         result = f"{result}.{ext}"
     return result
+
+
+def matching_tag_variant(artwork: Artwork | None, options: DownloadOptions) -> dict[str, str]:
+    if artwork is None:
+        return {}
+    for variant in options.tag_variants:
+        tag = (variant.get("tag") or "").casefold()
+        if tag and any(item.casefold() == tag for item in artwork.tags):
+            return variant
+    return {}
 
 
 def remove_empty_token_prefix(rule: str, token: str) -> str:

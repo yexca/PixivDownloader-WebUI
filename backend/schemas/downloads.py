@@ -19,6 +19,7 @@ class DownloadCreateRequest(BaseModel):
     only_new_artworks: bool = False
     stop_if_artwork_count_above: int | None = None
     naming_tag_variants: list[dict[str, str]] | None = None
+    tag_variants: list[dict[str, str]] | None = None
 
     @model_validator(mode="after")
     def validate_input(self) -> DownloadCreateRequest:

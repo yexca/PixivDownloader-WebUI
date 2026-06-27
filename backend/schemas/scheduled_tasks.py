@@ -240,4 +240,59 @@ def clean_download_options(options: dict[str, object]) -> dict[str, object]:
                 cleaned_variants.append({"tag": tag.strip(), "naming_rule": variant_rule.strip()})
         if cleaned_variants:
             cleaned["naming_tag_variants"] = cleaned_variants
+    tag_variants = clean_tag_variants(options.get("tag_variants"))
+    if not tag_variants:
+        tag_variants = legacy_tag_variants(options)
+    if tag_variants:
+        cleaned["tag_variants"] = tag_variants
     return cleaned
+
+
+def clean_tag_variants(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    cleaned: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        behavior = item.get("behavior")
+        naming_rule = item.get("naming_rule")
+        if not isinstance(tag, str) or not tag.strip():
+            continue
+        variant: dict[str, str] = {"tag": tag.strip()}
+        if isinstance(behavior, str) and behavior in {"download", "skip", "retry_failed"}:
+            variant["behavior"] = behavior
+        if isinstance(naming_rule, str) and naming_rule.strip():
+            variant["naming_rule"] = naming_rule.strip()
+        if len(variant) > 1:
+            cleaned.append(variant)
+    return cleaned
+
+
+def legacy_tag_variants(options: dict[str, object]) -> list[dict[str, str]]:
+    naming_variants = options.get("naming_tag_variants")
+    if not isinstance(naming_variants, list):
+        return []
+    behavior = legacy_action_to_behavior(options.get("tag_variant_action"))
+    result: list[dict[str, str]] = []
+    for item in naming_variants:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        naming_rule = item.get("naming_rule")
+        if not isinstance(tag, str) or not tag.strip():
+            continue
+        variant = {"tag": tag.strip(), "behavior": behavior}
+        if isinstance(naming_rule, str) and naming_rule.strip():
+            variant["naming_rule"] = naming_rule.strip()
+        result.append(variant)
+    return result
+
+
+def legacy_action_to_behavior(value: object) -> str:
+    if value == "retry_failed_artist":
+        return "retry_failed"
+    if value == "sync_artist":
+        return "skip"
+    return "download"

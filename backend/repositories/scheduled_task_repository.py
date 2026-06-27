@@ -342,7 +342,35 @@ def clean_download_options(value: object) -> dict[str, object]:
     naming_tag_variants = value.get("naming_tag_variants")
     if isinstance(naming_tag_variants, list):
         cleaned["naming_tag_variants"] = naming_tag_variants
+    tag_variants = value.get("tag_variants")
+    if isinstance(tag_variants, list):
+        cleaned["tag_variants"] = tag_variants
+    elif isinstance(naming_tag_variants, list):
+        cleaned["tag_variants"] = legacy_tag_variants(
+            naming_tag_variants,
+            value.get("tag_variant_action"),
+        )
     return cleaned
+
+
+def legacy_tag_variants(
+    naming_variants: list[object],
+    action: object,
+) -> list[dict[str, str]]:
+    behavior = "retry_failed" if action == "retry_failed_artist" else "skip" if action == "sync_artist" else "download"
+    result: list[dict[str, str]] = []
+    for item in naming_variants:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        naming_rule = item.get("naming_rule")
+        if not isinstance(tag, str) or not tag.strip():
+            continue
+        variant = {"tag": tag.strip(), "behavior": behavior}
+        if isinstance(naming_rule, str) and naming_rule.strip():
+            variant["naming_rule"] = naming_rule.strip()
+        result.append(variant)
+    return result
     try:
         return int(value)
     except (TypeError, ValueError):

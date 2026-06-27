@@ -79,6 +79,11 @@ class DownloadWorker:
                     job.options.get("stop_if_artwork_count_above")
                 ),
                 naming_tag_variants=tuple_dict_option(job.options.get("naming_tag_variants")),
+                tag_variants=tuple_tag_variant_option(
+                    job.options.get("tag_variants"),
+                    legacy_variants=job.options.get("naming_tag_variants"),
+                    legacy_action=job.options.get("tag_variant_action"),
+                ),
             )
             summary = service.download(
                 user_id=job.input_user_id,
@@ -292,3 +297,49 @@ def tuple_dict_option(value: object) -> tuple[dict[str, str], ...]:
         if isinstance(tag, str) and isinstance(naming_rule, str):
             result.append({"tag": tag, "naming_rule": naming_rule})
     return tuple(result)
+
+
+def tuple_tag_variant_option(
+    value: object,
+    *,
+    legacy_variants: object = None,
+    legacy_action: object = None,
+) -> tuple[dict[str, str], ...]:
+    if not isinstance(value, list):
+        value = legacy_tag_variant_option(legacy_variants, legacy_action)
+    result: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        behavior = item.get("behavior")
+        naming_rule = item.get("naming_rule")
+        if not isinstance(tag, str) or not tag.strip():
+            continue
+        variant: dict[str, str] = {"tag": tag}
+        if isinstance(behavior, str) and behavior in {"download", "skip", "retry_failed"}:
+            variant["behavior"] = behavior
+        if isinstance(naming_rule, str) and naming_rule.strip():
+            variant["naming_rule"] = naming_rule
+        if len(variant) > 1:
+            result.append(variant)
+    return tuple(result)
+
+
+def legacy_tag_variant_option(value: object, action: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    behavior = "retry_failed" if action == "retry_failed_artist" else "skip" if action == "sync_artist" else "download"
+    result: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        tag = item.get("tag")
+        naming_rule = item.get("naming_rule")
+        if not isinstance(tag, str) or not tag.strip():
+            continue
+        variant = {"tag": tag, "behavior": behavior}
+        if isinstance(naming_rule, str) and naming_rule.strip():
+            variant["naming_rule"] = naming_rule
+        result.append(variant)
+    return result
