@@ -48,6 +48,8 @@ type BasicForm = Pick<
   | "request_base_delay_seconds"
   | "request_random_delay_seconds"
   | "max_concurrent_downloads"
+  | "max_active_scheduled_tasks"
+  | "max_active_one_time_tasks"
   | "min_free_space_gb"
   | "library_stale_check_days"
   | "overwrite_existing_files"
@@ -510,6 +512,24 @@ function BasicSettingsTab({
               onChange={(value) => onChange({ ...form, max_concurrent_downloads: Math.max(1, value) })}
             />
             <NumberField
+              label="Max active schedules"
+              value={form.max_active_scheduled_tasks}
+              error={errors.max_active_scheduled_tasks}
+              min={1}
+              step={1}
+              tooltip="Maximum number of schedules allowed to stay active. Extra enabled schedules wait as inactive."
+              onChange={(value) => onChange({ ...form, max_active_scheduled_tasks: Math.max(1, Math.trunc(value)) })}
+            />
+            <NumberField
+              label="Max active one-time tasks"
+              value={form.max_active_one_time_tasks}
+              error={errors.max_active_one_time_tasks}
+              min={1}
+              step={1}
+              tooltip="Maximum number of one-time workflow jobs allowed to wait or run. Extra one-time jobs stay inactive."
+              onChange={(value) => onChange({ ...form, max_active_one_time_tasks: Math.max(1, Math.trunc(value)) })}
+            />
+            <NumberField
               label="Minimum free GB"
               value={form.min_free_space_gb}
               error={errors.min_free_space_gb}
@@ -908,6 +928,8 @@ function toBasicForm(settings: SettingsResponse): BasicForm {
     request_base_delay_seconds: settings.request_base_delay_seconds,
     request_random_delay_seconds: settings.request_random_delay_seconds,
     max_concurrent_downloads: settings.max_concurrent_downloads,
+    max_active_scheduled_tasks: settings.max_active_scheduled_tasks,
+    max_active_one_time_tasks: settings.max_active_one_time_tasks,
     min_free_space_gb: settings.min_free_space_gb,
     library_stale_check_days: settings.library_stale_check_days,
     overwrite_existing_files: settings.overwrite_existing_files,
@@ -928,6 +950,12 @@ function validateBasic(form: BasicForm, downloadPathEditable: boolean): Record<s
   }
   if (form.max_concurrent_downloads < 1 || !Number.isInteger(form.max_concurrent_downloads)) {
     errors.max_concurrent_downloads = "Must be a whole number of at least 1.";
+  }
+  if (form.max_active_scheduled_tasks < 1 || !Number.isInteger(form.max_active_scheduled_tasks)) {
+    errors.max_active_scheduled_tasks = "Must be a whole number of at least 1.";
+  }
+  if (form.max_active_one_time_tasks < 1 || !Number.isInteger(form.max_active_one_time_tasks)) {
+    errors.max_active_one_time_tasks = "Must be a whole number of at least 1.";
   }
   if (form.min_free_space_gb < 0) {
     errors.min_free_space_gb = "Must be zero or greater.";

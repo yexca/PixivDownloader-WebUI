@@ -75,6 +75,7 @@ def update_scheduled_task(
     request: ScheduledTaskUpdateRequest,
     db_path: DbPath,
     settings_json_path: SettingsJsonPath,
+    scheduler: Scheduler,
 ) -> ScheduledTaskResponse:
     service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
     config = (
@@ -95,6 +96,7 @@ def update_scheduled_task(
         )
         if task is None:
             raise JobNotFoundError(f"scheduled task {task_id} was not found")
+        scheduler.wake()
         return scheduled_task_response(task)
     finally:
         service.close()
@@ -128,10 +130,12 @@ def delete_scheduled_task(
     task_id: int,
     db_path: DbPath,
     settings_json_path: SettingsJsonPath,
+    scheduler: Scheduler,
 ) -> None:
     service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
     try:
         if not service.delete_task(task_id):
             raise JobNotFoundError(f"scheduled task {task_id} was not found")
+        scheduler.wake()
     finally:
         service.close()

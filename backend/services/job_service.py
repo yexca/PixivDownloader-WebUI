@@ -35,6 +35,7 @@ class JobService:
         sync_only: bool = False,
         retry_failed_artist: bool = False,
         options: dict[str, object] | None = None,
+        gate_one_time: bool = True,
     ) -> Job:
         if bool(user_id) == bool(artwork_id):
             raise ValueError("exactly one of user_id or artwork_id is required")
@@ -51,26 +52,31 @@ class JobService:
         )
         if job_type in DOWNLOAD_JOB_TYPES:
             self._ensure_download_space()
+        cleaned_options = clean_job_options(options or {})
+        status: JobStatus = "queued"
+        if gate_one_time:
+            cleaned_options["activation_scope"] = "one_time"
+            status = self._next_one_time_status()
         job = Job(
             id=str(uuid4()),
             type=job_type,
-            status="queued",
+            status=status,
             input_user_id=user_id,
             input_artwork_id=artwork_id,
-            options=clean_job_options(options or {}),
+            options=cleaned_options,
         )
         self.repository.create(job)
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
                 level="info",
-                message="Job queued",
+                message="Job queued" if status == "queued" else "Job waiting for one-time task capacity",
                 payload={
                     "force_rescan": force_rescan,
                     "retry_failed": retry_failed,
                     "sync_only": sync_only,
                     "retry_failed_artist": retry_failed_artist,
-                    "options": clean_job_options(options or {}),
+                    "options": cleaned_options,
                 },
             )
         )
@@ -97,7 +103,7 @@ class JobService:
             return None
         if job.status in TERMINAL_STATUSES:
             raise JobNotCancellableError(f"job {job_id} is already {job.status}")
-        if job.status == "queued":
+        if job.status in {"inactive", "queued"}:
             cancelled = Job(
                 id=job.id,
                 type=job.type,
@@ -148,6 +154,53 @@ class JobService:
 
     def close(self) -> None:
         self.repository.close()
+
+    def activate_inactive_one_time_jobs(self) -> list[Job]:
+        capacity = self._one_time_activation_capacity()
+        if capacity <= 0:
+            return []
+        activated: list[Job] = []
+        for job in self.repository.list_inactive_one_time(limit=capacity):
+            updated = Job(
+                id=job.id,
+                type=job.type,
+                status="queued",
+                input_user_id=job.input_user_id,
+                input_artwork_id=job.input_artwork_id,
+                options=job.options,
+                artist_id=job.artist_id,
+                total_files=job.total_files,
+                completed_files=job.completed_files,
+                skipped_files=job.skipped_files,
+                failed_files=job.failed_files,
+                cancel_requested=job.cancel_requested,
+                error_message=job.error_message,
+                created_at=job.created_at,
+                started_at=job.started_at,
+                finished_at=job.finished_at,
+            )
+            self.repository.update(updated)
+            self.repository.add_event(
+                JobEvent(job_id=job.id, level="info", message="Job activated")
+            )
+            activated.append(self.repository.get_by_id(job.id) or updated)
+        return activated
+
+    def _next_one_time_status(self) -> JobStatus:
+        return "queued" if self._one_time_activation_capacity() > 0 else "inactive"
+
+    def _one_time_activation_capacity(self) -> int:
+        return max(0, self._max_active_one_time_tasks() - self.repository.count_active_one_time())
+
+    def _max_active_one_time_tasks(self) -> int:
+        settings_service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            return settings_service.load().max_active_one_time_tasks
+        finally:
+            settings_service.close()
 
     def _ensure_download_space(self) -> None:
         settings_service = AppSettingsService(

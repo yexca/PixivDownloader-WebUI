@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 from backend.repositories.job_repository import JobRepository
+from backend.services.job_service import JobService
 from backend.workers.download_worker import DownloadWorker
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ class JobQueue:
         poll_interval_seconds: float = 0.2,
     ) -> None:
         self.db_path = db_path
+        self.settings_json_path = settings_json_path
         self.worker = worker or DownloadWorker(
             db_path=db_path,
             settings_json_path=settings_json_path,
@@ -81,9 +83,22 @@ class JobQueue:
             await asyncio.to_thread(self.worker.run_job, job_id)
 
     def _next_queued_job_id(self) -> str | None:
+        self._activate_waiting_one_time_jobs()
         repository = JobRepository(self.db_path)
         try:
             job = repository.next_queued()
             return job.id if job is not None else None
         finally:
             repository.close()
+
+    def _activate_waiting_one_time_jobs(self) -> None:
+        service = JobService(
+            self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            service.activate_inactive_one_time_jobs()
+        except Exception:
+            logger.exception("one-time job activation failed")
+        finally:
+            service.close()

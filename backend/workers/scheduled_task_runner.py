@@ -68,6 +68,7 @@ class ScheduledTaskRunner:
             settings_json_path=self.settings_json_path,
         )
         try:
+            service.activate_inactive_tasks()
             results = service.run_due_tasks(startup_scan=startup_scan)
         except Exception:
             logger.exception("scheduled task scan failed")

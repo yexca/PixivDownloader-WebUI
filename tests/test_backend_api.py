@@ -1,4 +1,5 @@
 import sqlite3
+from dataclasses import replace
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
 from backend.services import scheduled_task_service
+from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
 
 
@@ -56,6 +58,8 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
             "request_base_delay_seconds": 0.2,
             "request_random_delay_seconds": 0.3,
             "max_concurrent_downloads": 2,
+            "max_active_scheduled_tasks": 3,
+            "max_active_one_time_tasks": 4,
             "min_free_space_gb": 10.0,
             "library_stale_check_days": 14,
             "overwrite_existing_files": False,
@@ -68,6 +72,8 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["download_path"].endswith("new-downloads")
     assert body["download_path_editable"] is True
     assert body["runtime_mode"] == "local"
+    assert body["max_active_scheduled_tasks"] == 3
+    assert body["max_active_one_time_tasks"] == 4
     assert body["min_free_space_gb"] == 10.0
     assert body["library_stale_check_days"] == 14
     assert body["refresh_token_configured"] is True
@@ -361,6 +367,7 @@ def test_create_download_job_persists_workflow_options(tmp_path):
         job = repository.get_by_id(response.json()["job_id"])
         assert job is not None
         assert job.options == {
+            "activation_scope": "one_time",
             "full_download": True,
             "max_artworks": 12,
             "min_artwork_id": "100",
@@ -393,6 +400,80 @@ def test_create_download_job_rejects_low_disk_space(tmp_path, monkeypatch):
     assert response.json()["error"]["code"] == "insufficient_disk_space"
 
 
+def test_one_time_download_jobs_respect_active_limit(tmp_path):
+    client = make_client(tmp_path)
+
+    first_response = client.post(
+        "/api/downloads",
+        json={
+            "user_id": "123",
+            "artwork_id": None,
+            "mode": "artist",
+            "force_rescan": False,
+            "retry_failed": False,
+        },
+    )
+    second_response = client.post(
+        "/api/downloads",
+        json={
+            "user_id": "456",
+            "artwork_id": None,
+            "mode": "artist",
+            "force_rescan": False,
+            "retry_failed": False,
+        },
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json()["status"] == "queued"
+    assert second_response.json()["status"] == "inactive"
+
+
+def test_inactive_one_time_job_activates_when_capacity_opens(tmp_path):
+    client = make_client(tmp_path)
+
+    first_response = client.post(
+        "/api/downloads",
+        json={
+            "user_id": "123",
+            "artwork_id": None,
+            "mode": "artist",
+            "force_rescan": False,
+            "retry_failed": False,
+        },
+    )
+    second_response = client.post(
+        "/api/downloads",
+        json={
+            "user_id": "456",
+            "artwork_id": None,
+            "mode": "artist",
+            "force_rescan": False,
+            "retry_failed": False,
+        },
+    )
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    service = None
+    try:
+        first = repository.get_by_id(first_response.json()["job_id"])
+        assert first is not None
+        repository.update(replace(first, status="completed"))
+    finally:
+        repository.close()
+
+    service = JobService(
+        tmp_path / "pixiv.sqlite3",
+        settings_json_path=tmp_path / "config" / "settings.json",
+    )
+    try:
+        activated = service.activate_inactive_one_time_jobs()
+        assert [job.id for job in activated] == [second_response.json()["job_id"]]
+        assert service.get_job(second_response.json()["job_id"]).status == "queued"
+    finally:
+        service.close()
+
+
 def test_scheduled_task_create_and_run_queues_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
@@ -422,6 +503,83 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     assert body["job_id"]
     assert body["task"]["last_job_id"] == body["job_id"]
     assert queue.wake_count == 2
+
+
+def test_scheduled_task_creation_limits_active_schedules(tmp_path):
+    client = make_client(tmp_path)
+
+    first_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "First",
+            "action": "download_artist",
+            "target_artist_id": "123",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+    second_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Second",
+            "action": "download_artist",
+            "target_artist_id": "456",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json()["status"] == "active"
+    assert second_response.json()["status"] == "inactive"
+
+
+def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
+    client = make_client(tmp_path)
+
+    first_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "First",
+            "action": "download_artist",
+            "target_artist_id": "123",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+    second_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Second",
+            "action": "download_artist",
+            "target_artist_id": "456",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+    service = scheduled_task_service.ScheduledTaskService(
+        tmp_path / "pixiv.sqlite3",
+        settings_json_path=tmp_path / "config" / "settings.json",
+    )
+    try:
+        assert second_response.json()["status"] == "inactive"
+        paused_response = client.put(
+            f"/api/scheduled-tasks/{first_response.json()['id']}",
+            json={"status": "paused"},
+        )
+        assert paused_response.status_code == 200
+
+        activated = service.activate_inactive_tasks()
+
+        assert [task.id for task in activated] == [second_response.json()["id"]]
+        assert service.get_task(second_response.json()["id"]).status == "active"
+    finally:
+        service.close()
 
 
 def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
@@ -955,6 +1113,102 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert list_body["items"][0]["items"][0]["title"] == "Sync artist"
 
 
+def test_workflow_batch_schedules_respect_active_limit(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 2,
+            "items": [
+                {
+                    "draft_id": "draft-1",
+                    "title": "First schedule",
+                    "schedule": True,
+                    "name": "First schedule",
+                    "interval_days": 30,
+                    "enabled": True,
+                    "run_after_startup": True,
+                    "config": {
+                        "target": {"type": "single_artist", "artist_id": "123"},
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+                {
+                    "draft_id": "draft-2",
+                    "title": "Second schedule",
+                    "schedule": True,
+                    "name": "Second schedule",
+                    "interval_days": 30,
+                    "enabled": True,
+                    "run_after_startup": True,
+                    "config": {
+                        "target": {"type": "single_artist", "artist_id": "456"},
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    schedules_response = client.get("/api/scheduled-tasks")
+
+    assert schedules_response.status_code == 200
+    tasks = sorted(schedules_response.json()["items"], key=lambda task: task["name"])
+    assert [(task["name"], task["status"]) for task in tasks] == [
+        ("First schedule", "active"),
+        ("Second schedule", "inactive"),
+    ]
+
+
+def test_workflow_batch_one_time_jobs_respect_active_limit(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 2,
+            "items": [
+                {
+                    "draft_id": "draft-1",
+                    "title": "First one-time",
+                    "config": {
+                        "target": {"type": "single_artist", "artist_id": "123"},
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+                {
+                    "draft_id": "draft-2",
+                    "title": "Second one-time",
+                    "config": {
+                        "target": {"type": "single_artist", "artist_id": "456"},
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    jobs_response = client.get("/api/jobs")
+
+    assert jobs_response.status_code == 200
+    jobs = sorted(jobs_response.json()["items"], key=lambda job: job["input_user_id"])
+    assert [(job["input_user_id"], job["status"]) for job in jobs] == [
+        ("123", "queued"),
+        ("456", "inactive"),
+    ]
+
+
 def test_create_artist_queues_sync_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
@@ -1177,6 +1431,8 @@ def make_client(tmp_path, queue=None):
             "request_base_delay_seconds": 0.1,
             "request_random_delay_seconds": 0.2,
             "max_concurrent_downloads": 1,
+            "max_active_scheduled_tasks": 1,
+            "max_active_one_time_tasks": 1,
             "min_free_space_gb": 10.0,
             "library_stale_check_days": 30,
             "overwrite_existing_files": false,

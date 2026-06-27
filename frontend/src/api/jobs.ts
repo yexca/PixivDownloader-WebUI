@@ -1,6 +1,6 @@
 import { apiRequest } from "./client";
 
-export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "inactive" | "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export type Job = {
   id: string;

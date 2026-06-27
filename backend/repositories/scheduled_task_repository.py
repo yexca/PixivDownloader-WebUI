@@ -119,6 +119,31 @@ class ScheduledTaskRepository:
             raise DatabaseError("failed to list due scheduled tasks") from exc
         return [scheduled_task_from_row(row) for row in rows]
 
+    def count_by_status(self, status: str) -> int:
+        try:
+            row = self.conn.execute(
+                "SELECT COUNT(*) AS count FROM scheduled_tasks WHERE status = ?",
+                (status,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to count {status} scheduled tasks") from exc
+        return int(row["count"] if row is not None else 0)
+
+    def list_inactive(self, *, limit: int) -> list[ScheduledTask]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM scheduled_tasks
+                WHERE status = 'inactive'
+                ORDER BY created_at, id
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to list inactive scheduled tasks") from exc
+        return [scheduled_task_from_row(row) for row in rows]
+
     def delete(self, task_id: int) -> bool:
         try:
             with self.conn:

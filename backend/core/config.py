@@ -18,6 +18,8 @@ class Settings:
     request_base_delay_seconds: float = 0.0
     request_random_delay_seconds: float = 2.0
     max_concurrent_downloads: int = 1
+    max_active_scheduled_tasks: int = 1
+    max_active_one_time_tasks: int = 1
     min_free_space_gb: float = 10.0
     overwrite_existing_files: bool = False
     skip_existing_files: bool = True
@@ -32,6 +34,14 @@ class Settings:
         max_concurrent_downloads = int(data.get("max_concurrent_downloads", 1))
         if max_concurrent_downloads < 1:
             raise ConfigError("max_concurrent_downloads must be at least 1")
+
+        max_active_scheduled_tasks = int(data.get("max_active_scheduled_tasks", 1))
+        if max_active_scheduled_tasks < 1:
+            raise ConfigError("max_active_scheduled_tasks must be at least 1")
+
+        max_active_one_time_tasks = int(data.get("max_active_one_time_tasks", 1))
+        if max_active_one_time_tasks < 1:
+            raise ConfigError("max_active_one_time_tasks must be at least 1")
 
         request_base_delay_seconds = float(data.get("request_base_delay_seconds", 0.0))
         request_random_delay_seconds = float(data.get("request_random_delay_seconds", 2.0))
@@ -52,6 +62,8 @@ class Settings:
             request_base_delay_seconds=request_base_delay_seconds,
             request_random_delay_seconds=request_random_delay_seconds,
             max_concurrent_downloads=max_concurrent_downloads,
+            max_active_scheduled_tasks=max_active_scheduled_tasks,
+            max_active_one_time_tasks=max_active_one_time_tasks,
             min_free_space_gb=min_free_space_gb,
             overwrite_existing_files=bool(data.get("overwrite_existing_files", False)),
             skip_existing_files=bool(data.get("skip_existing_files", True)),
@@ -65,6 +77,8 @@ class Settings:
             "request_base_delay_seconds": self.request_base_delay_seconds,
             "request_random_delay_seconds": self.request_random_delay_seconds,
             "max_concurrent_downloads": self.max_concurrent_downloads,
+            "max_active_scheduled_tasks": self.max_active_scheduled_tasks,
+            "max_active_one_time_tasks": self.max_active_one_time_tasks,
             "min_free_space_gb": self.min_free_space_gb,
             "overwrite_existing_files": self.overwrite_existing_files,
             "skip_existing_files": self.skip_existing_files,
@@ -137,6 +151,8 @@ class SettingsService:
             "request_base_delay_seconds": settings.request_base_delay_seconds,
             "request_random_delay_seconds": settings.request_random_delay_seconds,
             "max_concurrent_downloads": settings.max_concurrent_downloads,
+            "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
+            "max_active_one_time_tasks": settings.max_active_one_time_tasks,
             "min_free_space_gb": settings.min_free_space_gb,
             "overwrite_existing_files": settings.overwrite_existing_files,
             "skip_existing_files": settings.skip_existing_files,

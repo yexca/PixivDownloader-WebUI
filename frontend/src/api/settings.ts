@@ -9,6 +9,8 @@ export type SettingsResponse = {
   request_base_delay_seconds: number;
   request_random_delay_seconds: number;
   max_concurrent_downloads: number;
+  max_active_scheduled_tasks: number;
+  max_active_one_time_tasks: number;
   min_free_space_gb: number;
   library_stale_check_days: number;
   overwrite_existing_files: boolean;
@@ -21,6 +23,8 @@ export type SettingsUpdateRequest = {
   request_base_delay_seconds?: number;
   request_random_delay_seconds?: number;
   max_concurrent_downloads?: number;
+  max_active_scheduled_tasks?: number;
+  max_active_one_time_tasks?: number;
   min_free_space_gb?: number;
   library_stale_check_days?: number;
   overwrite_existing_files?: boolean;

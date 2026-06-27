@@ -19,6 +19,7 @@ import {
 import { createArtist, listLocalTags, type LocalTag } from "@/api/artists";
 import { createDownloadJob } from "@/api/downloads";
 import { listJobs, type Job } from "@/api/jobs";
+import { getSettings, updateSettings, type SettingsResponse } from "@/api/settings";
 import {
   createScheduledTask,
   deleteScheduledTask,
@@ -226,7 +227,6 @@ export function WorkflowsPage(): JSX.Element {
   const [tab, setTab] = React.useState<WorkflowTab>("active");
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
-  const [oneOffConcurrency, setOneOffConcurrency] = React.useState(1);
 
   React.useEffect(() => {
     const storedDrafts = loadStoredDrafts();
@@ -256,6 +256,17 @@ export function WorkflowsPage(): JSX.Element {
     refetchInterval: 15000
   });
   const localTags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
+  const settings = useQuery({ queryKey: ["settings"], queryFn: getSettings });
+
+  const limitMutation = useMutation({
+    mutationFn: updateSettings,
+    onSuccess: () => {
+      pushToast({ title: "Workflow limits synced", tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      invalidateRuntimeQueries(queryClient);
+    },
+    onError: (error) => pushToast({ title: "Workflow limits could not sync", description: error.message, tone: "error" })
+  });
 
   const selectedDraft = drafts.find((draft) => draft.id === selectedDraftId) ?? drafts[0] ?? null;
   const errors = validateForm(form);
@@ -440,7 +451,12 @@ export function WorkflowsPage(): JSX.Element {
                 type="button"
                 variant="outline"
                 disabled={drafts.length === 0 || runAllMutation.isPending}
-                onClick={() => runAllMutation.mutate({ items: drafts, concurrency: oneOffConcurrency })}
+                onClick={() =>
+                  runAllMutation.mutate({
+                    items: drafts,
+                    concurrency: clampConcurrency(settings.data?.max_active_one_time_tasks ?? 1)
+                  })
+                }
               >
                 <Play className="h-4 w-4" aria-hidden="true" />
                 Run All
@@ -457,20 +473,13 @@ export function WorkflowsPage(): JSX.Element {
                 Clear
               </Button>
             </div>
-            <div className="mt-3 rounded-md border bg-muted/20 p-3">
-              <Field label="One-off workflow concurrency">
-                <Input
-                  type="number"
-                  min={1}
-                  max={6}
-                  value={oneOffConcurrency}
-                  onChange={(event) => setOneOffConcurrency(clampConcurrency(Number(event.target.value)))}
-                />
-              </Field>
-              <p className="mt-2 text-xs text-muted-foreground">
-                Scheduled drafts are created immediately; one-off drafts are submitted in parallel up to this limit.
-              </p>
-            </div>
+            <WorkflowLimitPanel
+              jobs={jobs.data?.items ?? []}
+              schedules={schedules.data?.items ?? []}
+              settings={settings.data}
+              disabled={settings.isLoading || limitMutation.isPending}
+              onSync={(key, value) => limitMutation.mutate({ [key]: value })}
+            />
           </section>
 
           {workflowRuns.data?.items.length ? (
@@ -1208,7 +1217,7 @@ function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
   const statusMutation = useMutation({
     mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
     onSuccess: () => {
-      pushToast({ title: task.status === "active" ? "Schedule paused" : "Schedule activated", tone: "success" });
+      pushToast({ title: task.status === "active" ? "Schedule paused" : "Schedule activation requested", tone: "success" });
       invalidate();
     },
     onError: (error) => pushToast({ title: "Schedule could not be updated", description: error.message, tone: "error" })
@@ -1300,6 +1309,161 @@ function JobWorkflowCard({ job }: { job: Job }): JSX.Element {
         </p>
       ) : null}
     </article>
+  );
+}
+
+function WorkflowLimitPanel({
+  jobs,
+  schedules,
+  settings,
+  disabled,
+  onSync
+}: {
+  jobs: Job[];
+  schedules: ScheduledTask[];
+  settings?: SettingsResponse;
+  disabled: boolean;
+  onSync: (key: "max_active_one_time_tasks" | "max_active_scheduled_tasks", value: number) => void;
+}): JSX.Element {
+  const oneTimeStats = workflowJobStats(jobs);
+  const scheduleStats = scheduleTaskStats(schedules);
+
+  return (
+    <div className="mt-3 space-y-2 rounded-md border bg-muted/20 p-3">
+      <WorkflowLimitControl
+        label="One-time tasks"
+        value={settings?.max_active_one_time_tasks ?? 1}
+        disabled={disabled || !settings}
+        active={oneTimeStats.active}
+        waiting={oneTimeStats.waiting}
+        onSync={(value) => onSync("max_active_one_time_tasks", value)}
+      />
+      <WorkflowLimitControl
+        label="Schedule tasks"
+        value={settings?.max_active_scheduled_tasks ?? 1}
+        disabled={disabled || !settings}
+        active={scheduleStats.active}
+        waiting={scheduleStats.waiting}
+        onSync={(value) => onSync("max_active_scheduled_tasks", value)}
+      />
+    </div>
+  );
+}
+
+function WorkflowLimitControl({
+  label,
+  value,
+  disabled,
+  active,
+  waiting,
+  onSync
+}: {
+  label: string;
+  value: number;
+  disabled: boolean;
+  active: number;
+  waiting: number;
+  onSync: (value: number) => void;
+}): JSX.Element {
+  const initialCustomValue = value >= 6 ? value : 6;
+  const [draftValue, setDraftValue] = React.useState(String(initialCustomValue));
+  const [customValue, setCustomValue] = React.useState(initialCustomValue);
+  const [editingCustom, setEditingCustom] = React.useState(value < 6);
+
+  React.useEffect(() => {
+    if (value >= 6) {
+      setCustomValue(value);
+      setDraftValue(String(value));
+      setEditingCustom(false);
+    }
+  }, [value]);
+
+  const parsedCustomValue = clampCustomLimit(Number(draftValue));
+  const customActive = value === customValue;
+  const customChanged = customValue !== value;
+
+  function normalizeCustomEdit() {
+    setCustomValue(parsedCustomValue);
+    setDraftValue(String(parsedCustomValue));
+  }
+
+  return (
+    <div className="grid gap-2 rounded-md border bg-background p-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs font-medium">{label}</span>
+        <span className="text-xs text-muted-foreground">
+          active {active} / waiting {waiting}
+        </span>
+      </div>
+      <div className="flex items-center gap-1.5">
+        {[1, 2, 3, 4, 5].map((item) => (
+          <Button
+            key={item}
+            type="button"
+            size="icon"
+            variant={value === item ? "default" : "outline"}
+            className="h-8 w-8 shrink-0 text-xs"
+            disabled={disabled}
+            title={`Set ${label} limit to ${item}`}
+            onClick={() => {
+              setDraftValue(String(item));
+              onSync(item);
+            }}
+          >
+            {item}
+          </Button>
+        ))}
+        {editingCustom ? (
+          <Input
+            type="number"
+            min={6}
+            value={draftValue}
+            disabled={disabled}
+            className="h-8 w-16 px-2 text-center"
+            title={`Custom ${label} limit, minimum 6`}
+            onChange={(event) => setDraftValue(event.target.value)}
+            onBlur={normalizeCustomEdit}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+              }
+            }}
+          />
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant={customActive ? "default" : "outline"}
+            className="h-8 min-w-12 shrink-0 px-2 text-xs"
+            disabled={disabled}
+            title={`Edit custom ${label} limit`}
+            onClick={() => setEditingCustom(true)}
+          >
+            {customValue}
+          </Button>
+        )}
+        <Button
+          type="button"
+          size="icon"
+          variant={customChanged ? "default" : "outline"}
+          className="h-8 w-8 shrink-0"
+          disabled={disabled}
+          title={`Sync ${label} limit`}
+          onClick={() => {
+            if (editingCustom) {
+              onSync(parsedCustomValue);
+              setCustomValue(parsedCustomValue);
+              setDraftValue(String(parsedCustomValue));
+              setEditingCustom(false);
+              return;
+            }
+            onSync(customValue);
+          }}
+        >
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </div>
+    </div>
   );
 }
 
@@ -1572,7 +1736,12 @@ function splitWorkflows(
     ];
   }
   if (tab === "inactive") {
-    return tasks.filter((task) => task.status === "paused").map((task) => ({ kind: "schedule" as const, task }));
+    return [
+      ...tasks
+        .filter((task) => task.status === "paused" || task.status === "inactive")
+        .map((task) => ({ kind: "schedule" as const, task })),
+      ...jobs.filter((job) => job.status === "inactive").map((job) => ({ kind: "job" as const, job }))
+    ];
   }
   if (tab === "failed") {
     return [
@@ -1778,6 +1947,21 @@ function jobTarget(job: Job): string {
   return "No target";
 }
 
+function workflowJobStats(jobs: Job[]): { active: number; waiting: number } {
+  const oneTimeJobs = jobs.filter((job) => job.options.activation_scope === "one_time");
+  return {
+    active: oneTimeJobs.filter((job) => job.status === "queued" || job.status === "running").length,
+    waiting: oneTimeJobs.filter((job) => job.status === "inactive").length
+  };
+}
+
+function scheduleTaskStats(tasks: ScheduledTask[]): { active: number; waiting: number } {
+  return {
+    active: tasks.filter((task) => task.status === "active").length,
+    waiting: tasks.filter((task) => task.status === "inactive").length
+  };
+}
+
 function StatusPill({ status }: { status: Job["status"] }): JSX.Element {
   const tone =
     status === "completed"
@@ -1819,5 +2003,12 @@ function clampConcurrency(value: number): number {
   if (!Number.isFinite(value)) {
     return 1;
   }
-  return Math.max(1, Math.min(6, Math.floor(value)));
+  return Math.max(1, Math.floor(value));
+}
+
+function clampCustomLimit(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 6;
+  }
+  return Math.max(6, Math.floor(value));
 }

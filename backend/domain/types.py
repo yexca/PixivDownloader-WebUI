@@ -5,7 +5,7 @@ ArtworkFileStatus = Literal[
 ]
 DownloadInputMode = Literal["artist", "artwork"]
 JobEventLevel = Literal["debug", "info", "warning", "error"]
-JobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
+JobStatus = Literal["inactive", "queued", "running", "completed", "failed", "cancelled"]
 JobType = Literal[
     "download_artist",
     "download_from_artwork",
@@ -15,7 +15,7 @@ JobType = Literal[
     "retry_failed_artist",
 ]
 ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
-ScheduledTaskStatus = Literal["active", "paused", "blocked"]
+ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked"]
 ScheduledTaskTargetType = Literal[
     "single_artist", "single_artwork", "all_artists", "artists_with_tag", "artists_not_checked"
 ]

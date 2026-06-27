@@ -21,6 +21,7 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.scheduled_task_repository import ScheduledTaskRepository
 from backend.services.job_service import JobService
+from backend.services.settings_service import AppSettingsService
 
 
 class ScheduledTaskService:
@@ -48,11 +49,14 @@ class ScheduledTaskService:
         if interval_days < 1:
             raise ValueError("interval_days must be at least 1")
         now = utc_now()
+        status: ScheduledTaskStatus = "paused"
+        if enabled:
+            status = self._next_enabled_status()
         task = ScheduledTask(
             id=None,
             name=name.strip() or default_task_name(action, target_artist_id, config),
             action=action,
-            status="active" if enabled else "paused",
+            status=status,
             target_artist_id=target_artist_id.strip(),
             interval_days=interval_days,
             run_after_startup=run_after_startup,
@@ -85,7 +89,10 @@ class ScheduledTaskService:
         if interval_days is not None and interval_days < 1:
             raise ValueError("interval_days must be at least 1")
         next_run_at = task.next_run_at
-        resolved_status = status or task.status
+        requested_status = status or task.status
+        resolved_status = requested_status
+        if requested_status == "active" and task.status != "active":
+            resolved_status = self._next_enabled_status()
         if resolved_status == "active" and task.status != "active" and next_run_at is None:
             next_run_at = utc_now()
         updated = replace(
@@ -111,6 +118,25 @@ class ScheduledTaskService:
     def delete_task(self, task_id: int) -> bool:
         return self.repository.delete(task_id)
 
+    def activate_inactive_tasks(self) -> list[ScheduledTask]:
+        capacity = self._activation_capacity()
+        if capacity <= 0:
+            return []
+        activated: list[ScheduledTask] = []
+        for task in self.repository.list_inactive(limit=capacity):
+            next_run_at = task.next_run_at or utc_now()
+            updated = replace(
+                task,
+                status="active",
+                next_run_at=next_run_at,
+                last_error_code=None,
+                last_error_message=None,
+            )
+            self.repository.update(updated)
+            refreshed = self.repository.get_by_id(task.id or 0)
+            activated.append(refreshed or updated)
+        return activated
+
     def run_config(self, config: ScheduledTaskConfig) -> list[Job]:
         action = config.actions[0] if config.actions else "download_artist"
         target_artist_id = config.target.artist_id or ""
@@ -123,7 +149,7 @@ class ScheduledTaskService:
             interval_days=1,
             config=config,
         )
-        return self._create_jobs(task)
+        return self._create_jobs(task, gate_one_time=True)
 
     def run_due_tasks(self, *, startup_scan: bool = False) -> list[ScheduledTaskRunResult]:
         now = utc_now()
@@ -154,7 +180,7 @@ class ScheduledTaskService:
 
         now = utc_now()
         try:
-            jobs = self._create_jobs(task)
+            jobs = self._create_jobs(task, gate_one_time=False)
         except InsufficientDiskSpaceError as exc:
             updated = replace(
                 task,
@@ -198,7 +224,23 @@ class ScheduledTaskService:
     def close(self) -> None:
         self.repository.close()
 
-    def _create_jobs(self, task: ScheduledTask) -> list[Job]:
+    def _next_enabled_status(self) -> ScheduledTaskStatus:
+        return "active" if self._activation_capacity() > 0 else "inactive"
+
+    def _activation_capacity(self) -> int:
+        return max(0, self._max_active_scheduled_tasks() - self.repository.count_by_status("active"))
+
+    def _max_active_scheduled_tasks(self) -> int:
+        service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            return service.load().max_active_scheduled_tasks
+        finally:
+            service.close()
+
+    def _create_jobs(self, task: ScheduledTask, *, gate_one_time: bool) -> list[Job]:
         config = task.config or legacy_config(task)
         if config.target.type == "single_artwork":
             if not config.target.artwork_id:
@@ -216,6 +258,7 @@ class ScheduledTaskService:
                     None,
                     artwork_id=config.target.artwork_id,
                     options=config.download_options,
+                    gate_one_time=gate_one_time,
                 )
             ]
         artists = self._resolve_artists(config)
@@ -225,7 +268,14 @@ class ScheduledTaskService:
                 active_job = self._find_active_job(action, artist.id, None)
                 if active_job is not None:
                     continue
-                jobs.append(self._create_job(action, artist.id, options=config.download_options))
+                jobs.append(
+                    self._create_job(
+                        action,
+                        artist.id,
+                        options=config.download_options,
+                        gate_one_time=gate_one_time,
+                    )
+                )
         return jobs
 
     def _create_job(
@@ -235,6 +285,7 @@ class ScheduledTaskService:
         *,
         artwork_id: str | None = None,
         options: dict[str, object] | None = None,
+        gate_one_time: bool,
     ) -> Job:
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
@@ -245,6 +296,7 @@ class ScheduledTaskService:
                     user_id=artist_id,
                     artwork_id=None,
                     sync_only=True,
+                    gate_one_time=gate_one_time,
                 )
             if action == "retry_failed_artist":
                 if artist_id is None:
@@ -253,11 +305,13 @@ class ScheduledTaskService:
                     user_id=artist_id,
                     artwork_id=None,
                     retry_failed_artist=True,
+                    gate_one_time=gate_one_time,
                 )
             return service.create_download_job(
                 user_id=artist_id,
                 artwork_id=artwork_id,
                 options=options,
+                gate_one_time=gate_one_time,
             )
         finally:
             service.close()

@@ -147,6 +147,35 @@ class JobRepository:
             raise DatabaseError("failed to fetch next queued job") from exc
         return job_from_row(row) if row is not None else None
 
+    def count_active_one_time(self) -> int:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS count FROM jobs
+                WHERE status IN ('queued', 'running')
+                  AND json_extract(options_json, '$.activation_scope') = 'one_time'
+                """
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to count active one-time jobs") from exc
+        return int(row["count"] if row is not None else 0)
+
+    def list_inactive_one_time(self, *, limit: int) -> list[Job]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE status = 'inactive'
+                  AND json_extract(options_json, '$.activation_scope') = 'one_time'
+                ORDER BY created_at
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to list inactive one-time jobs") from exc
+        return [job_from_row(row) for row in rows]
+
     def find_active(
         self,
         *,
@@ -159,7 +188,7 @@ class JobRepository:
                 """
                 SELECT * FROM jobs
                 WHERE type = ?
-                  AND status IN ('queued', 'running')
+                  AND status IN ('inactive', 'queued', 'running')
                   AND (
                     (? IS NULL AND input_user_id IS NULL)
                     OR input_user_id = ?
