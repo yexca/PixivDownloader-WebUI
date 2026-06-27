@@ -97,6 +97,7 @@ class Job:
     status: JobStatus
     input_user_id: str | None = None
     input_artwork_id: str | None = None
+    options: dict[str, object] = field(default_factory=dict)
     artist_id: str | None = None
     total_files: int = 0
     completed_files: int = 0
@@ -144,6 +145,7 @@ class ScheduledTask:
 class ScheduledTaskTarget:
     type: ScheduledTaskTargetType
     artist_id: str | None = None
+    artwork_id: str | None = None
     tag: str | None = None
     tags: tuple[str, ...] = ()
     days: int | None = None
@@ -160,6 +162,7 @@ class ScheduledTaskConfig:
     target: ScheduledTaskTarget
     filters: tuple[ScheduledTaskFilter, ...] = ()
     actions: tuple[ScheduledTaskAction, ...] = ("download_artist",)
+    download_options: dict[str, object] = field(default_factory=dict)
     max_artists_per_run: int = 25
     artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
     skip_unavailable_artists: bool = True

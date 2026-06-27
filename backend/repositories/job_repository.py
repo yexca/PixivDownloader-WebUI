@@ -26,6 +26,7 @@ class JobRepository:
                         status,
                         input_user_id,
                         input_artwork_id,
+                        options_json,
                         artist_id,
                         total_files,
                         completed_files,
@@ -37,7 +38,7 @@ class JobRepository:
                         started_at,
                         finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job.id,
@@ -45,6 +46,7 @@ class JobRepository:
                         job.status,
                         job.input_user_id,
                         job.input_artwork_id,
+                        json.dumps(job.options) if job.options else None,
                         job.artist_id,
                         job.total_files,
                         job.completed_files,
@@ -269,12 +271,17 @@ class JobRepository:
 
 
 def job_from_row(row: sqlite3.Row) -> Job:
+    try:
+        options_json = row["options_json"]
+    except IndexError:
+        options_json = None
     return Job(
         id=str(row["id"]),
         type=row["type"],
         status=row["status"],
         input_user_id=str(row["input_user_id"]) if row["input_user_id"] else None,
         input_artwork_id=str(row["input_artwork_id"]) if row["input_artwork_id"] else None,
+        options=json.loads(options_json) if options_json else {},
         artist_id=str(row["artist_id"]) if row["artist_id"] else None,
         total_files=int(row["total_files"]),
         completed_files=int(row["completed_files"]),

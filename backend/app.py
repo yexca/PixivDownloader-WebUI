@@ -21,6 +21,7 @@ from backend.api import (
     routes_logs,
     routes_scheduled_tasks,
     routes_settings,
+    routes_workflows,
 )
 from backend.core.errors import (
     ConfigError,
@@ -84,6 +85,7 @@ def create_app(
     app.include_router(routes_downloads.router)
     app.include_router(routes_imports.router)
     app.include_router(routes_jobs.router)
+    app.include_router(routes_workflows.router)
     app.include_router(routes_scheduled_tasks.router)
     app.include_router(routes_artists.router)
     app.include_router(routes_artwork_files.router)

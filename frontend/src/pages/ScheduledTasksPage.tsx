@@ -71,6 +71,7 @@ const actionLabels: Record<ScheduledTaskAction, string> = {
 
 const targetLabels: Record<ScheduledTaskTargetType, string> = {
   single_artist: "Single artist",
+  single_artwork: "Single artwork",
   all_artists: "All artists",
   artists_with_tag: "Artists with tag",
   artists_not_checked: "Artists not checked"
@@ -515,6 +516,7 @@ function formToConfig(form: FormState): ScheduledTaskConfig {
     target: {
       type: form.target_type,
       artist_id: form.target_type === "single_artist" ? form.artist_id.trim() : null,
+      artwork_id: null,
       tag: form.target_type === "artists_with_tag" ? form.tags[0] ?? null : null,
       tags: form.target_type === "artists_with_tag" ? form.tags : [],
       days: form.target_type === "artists_not_checked" ? form.stale_target_days : null
@@ -524,6 +526,7 @@ function formToConfig(form: FormState): ScheduledTaskConfig {
       days: filter === "last_checked_before_days" ? form.stale_filter_days : null
     })),
     actions: form.actions,
+    download_options: {},
     max_artists_per_run: form.max_artists_per_run,
     artist_selection: form.artist_selection,
     skip_unavailable_artists: form.skip_unavailable_artists

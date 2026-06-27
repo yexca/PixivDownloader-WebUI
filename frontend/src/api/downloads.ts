@@ -8,6 +8,10 @@ export type DownloadCreateRequest = {
   mode: DownloadMode;
   force_rescan: boolean;
   retry_failed: boolean;
+  full_download?: boolean;
+  max_artworks?: number | null;
+  min_artwork_id?: string | null;
+  max_artwork_id?: string | null;
 };
 
 export type DownloadCreateResponse = {

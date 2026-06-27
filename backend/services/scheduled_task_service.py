@@ -12,6 +12,7 @@ from backend.domain.entities import (
     ScheduledTask,
     ScheduledTaskConfig,
     ScheduledTaskFilter,
+    ScheduledTaskTarget,
 )
 from backend.domain.types import ScheduledTaskAction, ScheduledTaskStatus
 from backend.repositories._time import utc_now
@@ -49,7 +50,7 @@ class ScheduledTaskService:
         now = utc_now()
         task = ScheduledTask(
             id=None,
-            name=name.strip() or default_task_name(action, target_artist_id),
+            name=name.strip() or default_task_name(action, target_artist_id, config),
             action=action,
             status="active" if enabled else "paused",
             target_artist_id=target_artist_id.strip(),
@@ -109,6 +110,20 @@ class ScheduledTaskService:
 
     def delete_task(self, task_id: int) -> bool:
         return self.repository.delete(task_id)
+
+    def run_config(self, config: ScheduledTaskConfig) -> list[Job]:
+        action = config.actions[0] if config.actions else "download_artist"
+        target_artist_id = config.target.artist_id or ""
+        task = ScheduledTask(
+            id=None,
+            name=default_task_name(action, target_artist_id, config),
+            action=action,
+            status="active",
+            target_artist_id=target_artist_id,
+            interval_days=1,
+            config=config,
+        )
+        return self._create_jobs(task)
 
     def run_due_tasks(self, *, startup_scan: bool = False) -> list[ScheduledTaskRunResult]:
         now = utc_now()
@@ -185,26 +200,55 @@ class ScheduledTaskService:
 
     def _create_jobs(self, task: ScheduledTask) -> list[Job]:
         config = task.config or legacy_config(task)
+        if config.target.type == "single_artwork":
+            if not config.target.artwork_id:
+                return []
+            active_job = self._find_active_job(
+                "download_from_artwork",
+                None,
+                config.target.artwork_id,
+            )
+            if active_job is not None:
+                return []
+            return [
+                self._create_job(
+                    "download_artist",
+                    None,
+                    artwork_id=config.target.artwork_id,
+                    options=config.download_options,
+                )
+            ]
         artists = self._resolve_artists(config)
         jobs: list[Job] = []
         for artist in artists[: config.max_artists_per_run]:
             for action in config.actions:
-                active_job = self._find_active_job(action, artist.id)
+                active_job = self._find_active_job(action, artist.id, None)
                 if active_job is not None:
                     continue
-                jobs.append(self._create_job(action, artist.id))
+                jobs.append(self._create_job(action, artist.id, options=config.download_options))
         return jobs
 
-    def _create_job(self, action: ScheduledTaskAction, artist_id: str) -> Job:
+    def _create_job(
+        self,
+        action: ScheduledTaskAction,
+        artist_id: str | None,
+        *,
+        artwork_id: str | None = None,
+        options: dict[str, object] | None = None,
+    ) -> Job:
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
             if action == "sync_artist":
+                if artist_id is None:
+                    raise ValueError("sync_artist requires an artist target")
                 return service.create_download_job(
                     user_id=artist_id,
                     artwork_id=None,
                     sync_only=True,
                 )
             if action == "retry_failed_artist":
+                if artist_id is None:
+                    raise ValueError("retry_failed_artist requires an artist target")
                 return service.create_download_job(
                     user_id=artist_id,
                     artwork_id=None,
@@ -212,17 +256,24 @@ class ScheduledTaskService:
                 )
             return service.create_download_job(
                 user_id=artist_id,
-                artwork_id=None,
+                artwork_id=artwork_id,
+                options=options,
             )
         finally:
             service.close()
 
-    def _find_active_job(self, action: ScheduledTaskAction, artist_id: str) -> Job | None:
+    def _find_active_job(
+        self,
+        action: ScheduledTaskAction,
+        artist_id: str | None,
+        artwork_id: str | None,
+    ) -> Job | None:
         repository = JobRepository(self.db_path)
         try:
             return repository.find_active(
                 job_type=job_type_for_action(action),
                 user_id=artist_id,
+                artwork_id=artwork_id,
             )
         finally:
             repository.close()
@@ -331,7 +382,9 @@ class ScheduledTaskRunResult:
         self.skipped = skipped
 
 
-def job_type_for_action(action: ScheduledTaskAction) -> str:
+def job_type_for_action(action: str) -> str:
+    if action == "download_from_artwork":
+        return "download_from_artwork"
     if action == "sync_artist":
         return "sync_artist"
     if action == "retry_failed_artist":
@@ -339,18 +392,31 @@ def job_type_for_action(action: ScheduledTaskAction) -> str:
     return "download_artist"
 
 
-def default_task_name(action: ScheduledTaskAction, artist_id: str) -> str:
+def default_task_name(
+    action: ScheduledTaskAction,
+    artist_id: str,
+    config: ScheduledTaskConfig | None = None,
+) -> str:
     labels = {
         "sync_artist": "Sync artist",
         "download_artist": "Download artist",
         "retry_failed_artist": "Retry failed artist",
     }
+    if config is not None:
+        target = config.target
+        if target.type == "single_artwork" and target.artwork_id:
+            return f"Download artwork {target.artwork_id}"
+        if target.type == "all_artists":
+            return f"{labels[action]} all artists"
+        if target.type == "artists_with_tag":
+            tag_label = ", ".join(target.tags) if target.tags else target.tag or "tag"
+            return f"{labels[action]} artists tagged {tag_label}"
+        if target.type == "artists_not_checked":
+            return f"{labels[action]} unchecked artists"
     return f"{labels[action]} {artist_id}"
 
 
 def legacy_config(task: ScheduledTask) -> ScheduledTaskConfig:
-    from backend.domain.entities import ScheduledTaskTarget
-
     return ScheduledTaskConfig(
         target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
         actions=(task.action,),

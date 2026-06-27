@@ -10,6 +10,7 @@ type DialogProps = {
   description?: string;
   children?: React.ReactNode;
   footer?: React.ReactNode;
+  className?: string;
   onOpenChange: (open: boolean) => void;
 };
 
@@ -19,6 +20,7 @@ export function Dialog({
   description,
   children,
   footer,
+  className,
   onOpenChange
 }: DialogProps): JSX.Element | null {
   React.useEffect(() => {
@@ -51,7 +53,7 @@ export function Dialog({
         aria-modal="true"
         aria-labelledby="app-dialog-title"
         aria-describedby={description ? "app-dialog-description" : undefined}
-        className="surface relative z-10 w-full max-w-lg p-4 shadow-lg"
+        className={cn("surface relative z-10 w-full max-w-lg p-4 shadow-lg", className)}
       >
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

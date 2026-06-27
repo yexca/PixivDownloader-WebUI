@@ -11,11 +11,23 @@ class DownloadCreateRequest(BaseModel):
     mode: Literal["artist", "artwork"] = "artist"
     force_rescan: bool = False
     retry_failed: bool = False
+    full_download: bool = False
+    max_artworks: int | None = None
+    min_artwork_id: str | None = None
+    max_artwork_id: str | None = None
 
     @model_validator(mode="after")
     def validate_input(self) -> DownloadCreateRequest:
         if bool(self.user_id) == bool(self.artwork_id):
             raise ValueError("exactly one of user_id or artwork_id must be provided")
+        if self.full_download and self.retry_failed:
+            raise ValueError("full_download and retry_failed cannot both be enabled")
+        if self.max_artworks is not None and self.max_artworks < 1:
+            raise ValueError("max_artworks must be at least 1")
+        for field_name in ("min_artwork_id", "max_artwork_id"):
+            value = getattr(self, field_name)
+            if value is not None and value.strip() and not value.strip().isdigit():
+                raise ValueError(f"{field_name} must contain digits only")
         return self
 
 

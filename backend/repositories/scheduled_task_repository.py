@@ -224,6 +224,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig) -> dict[str, obje
         "target": {
             "type": config.target.type,
             "artist_id": config.target.artist_id,
+            "artwork_id": config.target.artwork_id,
             "tag": config.target.tag,
             "tags": list(config.target.tags),
             "days": config.target.days,
@@ -236,6 +237,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig) -> dict[str, obje
             for item in config.filters
         ],
         "actions": list(config.actions),
+        "download_options": dict(config.download_options),
         "max_artists_per_run": config.max_artists_per_run,
         "artist_selection": config.artist_selection,
         "skip_unavailable_artists": config.skip_unavailable_artists,
@@ -279,6 +281,7 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
     target_type = target_data.get("type")
     if target_type not in {
         "single_artist",
+        "single_artwork",
         "all_artists",
         "artists_with_tag",
         "artists_not_checked",
@@ -290,12 +293,14 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
         target=ScheduledTaskTarget(
             type=target_type,
             artist_id=optional_str(target_data.get("artist_id")),
+            artwork_id=optional_str(target_data.get("artwork_id")),
             tag=tag,
             tags=tags,
             days=optional_int(target_data.get("days")),
         ),
         filters=tuple(filters),
         actions=actions,
+        download_options=clean_download_options(data.get("download_options")),
         max_artists_per_run=max(1, optional_int(data.get("max_artists_per_run")) or 25),
         artist_selection=artist_selection,
         skip_unavailable_artists=bool(data.get("skip_unavailable_artists", True)),
@@ -312,6 +317,21 @@ def optional_str(value: object) -> str | None:
 def optional_int(value: object) -> int | None:
     if value is None:
         return None
+
+
+def clean_download_options(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    cleaned: dict[str, object] = {}
+    full_download = value.get("full_download")
+    if isinstance(full_download, bool):
+        cleaned["full_download"] = full_download
+    for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
+        item = value.get(key)
+        if item is None or item == "":
+            continue
+        cleaned[key] = item
+    return cleaned
     try:
         return int(value)
     except (TypeError, ValueError):

@@ -12,6 +12,7 @@ class JobResponse(BaseModel):
     artist_id: str | None
     input_user_id: str | None
     input_artwork_id: str | None
+    options: dict[str, object]
     total_files: int
     completed_files: int
     skipped_files: int
@@ -90,6 +91,7 @@ def job_response(job: Job) -> JobResponse:
         artist_id=job.artist_id,
         input_user_id=job.input_user_id,
         input_artwork_id=job.input_artwork_id,
+        options=job.options,
         total_files=job.total_files,
         completed_files=job.completed_files,
         skipped_files=job.skipped_files,

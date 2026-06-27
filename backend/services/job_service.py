@@ -34,6 +34,7 @@ class JobService:
         retry_failed: bool = False,
         sync_only: bool = False,
         retry_failed_artist: bool = False,
+        options: dict[str, object] | None = None,
     ) -> Job:
         if bool(user_id) == bool(artwork_id):
             raise ValueError("exactly one of user_id or artwork_id is required")
@@ -56,6 +57,7 @@ class JobService:
             status="queued",
             input_user_id=user_id,
             input_artwork_id=artwork_id,
+            options=clean_job_options(options or {}),
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -68,6 +70,7 @@ class JobService:
                     "retry_failed": retry_failed,
                     "sync_only": sync_only,
                     "retry_failed_artist": retry_failed_artist,
+                    "options": clean_job_options(options or {}),
                 },
             )
         )
@@ -101,6 +104,7 @@ class JobService:
                 status="cancelled",
                 input_user_id=job.input_user_id,
                 input_artwork_id=job.input_artwork_id,
+                options=job.options,
                 artist_id=job.artist_id,
                 total_files=job.total_files,
                 completed_files=job.completed_files,
@@ -187,3 +191,13 @@ DOWNLOAD_JOB_TYPES = {
     "retry_failed",
     "retry_failed_artist",
 }
+
+
+def clean_job_options(options: dict[str, object]) -> dict[str, object]:
+    cleaned: dict[str, object] = {}
+    for key in ("full_download", "max_artworks", "min_artwork_id", "max_artwork_id"):
+        value = options.get(key)
+        if value is None or value == "":
+            continue
+        cleaned[key] = value
+    return cleaned

@@ -13,6 +13,7 @@ import { LibraryPage } from "@/pages/LibraryPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { ScheduledTasksPage } from "@/pages/ScheduledTasksPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { WorkflowsPage } from "@/pages/WorkflowsPage";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, element: <DashboardPage /> },
+      { path: "workflows", element: <WorkflowsPage /> },
       { path: "download", element: <DownloadPage /> },
       { path: "library", element: <LibraryPage /> },
       { path: "artists/:artistId", element: <ArtistDetailPage /> },

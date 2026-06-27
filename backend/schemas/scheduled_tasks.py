@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.domain.entities import (
     ScheduledTask,
@@ -20,6 +20,7 @@ from backend.domain.types import (
 class ScheduledTaskTargetRequest(BaseModel):
     type: ScheduledTaskTargetType
     artist_id: str | None = None
+    artwork_id: str | None = None
     tag: str | None = None
     tags: list[str] = Field(default_factory=list)
     days: int | None = Field(default=None, ge=1)
@@ -34,9 +35,18 @@ class ScheduledTaskConfigRequest(BaseModel):
     target: ScheduledTaskTargetRequest
     filters: list[ScheduledTaskFilterRequest] = Field(default_factory=list)
     actions: list[ScheduledTaskAction] = Field(default_factory=lambda: ["download_artist"])
+    download_options: dict[str, object] = Field(default_factory=dict)
     max_artists_per_run: int = Field(default=25, ge=1, le=500)
     artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
     skip_unavailable_artists: bool = True
+
+    @model_validator(mode="after")
+    def validate_target_actions(self) -> ScheduledTaskConfigRequest:
+        if self.target.type == "single_artwork" and any(
+            action != "download_artist" for action in self.actions
+        ):
+            raise ValueError("single_artwork target only supports download_artist")
+        return self
 
 
 class ScheduledTaskCreateRequest(BaseModel):
@@ -137,6 +147,7 @@ def scheduled_task_config_from_request(
         target=ScheduledTaskTarget(
             type=request.target.type,
             artist_id=request.target.artist_id,
+            artwork_id=request.target.artwork_id,
             tag=request.target.tag,
             tags=tuple(normalize_tags(request.target.tags)),
             days=request.target.days,
@@ -145,6 +156,7 @@ def scheduled_task_config_from_request(
             ScheduledTaskFilter(type=item.type, days=item.days) for item in request.filters
         ),
         actions=tuple(request.actions) or ("download_artist",),
+        download_options=clean_download_options(request.download_options),
         max_artists_per_run=request.max_artists_per_run,
         artist_selection=request.artist_selection,
         skip_unavailable_artists=request.skip_unavailable_artists,
@@ -158,6 +170,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[st
         "target": {
             "type": config.target.type,
             "artist_id": config.target.artist_id,
+            "artwork_id": config.target.artwork_id,
             "tag": config.target.tag,
             "tags": list(config.target.tags),
             "days": config.target.days,
@@ -170,6 +183,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[st
             for item in config.filters
         ],
         "actions": list(config.actions),
+        "download_options": dict(config.download_options),
         "max_artists_per_run": config.max_artists_per_run,
         "artist_selection": config.artist_selection,
         "skip_unavailable_artists": config.skip_unavailable_artists,
@@ -189,3 +203,16 @@ def normalize_tags(tags: list[str]) -> list[str]:
         normalized.append(tag)
         seen.add(key)
     return normalized
+
+
+def clean_download_options(options: dict[str, object]) -> dict[str, object]:
+    cleaned: dict[str, object] = {}
+    full_download = options.get("full_download")
+    if isinstance(full_download, bool):
+        cleaned["full_download"] = full_download
+    for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
+        value = options.get(key)
+        if value is None or value == "":
+            continue
+        cleaned[key] = value
+    return cleaned

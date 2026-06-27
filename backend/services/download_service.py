@@ -39,6 +39,10 @@ class DownloadOptions:
     force_rescan: bool = False
     retry_failed: bool = False
     skip_existing_files: bool = True
+    full_download: bool = False
+    max_artworks: int | None = None
+    min_artwork_id: str | None = None
+    max_artwork_id: str | None = None
 
 
 class DownloadService:
@@ -88,6 +92,7 @@ class DownloadService:
             if artist.account_status == "unavailable"
             else list(self.pixiv_client.get_artworks_by_user_id(artist.id))
         )
+        artworks = filter_artworks(artworks, resolved_options)
         self._check_cancelled(cancel_callback)
 
         self._report(progress_callback, "Got artworks info. Getting download links...")
@@ -122,6 +127,7 @@ class DownloadService:
                 if (
                     not resolved_options.retry_failed
                     and not resolved_options.force_rescan
+                    and not resolved_options.full_download
                     and artist.last_download_id
                     and current_download_id <= int(artist.last_download_id)
                 ):
@@ -356,6 +362,40 @@ def latest_artwork_id(artworks: list[Artwork]) -> str | None:
     if not ids:
         return None
     return str(max(ids))
+
+
+def filter_artworks(artworks: list[Artwork], options: DownloadOptions) -> list[Artwork]:
+    selected = artworks
+    min_id = optional_artwork_id(options.min_artwork_id)
+    max_id = optional_artwork_id(options.max_artwork_id)
+    if min_id is not None or max_id is not None:
+        selected = [
+            artwork
+            for artwork in selected
+            if artwork_id_in_range(artwork.id, min_id=min_id, max_id=max_id)
+        ]
+    if options.max_artworks is not None:
+        selected = selected[: options.max_artworks]
+    return selected
+
+
+def optional_artwork_id(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+def artwork_id_in_range(artwork_id: str, *, min_id: int | None, max_id: int | None) -> bool:
+    try:
+        value = int(artwork_id)
+    except ValueError:
+        return False
+    if min_id is not None and value < min_id:
+        return False
+    return not (max_id is not None and value > max_id)
 
 
 def merge_fetched_artist(existing: Artist, fetched: Artist, *, now: str) -> Artist:

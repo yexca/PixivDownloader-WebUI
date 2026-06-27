@@ -69,6 +69,10 @@ class DownloadWorker:
             options = DownloadOptions(
                 force_rescan=job.type == "rescan_artist",
                 retry_failed=job.type in {"retry_failed", "retry_failed_artist"},
+                full_download=bool(job.options.get("full_download", False)),
+                max_artworks=positive_int_option(job.options.get("max_artworks")),
+                min_artwork_id=string_option(job.options.get("min_artwork_id")),
+                max_artwork_id=string_option(job.options.get("max_artwork_id")),
             )
             summary = service.download(
                 user_id=job.input_user_id,
@@ -251,3 +255,20 @@ def user_safe_error_message(exc: Exception) -> str:
     if not message:
         return "Download job failed"
     return message.replace("\n", " ")[:500]
+
+
+def positive_int_option(value: object) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 1 else None
+
+
+def string_option(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

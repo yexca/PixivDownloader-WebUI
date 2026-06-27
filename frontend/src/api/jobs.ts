@@ -9,6 +9,7 @@ export type Job = {
   artist_id: string | null;
   input_user_id: string | null;
   input_artwork_id: string | null;
+  options: Record<string, unknown>;
   total_files: number;
   completed_files: number;
   skipped_files: number;

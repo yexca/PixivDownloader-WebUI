@@ -337,6 +337,39 @@ def test_create_download_job(tmp_path):
         repository.close()
 
 
+def test_create_download_job_persists_workflow_options(tmp_path):
+    client = make_client(tmp_path)
+
+    response = client.post(
+        "/api/downloads",
+        json={
+            "user_id": "123",
+            "artwork_id": None,
+            "mode": "artist",
+            "force_rescan": False,
+            "retry_failed": False,
+            "full_download": True,
+            "max_artworks": 12,
+            "min_artwork_id": "100",
+            "max_artwork_id": "200",
+        },
+    )
+
+    assert response.status_code == 200
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(response.json()["job_id"])
+        assert job is not None
+        assert job.options == {
+            "full_download": True,
+            "max_artworks": 12,
+            "min_artwork_id": "100",
+            "max_artwork_id": "200",
+        }
+    finally:
+        repository.close()
+
+
 def test_create_download_job_rejects_low_disk_space(tmp_path, monkeypatch):
     client = make_client(tmp_path)
 
@@ -441,6 +474,43 @@ def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
         assert job is not None
         assert job.type == "sync_artist"
         assert job.input_user_id == "123"
+    finally:
+        repository.close()
+
+
+def test_scheduled_task_builder_targets_single_artwork(tmp_path):
+    client = make_client(tmp_path)
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Artwork workflow",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+            "config": {
+                "target": {"type": "single_artwork", "artwork_id": "999"},
+                "filters": [],
+                "actions": ["download_artist"],
+                "download_options": {"full_download": True},
+                "max_artists_per_run": 25,
+            },
+        },
+    )
+
+    assert create_response.status_code == 200
+    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    assert body["created"] is True
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["job_ids"][0])
+        assert job is not None
+        assert job.type == "download_from_artwork"
+        assert job.input_artwork_id == "999"
+        assert job.options == {"full_download": True}
     finally:
         repository.close()
 

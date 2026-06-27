@@ -182,6 +182,35 @@ def test_retry_failed_ignores_latest_downloaded_artwork_id(tmp_path):
     assert file_downloader.calls[0][2].endswith("100_p0.jpg")
 
 
+def test_download_options_filter_artwork_range_and_limit(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = ArtistRepository(db_path)
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        sleeper=lambda: None,
+    )
+
+    summary = service.download(
+        user_id="123",
+        options=DownloadOptions(
+            full_download=True,
+            min_artwork_id="101",
+            max_artwork_id="200",
+            max_artworks=1,
+        ),
+    )
+
+    assert summary.downloaded_files == 1
+    assert len(file_downloader.calls) == 1
+    assert file_downloader.calls[0][2].endswith("101_p0.jpg")
+
+
 def test_library_sync_persists_remote_only_files_and_preserves_download_cursor(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")

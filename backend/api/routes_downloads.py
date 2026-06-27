@@ -23,6 +23,16 @@ def create_download(
             artwork_id=request.artwork_id,
             force_rescan=request.force_rescan,
             retry_failed=request.retry_failed,
+            options={
+                "full_download": request.full_download,
+                "max_artworks": request.max_artworks,
+                "min_artwork_id": request.min_artwork_id.strip()
+                if request.min_artwork_id
+                else None,
+                "max_artwork_id": request.max_artwork_id.strip()
+                if request.max_artwork_id
+                else None,
+            },
         )
     finally:
         service.close()
