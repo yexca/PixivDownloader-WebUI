@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: yexca/pixivdownloader:v0.2.0
+    image: yexca/pixivdownloader:v0.1.0
     container_name: pixivdownloader
     ports:
       - "7653:7653"
@@ -27,7 +27,7 @@ services:
     build:
       context: ./auth-browser
       dockerfile: Dockerfile
-    image: yexca/pixivdownloader-auth-browser:v0.2.0
+    image: yexca/pixivdownloader-auth-browser:v0.1.0
     container_name: pixiv-auth-browser
     ports:
       - "6080:6080"

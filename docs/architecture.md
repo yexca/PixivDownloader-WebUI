@@ -32,7 +32,7 @@ Container runtime:
 
 ```text
 docker compose up -d
-  -> yexca/pixivdownloader:v0.2.0
+  -> yexca/pixivdownloader:v0.1.0
   -> FastAPI on 0.0.0.0:7653 inside the container
   -> host port 7653
 ```

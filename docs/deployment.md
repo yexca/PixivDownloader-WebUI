@@ -53,7 +53,7 @@ docker compose build
 The compose service uses:
 
 ```yaml
-image: yexca/pixivdownloader:v0.2.0
+image: yexca/pixivdownloader:v0.1.0
 build:
   context: .
   dockerfile: Dockerfile

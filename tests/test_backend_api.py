@@ -37,7 +37,7 @@ def test_health_endpoint(tmp_path):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.2.0"}
+    assert response.json() == {"status": "ok", "version": "0.1.0"}
 
 
 def test_settings_get_and_update_masks_refresh_token(tmp_path):

@@ -1,7 +1,7 @@
 {
   "name": "pixiv-auth-browser",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "start": "node src/server.js"
