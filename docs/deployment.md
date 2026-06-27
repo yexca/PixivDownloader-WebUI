@@ -151,9 +151,9 @@ The image entrypoint is:
 python -m backend.app
 ```
 
-## Legacy PyQt Archive
+## Legacy Data Import
 
-The old PyQt desktop application is archived under `legacy/pyqt/`. It is not copied into the Docker image and is not part of the default installation or deployment flow.
+Legacy `pixiv.db` imports are handled through the WebUI Settings page. The old PyQt desktop application source is not copied into the Docker image and is not part of deployment.
 
 ## Packaged Executable Expectations
 

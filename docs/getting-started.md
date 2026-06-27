@@ -110,6 +110,6 @@ Open the Download page and choose one input mode:
 
 The backend creates a job, runs downloads in the background, writes progress into SQLite, and streams updates to the WebUI.
 
-## Legacy PyQt Archive
+## Legacy Data Import
 
-The old PyQt desktop application is archived under `legacy/pyqt/`. It is kept for historical reference only and is not part of the maintained runtime.
+If you used the old PyQt desktop application, import its `pixiv.db` from WebUI Settings. The old desktop application source is not part of this WebUI project.

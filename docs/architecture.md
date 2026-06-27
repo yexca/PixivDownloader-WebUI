@@ -66,9 +66,6 @@ config/
 resources/
   pixiv.sqlite3
   static application assets
-
-legacy/pyqt/
-  archived PyQt desktop application, outside the maintained runtime.
 ```
 
 ## Backend Startup
@@ -148,9 +145,9 @@ queued -> running -> cancelled
 
 Job progress and events are stored in SQLite and exposed to the WebUI by API/WebSocket endpoints.
 
-## Legacy PyQt Archive
+## Legacy Data Import
 
-The project began as a PyQt6 GUI. That desktop application is archived under `legacy/pyqt/` together with its old entry script and related tests.
+The WebUI can import old PyQt `pixiv.db` files for user migration. The old desktop application source is not part of this repository.
 
 The maintained architecture is:
 
@@ -159,4 +156,4 @@ The maintained architecture is:
 - `auth-browser/` for Docker browser authentication.
 - `resources/` and migrations for local data.
 
-Do not add new features to the PyQt archive. New work should target the WebUI and backend.
+New work should target the WebUI and backend. Legacy compatibility code should stay limited to explicit data import paths.

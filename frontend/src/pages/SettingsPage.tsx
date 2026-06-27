@@ -786,7 +786,7 @@ function AdvancedSettingsTab({
             <Button
               type="button"
               variant="outline"
-              title="Import artists and artwork metadata from an archived PyQt pixiv.db or SQLite database."
+              title="Import artists and artwork metadata from an old PyQt pixiv.db or SQLite database."
               disabled={isImporting}
               onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
             >

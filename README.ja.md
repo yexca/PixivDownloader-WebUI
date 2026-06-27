@@ -4,7 +4,7 @@
 
 PixivDownloader-SQLite は、Pixiv 作品のバックアップと管理を行うローカル WebUI です。現在メンテナンスされている実行環境は、FastAPI バックエンド、React + TypeScript フロントエンド、ローカル SQLite データベースで構成されています。
 
-旧 PyQt デスクトップアプリは `legacy/pyqt/` にアーカイブされており、現在のメンテナンス対象ではありません。
+このリポジトリは WebUI 版へのリライトです。旧 PyQt 版の `pixiv.db` インポートには対応していますが、旧デスクトップアプリのソースコードは含みません。
 
 ## 主な機能
 
@@ -78,7 +78,6 @@ Browser WebUI
 - `auth-browser/`: Docker で Pixiv ブラウザーログインを行うサイドカー。
 - `config/`: WebUI 設定。`settings.example.json` はコミットされ、`settings.json` はローカル設定を保存します。
 - `resources/`: SQLite データベースと静的リソース。
-- `legacy/pyqt/`: アーカイブ済み PyQt デスクトップアプリ。現在の実行環境には含まれません。
 
 ## 設定移行
 

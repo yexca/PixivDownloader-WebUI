@@ -100,4 +100,4 @@ Do not run Pixiv network tests unless a valid local refresh token is configured 
 
 Automated regression tests should mock Pixiv and file download boundaries.
 
-The archived PyQt application under `legacy/pyqt/` is outside the default verification flow.
+Legacy verification is limited to explicit old `pixiv.db` import behavior.
