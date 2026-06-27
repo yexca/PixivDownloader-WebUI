@@ -225,6 +225,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig) -> dict[str, obje
             "type": config.target.type,
             "artist_id": config.target.artist_id,
             "tag": config.target.tag,
+            "tags": list(config.target.tags),
             "days": config.target.days,
         },
         "filters": [
@@ -236,6 +237,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig) -> dict[str, obje
         ],
         "actions": list(config.actions),
         "max_artists_per_run": config.max_artists_per_run,
+        "artist_selection": config.artist_selection,
     }
 
 
@@ -266,6 +268,13 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
     )
     if not actions:
         actions = ("download_artist",)
+    artist_selection = data.get("artist_selection", "oldest_checked_first")
+    if artist_selection not in {
+        "oldest_checked_first",
+        "newest_checked_first",
+        "random",
+    }:
+        artist_selection = "oldest_checked_first"
     target_type = target_data.get("type")
     if target_type not in {
         "single_artist",
@@ -274,16 +283,20 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
         "artists_not_checked",
     }:
         target_type = "single_artist"
+    tag = optional_str(target_data.get("tag"))
+    tags = tuple(normalize_tags(target_data.get("tags"), fallback=tag))
     return ScheduledTaskConfig(
         target=ScheduledTaskTarget(
             type=target_type,
             artist_id=optional_str(target_data.get("artist_id")),
-            tag=optional_str(target_data.get("tag")),
+            tag=tag,
+            tags=tags,
             days=optional_int(target_data.get("days")),
         ),
         filters=tuple(filters),
         actions=actions,
         max_artists_per_run=max(1, optional_int(data.get("max_artists_per_run")) or 25),
+        artist_selection=artist_selection,
     )
 
 
@@ -301,3 +314,23 @@ def optional_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def normalize_tags(value: object, *, fallback: str | None = None) -> list[str]:
+    values: list[object] = []
+    if isinstance(value, list):
+        values.extend(value)
+    if fallback:
+        values.append(fallback)
+    tags: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in values:
+        tag = optional_str(raw_tag)
+        if tag is None:
+            continue
+        key = tag.casefold()
+        if key in seen:
+            continue
+        tags.append(tag)
+        seen.add(key)
+    return tags

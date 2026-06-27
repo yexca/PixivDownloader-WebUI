@@ -4,12 +4,14 @@ export type ScheduledTaskAction = "sync_artist" | "download_artist" | "retry_fai
 export type ScheduledTaskStatus = "active" | "paused" | "blocked";
 export type ScheduledTaskTargetType = "single_artist" | "all_artists" | "artists_with_tag" | "artists_not_checked";
 export type ScheduledTaskFilterType = "last_checked_before_days" | "has_failed_files";
+export type ScheduledTaskArtistSelection = "oldest_checked_first" | "newest_checked_first" | "random";
 
 export type ScheduledTaskConfig = {
   target: {
     type: ScheduledTaskTargetType;
     artist_id?: string | null;
     tag?: string | null;
+    tags?: string[];
     days?: number | null;
   };
   filters: Array<{
@@ -18,6 +20,7 @@ export type ScheduledTaskConfig = {
   }>;
   actions: ScheduledTaskAction[];
   max_artists_per_run: number;
+  artist_selection: ScheduledTaskArtistSelection;
 };
 
 export type ScheduledTask = {
@@ -48,7 +51,7 @@ export type ScheduledTaskListResponse = {
 export type ScheduledTaskCreateRequest = {
   name: string;
   action: ScheduledTaskAction;
-  target_artist_id: string;
+  target_artist_id: string | null;
   interval_days: number;
   enabled: boolean;
   run_after_startup: boolean;

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.domain.entities import (
     ScheduledTask,
@@ -10,6 +10,7 @@ from backend.domain.entities import (
 )
 from backend.domain.types import (
     ScheduledTaskAction,
+    ScheduledTaskArtistSelection,
     ScheduledTaskFilterType,
     ScheduledTaskStatus,
     ScheduledTaskTargetType,
@@ -20,6 +21,7 @@ class ScheduledTaskTargetRequest(BaseModel):
     type: ScheduledTaskTargetType
     artist_id: str | None = None
     tag: str | None = None
+    tags: list[str] = Field(default_factory=list)
     days: int | None = Field(default=None, ge=1)
 
 
@@ -33,6 +35,7 @@ class ScheduledTaskConfigRequest(BaseModel):
     filters: list[ScheduledTaskFilterRequest] = Field(default_factory=list)
     actions: list[ScheduledTaskAction] = Field(default_factory=lambda: ["download_artist"])
     max_artists_per_run: int = Field(default=25, ge=1, le=500)
+    artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
 
 
 class ScheduledTaskCreateRequest(BaseModel):
@@ -44,6 +47,13 @@ class ScheduledTaskCreateRequest(BaseModel):
     run_after_startup: bool = True
     config: ScheduledTaskConfigRequest | None = None
 
+    @field_validator("target_artist_id", mode="before")
+    @classmethod
+    def empty_target_artist_id_as_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
 
 class ScheduledTaskUpdateRequest(BaseModel):
     name: str | None = None
@@ -53,6 +63,13 @@ class ScheduledTaskUpdateRequest(BaseModel):
     interval_days: int | None = Field(default=None, ge=1)
     run_after_startup: bool | None = None
     config: ScheduledTaskConfigRequest | None = None
+
+    @field_validator("target_artist_id", mode="before")
+    @classmethod
+    def empty_target_artist_id_as_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class ScheduledTaskResponse(BaseModel):
@@ -120,6 +137,7 @@ def scheduled_task_config_from_request(
             type=request.target.type,
             artist_id=request.target.artist_id,
             tag=request.target.tag,
+            tags=tuple(normalize_tags(request.target.tags)),
             days=request.target.days,
         ),
         filters=tuple(
@@ -128,6 +146,7 @@ def scheduled_task_config_from_request(
         ),
         actions=tuple(request.actions) or ("download_artist",),
         max_artists_per_run=request.max_artists_per_run,
+        artist_selection=request.artist_selection,
     )
 
 
@@ -139,6 +158,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[st
             "type": config.target.type,
             "artist_id": config.target.artist_id,
             "tag": config.target.tag,
+            "tags": list(config.target.tags),
             "days": config.target.days,
         },
         "filters": [
@@ -150,4 +170,20 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[st
         ],
         "actions": list(config.actions),
         "max_artists_per_run": config.max_artists_per_run,
+        "artist_selection": config.artist_selection,
     }
+
+
+def normalize_tags(tags: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_tag in tags:
+        tag = raw_tag.strip()
+        if not tag:
+            continue
+        key = tag.casefold()
+        if key in seen:
+            continue
+        normalized.append(tag)
+        seen.add(key)
+    return normalized

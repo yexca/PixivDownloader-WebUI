@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -258,9 +259,17 @@ class ScheduledTaskService:
                     else [Artist(id=target.artist_id, name=target.artist_id)]
                 )
             if target.type == "artists_with_tag":
-                if not target.tag:
+                tags = target.tags or ((target.tag,) if target.tag else ())
+                if not tags:
                     return []
-                artists = repository.list(limit=1000, local_tag=target.tag)
+                artists = []
+                seen_artist_ids: set[str] = set()
+                for tag in tags:
+                    for artist in repository.list(limit=1000, local_tag=tag):
+                        if artist.id in seen_artist_ids:
+                            continue
+                        artists.append(artist)
+                        seen_artist_ids.add(artist.id)
             else:
                 artists = repository.list(limit=1000)
         finally:
@@ -271,7 +280,7 @@ class ScheduledTaskService:
             artists = [artist for artist in artists if artist_is_stale(artist, days)]
         for item in config.filters:
             artists = self._apply_filter(artists, item)
-        return artists
+        return select_artists(artists, config)
 
     def _apply_filter(
         self,
@@ -350,6 +359,24 @@ def artist_is_stale(artist: Artist, days: int) -> bool:
     if artist.last_checked_at is None:
         return True
     return parse_time(artist.last_checked_at) <= datetime.now(UTC) - timedelta(days=days)
+
+
+def select_artists(artists: list[Artist], config: ScheduledTaskConfig) -> list[Artist]:
+    if config.target.type == "single_artist":
+        return artists
+    if config.artist_selection == "random":
+        return random.sample(artists, k=len(artists))
+    reverse = config.artist_selection == "newest_checked_first"
+    return sorted(artists, key=artist_checked_sort_key, reverse=reverse)
+
+
+def artist_checked_sort_key(artist: Artist) -> datetime:
+    if artist.last_checked_at is None:
+        return datetime.min.replace(tzinfo=UTC)
+    try:
+        return parse_time(artist.last_checked_at)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
 
 
 def next_time(from_time: str, interval_days: int) -> str:

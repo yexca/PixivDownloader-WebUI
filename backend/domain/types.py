@@ -20,3 +20,6 @@ ScheduledTaskTargetType = Literal[
     "single_artist", "all_artists", "artists_with_tag", "artists_not_checked"
 ]
 ScheduledTaskFilterType = Literal["last_checked_before_days", "has_failed_files"]
+ScheduledTaskArtistSelection = Literal[
+    "oldest_checked_first", "newest_checked_first", "random"
+]

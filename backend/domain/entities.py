@@ -9,6 +9,7 @@ from backend.domain.types import (
     JobStatus,
     JobType,
     ScheduledTaskAction,
+    ScheduledTaskArtistSelection,
     ScheduledTaskFilterType,
     ScheduledTaskStatus,
     ScheduledTaskTargetType,
@@ -128,6 +129,7 @@ class ScheduledTaskTarget:
     type: ScheduledTaskTargetType
     artist_id: str | None = None
     tag: str | None = None
+    tags: tuple[str, ...] = ()
     days: int | None = None
 
 
@@ -143,3 +145,4 @@ class ScheduledTaskConfig:
     filters: tuple[ScheduledTaskFilter, ...] = ()
     actions: tuple[ScheduledTaskAction, ...] = ("download_artist",)
     max_artists_per_run: int = 25
+    artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
