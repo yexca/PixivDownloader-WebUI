@@ -75,6 +75,8 @@ export type LocalTagListResponse = {
 export type ListArtistsParams = {
   q?: string;
   local_tag?: string;
+  file_state?: string;
+  tag_state?: string;
   sort?: string;
   limit?: number;
   offset?: number;
@@ -87,6 +89,12 @@ export function listArtists(params: ListArtistsParams = {}): Promise<ArtistListR
   }
   if (params.local_tag) {
     search.set("local_tag", params.local_tag);
+  }
+  if (params.file_state) {
+    search.set("file_state", params.file_state);
+  }
+  if (params.tag_state) {
+    search.set("tag_state", params.tag_state);
   }
   if (params.sort) {
     search.set("sort", params.sort);

@@ -37,6 +37,11 @@ class JobEventResponse(BaseModel):
     created_at: str | None
 
 
+class JobEventListResponse(BaseModel):
+    items: list[JobEventResponse]
+    total: int
+
+
 class JobDetailResponse(JobResponse):
     events: list[JobEventResponse]
 
@@ -45,6 +50,24 @@ class JobCancelResponse(BaseModel):
     job_id: str
     status: str
     cancel_requested: bool
+
+
+class JobBulkCancelRequest(BaseModel):
+    job_ids: list[str]
+
+
+class JobBulkActionError(BaseModel):
+    job_id: str
+    message: str
+
+
+class JobBulkCancelResponse(BaseModel):
+    cancelled: list[JobCancelResponse]
+    errors: list[JobBulkActionError]
+
+
+class JobQueueStateResponse(BaseModel):
+    paused: bool
 
 
 class JobStreamMessage(BaseModel):

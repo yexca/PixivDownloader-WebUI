@@ -117,6 +117,20 @@ class JobRepository:
             raise DatabaseError(f"failed to request cancellation for job {job_id}") from exc
         return self.get_by_id(job_id)
 
+    def list_by_ids(self, job_ids: list[str]) -> list[Job]:
+        if not job_ids:
+            return []
+        placeholders = ",".join("?" for _ in job_ids)
+        try:
+            rows = self.conn.execute(
+                f"SELECT * FROM jobs WHERE id IN ({placeholders})",
+                job_ids,
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to fetch jobs by id") from exc
+        jobs_by_id = {str(row["id"]): job_from_row(row) for row in rows}
+        return [jobs_by_id[job_id] for job_id in job_ids if job_id in jobs_by_id]
+
     def next_queued(self) -> Job | None:
         try:
             row = self.conn.execute(
@@ -218,19 +232,37 @@ class JobRepository:
             raise DatabaseError(f"failed to list events for job {job_id}") from exc
         return [job_event_from_row(row) for row in reversed(rows)]
 
-    def list_recent_events(self, *, limit: int = 100) -> list[JobEvent]:
+    def list_recent_events(
+        self,
+        *,
+        level: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[JobEvent]:
+        sql = "SELECT * FROM job_events"
+        params: list[object] = []
+        if level:
+            sql += " WHERE level = ?"
+            params.append(level)
+        sql += " ORDER BY id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         try:
-            rows = self.conn.execute(
-                """
-                SELECT * FROM job_events
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            rows = self.conn.execute(sql, params).fetchall()
         except sqlite3.Error as exc:
             raise DatabaseError("failed to list recent job events") from exc
         return [job_event_from_row(row) for row in reversed(rows)]
+
+    def count_events(self, *, level: str | None = None) -> int:
+        sql = "SELECT COUNT(*) AS total FROM job_events"
+        params: list[object] = []
+        if level:
+            sql += " WHERE level = ?"
+            params.append(level)
+        try:
+            row = self.conn.execute(sql, params).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to count job events") from exc
+        return int(row["total"])
 
     def close(self) -> None:
         self.conn.close()

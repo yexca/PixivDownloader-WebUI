@@ -44,6 +44,15 @@ export type JobCancelResponse = {
   cancel_requested: boolean;
 };
 
+export type JobBulkCancelResponse = {
+  cancelled: JobCancelResponse[];
+  errors: Array<{ job_id: string; message: string }>;
+};
+
+export type JobQueueState = {
+  paused: boolean;
+};
+
 export type JobStreamMessage = {
   type: "job_progress" | "job_event" | "job_completed" | "job_failed" | "job_cancelled" | string;
   job_id: string;
@@ -83,6 +92,29 @@ export function getJob(jobId: string): Promise<JobDetail> {
 
 export function cancelJob(jobId: string): Promise<JobCancelResponse> {
   return apiRequest<JobCancelResponse>(`/jobs/${jobId}/cancel`, {
+    method: "POST"
+  });
+}
+
+export function bulkCancelJobs(jobIds: string[]): Promise<JobBulkCancelResponse> {
+  return apiRequest<JobBulkCancelResponse>("/jobs/bulk-cancel", {
+    method: "POST",
+    body: { job_ids: jobIds }
+  });
+}
+
+export function getJobQueueState(): Promise<JobQueueState> {
+  return apiRequest<JobQueueState>("/jobs/queue");
+}
+
+export function pauseJobQueue(): Promise<JobQueueState> {
+  return apiRequest<JobQueueState>("/jobs/queue/pause", {
+    method: "POST"
+  });
+}
+
+export function resumeJobQueue(): Promise<JobQueueState> {
+  return apiRequest<JobQueueState>("/jobs/queue/resume", {
     method: "POST"
   });
 }

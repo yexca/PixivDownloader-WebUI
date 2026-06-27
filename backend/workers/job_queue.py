@@ -28,6 +28,7 @@ class JobQueue:
         self.poll_interval_seconds = poll_interval_seconds
         self._wake_event = asyncio.Event()
         self._stop_event = asyncio.Event()
+        self._paused = False
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -46,8 +47,28 @@ class JobQueue:
     def wake(self) -> None:
         self._wake_event.set()
 
+    def pause(self) -> None:
+        self._paused = True
+        self._wake_event.set()
+
+    def resume(self) -> None:
+        self._paused = False
+        self._wake_event.set()
+
+    @property
+    def paused(self) -> bool:
+        return self._paused
+
     async def _run(self) -> None:
         while not self._stop_event.is_set():
+            if self._paused:
+                self._wake_event.clear()
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        self._wake_event.wait(),
+                        timeout=self.poll_interval_seconds,
+                    )
+                continue
             job_id = self._next_queued_job_id()
             if job_id is None:
                 self._wake_event.clear()

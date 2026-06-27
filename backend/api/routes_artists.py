@@ -31,6 +31,8 @@ def list_artists(
     db_path: DbPath,
     q: str | None = None,
     local_tag: str | None = None,
+    file_state: str | None = None,
+    tag_state: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     sort: str = "updated_desc",
@@ -38,11 +40,15 @@ def list_artists(
     repository = ArtistRepository(db_path)
     tag_repository = LocalTagRepository(db_path)
     try:
-        artists = repository.list(limit=limit, offset=offset, query=q, local_tag=local_tag)
-        if sort == "name_asc":
-            artists = sorted(artists, key=lambda artist: artist.name.lower())
-        if sort == "id_asc":
-            artists = sorted(artists, key=lambda artist: artist.id)
+        artists = repository.list(
+            limit=limit,
+            offset=offset,
+            query=q,
+            local_tag=local_tag,
+            file_state=file_state,
+            tag_state=tag_state,
+            sort=sort,
+        )
         return ArtistListResponse(
             items=[
                 artist_summary_response(
@@ -52,7 +58,12 @@ def list_artists(
                 )
                 for artist in artists
             ],
-            total=repository.count(query=q, local_tag=local_tag),
+            total=repository.count(
+                query=q,
+                local_tag=local_tag,
+                file_state=file_state,
+                tag_state=tag_state,
+            ),
         )
     finally:
         repository.close()

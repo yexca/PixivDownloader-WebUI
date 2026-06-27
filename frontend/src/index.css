@@ -53,4 +53,55 @@
   .table-cell {
     @apply border-b px-3 py-2 align-middle text-sm;
   }
+
+  .data-table-wrap {
+    @apply overflow-x-auto rounded-md border bg-card;
+  }
+
+  .data-table-scrollbar {
+    @apply overflow-x-auto overflow-y-hidden rounded-md border bg-card;
+    height: 14px;
+  }
+
+  .data-table {
+    @apply w-full border-collapse;
+  }
+
+  .sticky-col-left {
+    @apply sticky left-0 z-10 bg-card shadow-[1px_0_0_hsl(var(--border))];
+  }
+
+  .sticky-col-left-offset {
+    @apply sticky left-10 z-10 bg-card shadow-[1px_0_0_hsl(var(--border))];
+  }
+
+  .sticky-col-right {
+    @apply sticky right-0 z-10 bg-card shadow-[-1px_0_0_hsl(var(--border))];
+  }
+
+  .table-head .sticky-col-left,
+  .table-head .sticky-col-left-offset,
+  .table-head .sticky-col-right {
+    @apply bg-muted;
+  }
+
+  tr:hover .sticky-col-left,
+  tr:hover .sticky-col-left-offset,
+  tr:hover .sticky-col-right {
+    @apply bg-muted;
+  }
+
+  tr[data-selected="true"] .table-cell,
+  tr[data-selected="true"] .sticky-col-left,
+  tr[data-selected="true"] .sticky-col-left-offset,
+  tr[data-selected="true"] .sticky-col-right {
+    @apply bg-accent;
+  }
+
+  tr[data-selected="true"]:hover .table-cell,
+  tr[data-selected="true"]:hover .sticky-col-left,
+  tr[data-selected="true"]:hover .sticky-col-left-offset,
+  tr[data-selected="true"]:hover .sticky-col-right {
+    @apply bg-accent/80;
+  }
 }

@@ -9,10 +9,14 @@ from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.core.errors import JobNotFoundError
 from backend.domain.types import JobStatus
 from backend.schemas.jobs import (
+    JobBulkActionError,
+    JobBulkCancelRequest,
+    JobBulkCancelResponse,
     JobCancelResponse,
     JobDetailResponse,
     JobEventResponse,
     JobListResponse,
+    JobQueueStateResponse,
     JobStreamMessage,
     job_event_response,
     job_response,
@@ -37,6 +41,27 @@ def list_jobs(
         return JobListResponse(items=[job_response(job) for job in jobs], total=total)
     finally:
         service.close()
+
+
+@router.get("/queue", response_model=JobQueueStateResponse)
+def get_queue_state(queue: Queue) -> JobQueueStateResponse:
+    return JobQueueStateResponse(paused=bool(getattr(queue, "paused", False)))
+
+
+@router.post("/queue/pause", response_model=JobQueueStateResponse)
+def pause_queue(queue: Queue) -> JobQueueStateResponse:
+    if hasattr(queue, "pause"):
+        queue.pause()
+    return JobQueueStateResponse(paused=bool(getattr(queue, "paused", False)))
+
+
+@router.post("/queue/resume", response_model=JobQueueStateResponse)
+def resume_queue(queue: Queue) -> JobQueueStateResponse:
+    if hasattr(queue, "resume"):
+        queue.resume()
+    else:
+        queue.wake()
+    return JobQueueStateResponse(paused=bool(getattr(queue, "paused", False)))
 
 
 @router.get("/{job_id}", response_model=JobDetailResponse)
@@ -72,6 +97,31 @@ def cancel_job(job_id: str, db_path: DbPath, queue: Queue) -> JobCancelResponse:
         job_id=job.id,
         status=job.status,
         cancel_requested=job.cancel_requested,
+    )
+
+
+@router.post("/bulk-cancel", response_model=JobBulkCancelResponse)
+def bulk_cancel_jobs(
+    request: JobBulkCancelRequest,
+    db_path: DbPath,
+    queue: Queue,
+) -> JobBulkCancelResponse:
+    service = JobService(db_path)
+    try:
+        cancelled, errors = service.cancel_jobs(request.job_ids)
+    finally:
+        service.close()
+    queue.wake()
+    return JobBulkCancelResponse(
+        cancelled=[
+            JobCancelResponse(
+                job_id=job.id,
+                status=job.status,
+                cancel_requested=job.cancel_requested,
+            )
+            for job in cancelled
+        ],
+        errors=[JobBulkActionError(**error) for error in errors],
     )
 
 

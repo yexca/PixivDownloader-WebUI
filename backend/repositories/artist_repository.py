@@ -74,6 +74,9 @@ class ArtistRepository:
         offset: int = 0,
         query: str | None = None,
         local_tag: str | None = None,
+        file_state: str | None = None,
+        tag_state: str | None = None,
+        sort: str = "updated_desc",
     ) -> list[Artist]:
         sql = "SELECT DISTINCT artists.* FROM artists"
         params: list[object] = []
@@ -89,9 +92,10 @@ class ArtistRepository:
             where.append("(artists.id LIKE ? OR artists.name LIKE ?)")
             like_query = f"%{query}%"
             params.extend([like_query, like_query])
+        add_artist_filters(where, tag_state=tag_state, file_state=file_state)
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY artists.updated_at DESC LIMIT ? OFFSET ?"
+        sql += f" ORDER BY {artist_sort_expression(sort)} LIMIT ? OFFSET ?"
         params.extend([limit, offset])
 
         try:
@@ -100,7 +104,14 @@ class ArtistRepository:
             raise DatabaseError("failed to list artists") from exc
         return [artist_from_row(row) for row in rows]
 
-    def count(self, *, query: str | None = None, local_tag: str | None = None) -> int:
+    def count(
+        self,
+        *,
+        query: str | None = None,
+        local_tag: str | None = None,
+        file_state: str | None = None,
+        tag_state: str | None = None,
+    ) -> int:
         sql = "SELECT COUNT(DISTINCT artists.id) AS total FROM artists"
         params: list[object] = []
         where: list[str] = []
@@ -115,6 +126,7 @@ class ArtistRepository:
             where.append("(artists.id LIKE ? OR artists.name LIKE ?)")
             like_query = f"%{query}%"
             params.extend([like_query, like_query])
+        add_artist_filters(where, tag_state=tag_state, file_state=file_state)
         if where:
             sql += " WHERE " + " AND ".join(where)
         try:
@@ -194,3 +206,91 @@ def artist_from_row(row: sqlite3.Row) -> Artist:
         else None,
         last_checked_at=str(row["last_checked_at"]) if row["last_checked_at"] else None,
     )
+
+
+def add_artist_filters(
+    where: list[str],
+    *,
+    tag_state: str | None,
+    file_state: str | None,
+) -> None:
+    if tag_state == "untagged":
+        where.append(
+            """
+            NOT EXISTS (
+                SELECT 1 FROM artist_local_tags
+                WHERE artist_local_tags.artist_id = artists.id
+            )
+            """
+        )
+    if tag_state == "tagged":
+        where.append(
+            """
+            EXISTS (
+                SELECT 1 FROM artist_local_tags
+                WHERE artist_local_tags.artist_id = artists.id
+            )
+            """
+        )
+    if file_state == "failed":
+        where.append(status_exists("failed"))
+    if file_state == "pending":
+        where.append(status_exists("pending", "remote_only"))
+    if file_state == "downloaded":
+        where.append(
+            """
+            EXISTS (
+                SELECT 1 FROM artworks
+                JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+                WHERE artworks.artist_id = artists.id
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM artworks
+                JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+                WHERE artworks.artist_id = artists.id
+                  AND artwork_files.status NOT IN ('downloaded', 'skipped')
+            )
+            """
+        )
+
+
+def status_exists(*statuses: str) -> str:
+    quoted_statuses = ", ".join(f"'{status}'" for status in statuses)
+    return f"""
+        EXISTS (
+            SELECT 1 FROM artworks
+            JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+            WHERE artworks.artist_id = artists.id
+              AND artwork_files.status IN ({quoted_statuses})
+        )
+    """
+
+
+def artist_sort_expression(sort: str) -> str:
+    if sort == "name_asc":
+        return "LOWER(artists.name) ASC, artists.id ASC"
+    if sort == "id_asc":
+        return "artists.id ASC"
+    if sort == "failed_desc":
+        return """
+            (
+                SELECT COUNT(*) FROM artworks
+                JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+                WHERE artworks.artist_id = artists.id
+                  AND artwork_files.status = 'failed'
+            ) DESC,
+            artists.updated_at DESC
+        """
+    if sort == "pending_desc":
+        return """
+            (
+                SELECT COUNT(*) FROM artworks
+                JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+                WHERE artworks.artist_id = artists.id
+                  AND artwork_files.status IN ('pending', 'remote_only')
+            ) DESC,
+            artists.updated_at DESC
+        """
+    if sort == "checked_asc":
+        return "artists.last_checked_at IS NOT NULL ASC, artists.last_checked_at ASC"
+    return "artists.updated_at DESC"

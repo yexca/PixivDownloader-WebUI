@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from backend.api import routes_settings
 from backend.app import create_app
 from backend.db.migrate import migrate_database
-from backend.domain.entities import Artist, Job
+from backend.domain.entities import Artist, Job, JobEvent
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
@@ -17,9 +17,17 @@ from backend.services.settings_service import AppSettingsService
 class NoopQueue:
     def __init__(self):
         self.wake_count = 0
+        self.paused = False
 
     def wake(self):
         self.wake_count += 1
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
+        self.wake()
 
 
 def test_health_endpoint(tmp_path):
@@ -827,6 +835,63 @@ def test_cancel_completed_job_returns_consistent_error(tmp_path):
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "job_not_cancellable"
+
+
+def test_job_queue_pause_and_resume_endpoints(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    pause_response = client.post("/api/jobs/queue/pause")
+    state_response = client.get("/api/jobs/queue")
+    resume_response = client.post("/api/jobs/queue/resume")
+
+    assert pause_response.status_code == 200
+    assert pause_response.json() == {"paused": True}
+    assert state_response.json() == {"paused": True}
+    assert resume_response.json() == {"paused": False}
+    assert queue.wake_count == 1
+
+
+def test_bulk_cancel_jobs_cancels_active_and_reports_terminal_errors(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        repository.create(Job(id="queued-job", type="download_artist", status="queued"))
+        repository.create(Job(id="done-job", type="download_artist", status="completed"))
+    finally:
+        repository.close()
+
+    response = client.post(
+        "/api/jobs/bulk-cancel",
+        json={"job_ids": ["queued-job", "done-job", "missing-job"]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cancelled"][0]["job_id"] == "queued-job"
+    assert body["cancelled"][0]["status"] == "cancelled"
+    assert [error["job_id"] for error in body["errors"]] == ["done-job", "missing-job"]
+    assert queue.wake_count == 1
+
+
+def test_recent_logs_endpoint_returns_paginated_items(tmp_path):
+    client = make_client(tmp_path)
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        repository.create(Job(id="job-1", type="download_artist", status="queued"))
+        repository.add_event(JobEvent(job_id="job-1", level="info", message="First"))
+        repository.add_event(JobEvent(job_id="job-1", level="error", message="Second"))
+    finally:
+        repository.close()
+
+    response = client.get("/api/logs/recent?level=error&limit=1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 1
+    assert body["items"][0]["level"] == "error"
+    assert body["items"][0]["message"] == "Second"
 
 
 def make_client(tmp_path, queue=None):

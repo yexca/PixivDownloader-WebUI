@@ -124,6 +124,21 @@ class JobService:
         )
         return updated
 
+    def cancel_jobs(self, job_ids: list[str]) -> tuple[list[Job], list[dict[str, str]]]:
+        cancelled: list[Job] = []
+        errors: list[dict[str, str]] = []
+        for job_id in job_ids:
+            try:
+                job = self.cancel_job(job_id)
+            except JobNotCancellableError as exc:
+                errors.append({"job_id": job_id, "message": str(exc)})
+                continue
+            if job is None:
+                errors.append({"job_id": job_id, "message": "job not found"})
+                continue
+            cancelled.append(job)
+        return cancelled, errors
+
     def list_events(self, job_id: str, *, limit: int = 100) -> list[JobEvent]:
         return self.repository.list_events(job_id, limit=limit)
 

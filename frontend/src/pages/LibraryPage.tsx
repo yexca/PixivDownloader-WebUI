@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Check, ExternalLink, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -19,25 +19,35 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
+import { Pagination } from "@/components/Pagination";
+import { ScrollableTable } from "@/components/ScrollableTable";
 import { useToast } from "@/components/ToastProvider";
 import { formatDate } from "@/lib/utils";
 
 export function LibraryPage(): JSX.Element {
-  const [query, setQuery] = React.useState("");
-  const [submittedQuery, setSubmittedQuery] = React.useState("");
-  const [selectedTag, setSelectedTag] = React.useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const submittedQuery = searchParams.get("q") ?? "";
+  const selectedTag = searchParams.get("localTag") ?? "";
+  const fileState = searchParams.get("fileState") ?? "";
+  const tagState = searchParams.get("tagState") ?? "";
+  const sort = searchParams.get("sort") ?? "updated_desc";
+  const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const pageSize = Math.max(1, Number(searchParams.get("pageSize") || "50"));
+  const [query, setQuery] = React.useState(submittedQuery);
   const [newArtistId, setNewArtistId] = React.useState("");
-  const [sort, setSort] = React.useState("updated_desc");
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const artists = useQuery({
-    queryKey: ["artists", submittedQuery, selectedTag, sort],
+    queryKey: ["artists", submittedQuery, selectedTag, fileState, tagState, sort, pageSize, page],
     queryFn: () =>
       listArtists({
         q: submittedQuery || undefined,
         local_tag: selectedTag || undefined,
+        file_state: fileState || undefined,
+        tag_state: tagState || undefined,
         sort,
-        limit: 100
+        limit: pageSize,
+        offset: (page - 1) * pageSize
       })
   });
   const tags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
@@ -50,6 +60,31 @@ export function LibraryPage(): JSX.Element {
     },
     onError: (error) => pushToast({ title: "Artist could not be added", description: error.message, tone: "error" })
   });
+  React.useEffect(() => {
+    setQuery(submittedQuery);
+  }, [submittedQuery]);
+
+  const setFilter = (key: string, value: string) => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (value) {
+      nextParams.set(key, value);
+    } else {
+      nextParams.delete(key);
+    }
+    nextParams.set("page", "1");
+    setSearchParams(nextParams, { replace: true });
+  };
+  const setPage = (nextPage: number) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("page", String(nextPage));
+    setSearchParams(nextParams, { replace: true });
+  };
+  const setPageSize = (nextPageSize: number) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("pageSize", String(nextPageSize));
+    nextParams.set("page", "1");
+    setSearchParams(nextParams, { replace: true });
+  };
 
   return (
     <>
@@ -84,7 +119,7 @@ export function LibraryPage(): JSX.Element {
           className="surface flex flex-col gap-3 p-3 sm:flex-row"
           onSubmit={(event) => {
             event.preventDefault();
-            setSubmittedQuery(query.trim());
+            setFilter("q", query.trim());
           }}
         >
           <div className="relative flex-1">
@@ -97,18 +132,32 @@ export function LibraryPage(): JSX.Element {
               aria-label="Search artist name or ID"
             />
           </div>
-          <Select value={sort} onChange={(event) => setSort(event.target.value)} aria-label="Sort artists">
+          <Select value={sort} onChange={(event) => setFilter("sort", event.target.value)} aria-label="Sort artists">
             <option value="updated_desc">Recently updated</option>
             <option value="name_asc">Name</option>
             <option value="id_asc">ID</option>
+            <option value="failed_desc">Most failed</option>
+            <option value="pending_desc">Most pending</option>
+            <option value="checked_asc">Oldest checked</option>
           </Select>
-          <Select value={selectedTag} onChange={(event) => setSelectedTag(event.target.value)} aria-label="Filter by local tag">
+          <Select value={selectedTag} onChange={(event) => setFilter("localTag", event.target.value)} aria-label="Filter by local tag">
             <option value="">All tags</option>
             {tags.data?.items.map((tag) => (
               <option key={tag.id} value={tag.name}>
                 {tag.name}
               </option>
             ))}
+          </Select>
+          <Select value={fileState} onChange={(event) => setFilter("fileState", event.target.value)} aria-label="Filter by file state">
+            <option value="">All files</option>
+            <option value="failed">Has failed files</option>
+            <option value="pending">Has pending files</option>
+            <option value="downloaded">Fully downloaded</option>
+          </Select>
+          <Select value={tagState} onChange={(event) => setFilter("tagState", event.target.value)} aria-label="Filter by tag state">
+            <option value="">Any tag state</option>
+            <option value="tagged">Tagged</option>
+            <option value="untagged">Untagged</option>
           </Select>
           <Button type="submit">Search</Button>
         </form>
@@ -120,7 +169,16 @@ export function LibraryPage(): JSX.Element {
         ) : artists.data.items.length === 0 ? (
           <DataState title="No artists found" description="Downloaded or scanned artists will appear here." />
         ) : (
-          <ArtistTable artists={artists.data.items} />
+          <>
+            <ArtistTable artists={artists.data.items} />
+            <Pagination
+              total={artists.data.total}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+            />
+          </>
         )}
       </div>
     </>
@@ -159,11 +217,11 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
   });
 
   return (
-    <div className="overflow-x-auto rounded-md border bg-card">
-      <table className="w-full min-w-[1140px] border-collapse">
+    <ScrollableTable>
+      <table className="data-table min-w-[1180px]">
         <thead className="table-head">
           <tr>
-            <th className="px-3 py-2">Artist</th>
+            <th className="sticky-col-left px-3 py-2">Artist</th>
             <th className="px-3 py-2">ID</th>
             <th className="px-3 py-2">Artworks</th>
             <th className="px-3 py-2">Files</th>
@@ -172,13 +230,13 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
             <th className="px-3 py-2">Latest ID</th>
             <th className="px-3 py-2">Tags</th>
             <th className="px-3 py-2">Last checked</th>
-            <th className="px-3 py-2">Actions</th>
+            <th className="sticky-col-right px-3 py-2">Actions</th>
           </tr>
         </thead>
         <tbody>
           {artists.map((artist) => (
             <tr key={artist.id} className="hover:bg-muted/40">
-              <td className="table-cell">
+              <td className="table-cell sticky-col-left min-w-52 max-w-72">
                 <Link to={`/artists/${artist.id}`} className="font-medium text-primary hover:underline">
                   {artist.name}
                 </Link>
@@ -193,7 +251,7 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
                 <TagEditor artist={artist} />
               </td>
               <td className="table-cell">{formatDate(artist.last_checked_at)}</td>
-              <td className="table-cell">
+              <td className="table-cell sticky-col-right min-w-72">
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
                     type="button"
@@ -241,7 +299,7 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTable>
   );
 }
 

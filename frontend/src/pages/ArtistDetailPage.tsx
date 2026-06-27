@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+import { useParams, useSearchParams } from "react-router-dom";
 import { ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -8,11 +8,16 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
+import { Pagination } from "@/components/Pagination";
+import { ScrollableTable } from "@/components/ScrollableTable";
 import { useToast } from "@/components/ToastProvider";
 import { formatDate } from "@/lib/utils";
 
 export function ArtistDetailPage(): JSX.Element {
   const { artistId } = useParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const page = Math.max(1, Number(searchParams.get("page") || "1"));
+  const pageSize = Math.max(1, Number(searchParams.get("pageSize") || "50"));
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const artist = useQuery({
@@ -21,8 +26,8 @@ export function ArtistDetailPage(): JSX.Element {
     enabled: Boolean(artistId)
   });
   const artworks = useQuery({
-    queryKey: ["artist-artworks", artistId],
-    queryFn: () => listArtistArtworks(artistId!, 100),
+    queryKey: ["artist-artworks", artistId, pageSize, page],
+    queryFn: () => listArtistArtworks(artistId!, pageSize, (page - 1) * pageSize),
     enabled: Boolean(artistId)
   });
   const rescan = useMutation({
@@ -44,6 +49,17 @@ export function ArtistDetailPage(): JSX.Element {
   if (!artistId) {
     return <DataState title="Artist ID is missing" variant="error" />;
   }
+  const setPage = (nextPage: number) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("page", String(nextPage));
+    setSearchParams(nextParams, { replace: true });
+  };
+  const setPageSize = (nextPageSize: number) => {
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("pageSize", String(nextPageSize));
+    nextParams.set("page", "1");
+    setSearchParams(nextParams, { replace: true });
+  };
 
   return (
     <>
@@ -89,7 +105,16 @@ export function ArtistDetailPage(): JSX.Element {
           ) : artworks.data.items.length === 0 ? (
             <DataState title="No artworks recorded" description="Run a rescan to discover artworks." />
           ) : (
-            <ArtworkTable artworks={artworks.data.items} />
+            <>
+              <ArtworkTable artworks={artworks.data.items} />
+              <Pagination
+                total={artworks.data.total}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+              />
+            </>
           )}
         </section>
       </div>
@@ -108,16 +133,16 @@ function Metric({ label, value }: { label: string; value: number }): JSX.Element
 
 function ArtworkTable({ artworks }: { artworks: ArtworkSummary[] }): JSX.Element {
   return (
-    <div className="overflow-x-auto rounded-md border bg-card">
-      <table className="w-full min-w-[860px] border-collapse">
+    <ScrollableTable>
+      <table className="data-table min-w-[860px]">
         <thead className="table-head">
           <tr>
-            <th className="px-3 py-2">Artwork</th>
+            <th className="sticky-col-left px-3 py-2">Artwork</th>
             <th className="px-3 py-2">Pages</th>
             <th className="px-3 py-2">Files</th>
             <th className="px-3 py-2">Failed</th>
             <th className="px-3 py-2">Pixiv date</th>
-            <th className="px-3 py-2">Files</th>
+            <th className="sticky-col-right px-3 py-2">Files</th>
           </tr>
         </thead>
         <tbody>
@@ -126,7 +151,7 @@ function ArtworkTable({ artworks }: { artworks: ArtworkSummary[] }): JSX.Element
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollableTable>
   );
 }
 
@@ -149,7 +174,7 @@ function ArtworkRow({ artwork }: { artwork: ArtworkSummary }): JSX.Element {
 
   return (
     <tr className="hover:bg-muted/40">
-      <td className="table-cell">
+      <td className="table-cell sticky-col-left min-w-64 max-w-96">
         <div className="font-medium">{artwork.title || "Untitled"}</div>
         <div className="text-xs text-muted-foreground">{artwork.id}</div>
       </td>
@@ -160,7 +185,7 @@ function ArtworkRow({ artwork }: { artwork: ArtworkSummary }): JSX.Element {
           <Badge tone="muted">{artwork.skipped_files} skipped</Badge>
         </div>
       </td>
-      <td className="table-cell">
+      <td className="table-cell sticky-col-right min-w-32">
         <Badge tone={artwork.failed_files > 0 ? "danger" : "muted"}>{artwork.failed_files}</Badge>
       </td>
       <td className="table-cell">{formatDate(artwork.pixiv_created_at)}</td>
