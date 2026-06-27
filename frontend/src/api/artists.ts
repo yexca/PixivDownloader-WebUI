@@ -6,6 +6,7 @@ export type ArtistSummary = {
   name: string;
   profile_url: string;
   avatar_url: string | null;
+  avatar_cached: boolean;
   artwork_count: number;
   downloaded_file_count: number;
   remote_file_count: number;

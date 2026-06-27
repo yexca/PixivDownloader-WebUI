@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from backend.domain.entities import Artist, ArtistNameHistory, Artwork, LocalTag
 from backend.domain.types import ArtistAccountStatus
+from backend.services.avatar_cache_service import AvatarCacheService
 
 
 class LocalTagResponse(BaseModel):
@@ -31,6 +32,7 @@ class ArtistSummaryResponse(BaseModel):
     name: str
     profile_url: str
     avatar_url: str | None
+    avatar_cached: bool
     artwork_count: int
     downloaded_file_count: int
     remote_file_count: int
@@ -93,11 +95,13 @@ def artist_summary_response(
     *,
     stale_days: int = 30,
 ) -> ArtistSummaryResponse:
+    avatar_cache = AvatarCacheService()
     return ArtistSummaryResponse(
         id=artist.id,
         name=artist.name,
         profile_url=artist.profile_url,
         avatar_url=artist.avatar_url,
+        avatar_cached=avatar_cache.has_cached_avatar(artist.id),
         artwork_count=counts["artwork_count"],
         downloaded_file_count=counts["downloaded_file_count"],
         remote_file_count=counts["remote_file_count"],

@@ -9,4 +9,5 @@ sample*/
 env/
 node_modules/
 downloads/
+resources/cache/
 config/settings.json

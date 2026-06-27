@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
@@ -22,6 +23,7 @@ from backend.schemas.artists import (
     local_tag_list_response,
 )
 from backend.schemas.downloads import DownloadCreateResponse
+from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
 
@@ -143,12 +145,31 @@ def get_artist(
         settings_service.close()
 
 
+@router.get("/{artist_id}/avatar", include_in_schema=False)
+def get_artist_avatar(artist_id: str, db_path: DbPath) -> FileResponse:
+    repository = ArtistRepository(db_path)
+    try:
+        if repository.get_by_id(artist_id) is None:
+            raise HTTPException(status_code=404, detail="artist not found")
+        cached_avatar = AvatarCacheService().get_cached_avatar(artist_id)
+        if cached_avatar is None:
+            raise HTTPException(status_code=404, detail="artist avatar not cached")
+        return FileResponse(
+            cached_avatar.path,
+            media_type=cached_avatar.media_type,
+            headers={"Cache-Control": "public, max-age=86400"},
+        )
+    finally:
+        repository.close()
+
+
 @router.delete("/{artist_id}", status_code=204)
 def delete_artist(artist_id: str, db_path: DbPath) -> None:
     repository = ArtistRepository(db_path)
     try:
         if not repository.delete(artist_id):
             raise HTTPException(status_code=404, detail="artist not found")
+        AvatarCacheService().remove_artist_avatar(artist_id)
     finally:
         repository.close()
 

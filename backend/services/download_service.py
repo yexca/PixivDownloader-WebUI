@@ -13,6 +13,7 @@ from backend.repositories.artist_name_history_repository import ArtistNameHistor
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
+from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.file_downloader import FileDownloader
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.random_sleep import RandomSleep
@@ -50,6 +51,7 @@ class DownloadService:
         name_history_repository: ArtistNameHistoryRepository | None = None,
         artwork_repository: ArtworkRepository | None = None,
         file_repository: ArtworkFileRepository | None = None,
+        avatar_cache_service: AvatarCacheService | None = None,
         sleeper: Callable[[], None] | None = None,
     ) -> None:
         resolved_sleeper = sleeper or RandomSleep()
@@ -59,6 +61,7 @@ class DownloadService:
         self.name_history_repository = name_history_repository or ArtistNameHistoryRepository()
         self.artwork_repository = artwork_repository
         self.file_repository = file_repository
+        self.avatar_cache_service = avatar_cache_service or AvatarCacheService()
         self.sleeper = resolved_sleeper
 
     def download(
@@ -185,24 +188,24 @@ class DownloadService:
             raise
 
         self._report(progress_callback, "Download completed, Inserting database...")
-        self.artist_repository.upsert(
-            Artist(
-                id=artist.id,
-                name=artist.name,
-                profile_url=artist.profile_url,
-                account=artist.account,
-                avatar_url=artist.avatar_url,
-                comment=artist.comment,
-                last_download_id=str(last_download_id),
-                last_checked_at=artist.last_checked_at,
-                account_status=artist.account_status,
-                account_status_checked_at=artist.account_status_checked_at,
-                account_status_reason=artist.account_status_reason,
-                remote_latest_artwork_id=latest_artwork_id(artworks)
-                or artist.remote_latest_artwork_id,
-                remote_latest_checked_at=remote_checked_at,
-            )
+        updated_artist = Artist(
+            id=artist.id,
+            name=artist.name,
+            profile_url=artist.profile_url,
+            account=artist.account,
+            avatar_url=artist.avatar_url,
+            comment=artist.comment,
+            last_download_id=str(last_download_id),
+            last_checked_at=artist.last_checked_at,
+            account_status=artist.account_status,
+            account_status_checked_at=artist.account_status_checked_at,
+            account_status_reason=artist.account_status_reason,
+            remote_latest_artwork_id=latest_artwork_id(artworks)
+            or artist.remote_latest_artwork_id,
+            remote_latest_checked_at=remote_checked_at,
         )
+        self.artist_repository.upsert(updated_artist)
+        self.avatar_cache_service.cache_artist_avatar(updated_artist)
         self._report(progress_callback, "Inserted database")
 
         return DownloadSummary(
@@ -222,6 +225,7 @@ class DownloadService:
         retry_failed: bool,
     ) -> list[ArtworkFile]:
         self.artist_repository.upsert(artist)
+        self.avatar_cache_service.cache_artist_avatar(artist)
         if self.artwork_repository is None or self.file_repository is None:
             return [file for artwork in artworks for file in artwork.files]
 

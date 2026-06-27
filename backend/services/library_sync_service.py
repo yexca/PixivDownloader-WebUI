@@ -8,6 +8,7 @@ from backend.repositories.artist_name_history_repository import ArtistNameHistor
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
+from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 
 
@@ -27,12 +28,14 @@ class LibrarySyncService:
         name_history_repository: ArtistNameHistoryRepository | None = None,
         artwork_repository: ArtworkRepository | None = None,
         file_repository: ArtworkFileRepository | None = None,
+        avatar_cache_service: AvatarCacheService | None = None,
     ) -> None:
         self.pixiv_client = pixiv_client or PixivClient()
         self.artist_repository = artist_repository or ArtistRepository()
         self.name_history_repository = name_history_repository or ArtistNameHistoryRepository()
         self.artwork_repository = artwork_repository or ArtworkRepository()
         self.file_repository = file_repository or ArtworkFileRepository()
+        self.avatar_cache_service = avatar_cache_service or AvatarCacheService()
 
     def sync_artist(self, artist_id: str) -> LibrarySyncSummary:
         existing_artist = self.artist_repository.get_by_id(artist_id)
@@ -84,6 +87,7 @@ class LibrarySyncService:
             remote_latest_checked_at=now,
         )
         self.artist_repository.upsert(synced_artist)
+        self.avatar_cache_service.cache_artist_avatar(synced_artist)
         file_count = 0
         for artwork in artworks:
             self.artwork_repository.upsert(artwork)

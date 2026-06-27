@@ -323,18 +323,7 @@ function ArtistTable({
             >
               <td className="table-cell sticky-col-left min-w-52 max-w-72">
                 <div className="flex items-center gap-3">
-                  {artist.avatar_url ? (
-                    <img
-                      src={artist.avatar_url}
-                      alt=""
-                      className="h-9 w-9 shrink-0 rounded-md border object-cover"
-                      loading="lazy"
-                    />
-                  ) : (
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted text-xs font-semibold text-muted-foreground">
-                      {artist.name.slice(0, 1).toUpperCase() || "A"}
-                    </div>
-                  )}
+                  <ArtistAvatar artist={artist} size="sm" />
                   <div className="min-w-0">
                     <div className="truncate font-medium">{artist.name}</div>
                     <div className="text-xs text-muted-foreground">Pixiv {artist.id}</div>
@@ -450,13 +439,7 @@ function ArtistDetailPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
     <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
       <div className="shrink-0">
         <div className="flex items-start gap-3">
-          {artist.avatar_url ? (
-            <img src={artist.avatar_url} alt="" className="h-12 w-12 shrink-0 rounded-md border object-cover" />
-          ) : (
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
-              {artist.name.slice(0, 1).toUpperCase() || "A"}
-            </div>
-          )}
+          <ArtistAvatar artist={artist} size="lg" />
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold">{artist.name}</h2>
             <p className="mt-1 text-xs text-muted-foreground">Pixiv user {artist.id}</p>
@@ -589,6 +572,34 @@ function ArtistTagsPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
     <div className="space-y-3">
       <h3 className="text-sm font-semibold">Local Tags</h3>
       <TagEditor artist={artist} />
+    </div>
+  );
+}
+
+function ArtistAvatar({ artist, size }: { artist: ArtistSummary; size: "sm" | "lg" }): JSX.Element {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => {
+    setFailed(false);
+  }, [artist.id, artist.avatar_cached]);
+
+  const className =
+    size === "lg"
+      ? "h-12 w-12 text-sm"
+      : "h-9 w-9 text-xs";
+  if (artist.avatar_cached && !failed) {
+    return (
+      <img
+        src={`/api/artists/${artist.id}/avatar`}
+        alt=""
+        className={`${className} shrink-0 rounded-md border object-cover`}
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <div className={`${className} flex shrink-0 items-center justify-center rounded-md border bg-muted font-semibold text-muted-foreground`}>
+      {artist.name.slice(0, 1).toUpperCase() || "A"}
     </div>
   );
 }
