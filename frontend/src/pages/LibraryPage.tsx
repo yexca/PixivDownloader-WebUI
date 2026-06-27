@@ -1,22 +1,25 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Check, ExternalLink, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   createArtist,
   deleteArtist,
+  getArtist,
   listArtists,
   listLocalTags,
   retryFailedArtist,
   setArtistLocalTags,
   syncArtist,
+  type ArtistDetail,
   type ArtistSummary
 } from "@/api/artists";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { Pagination } from "@/components/Pagination";
@@ -35,6 +38,9 @@ export function LibraryPage(): JSX.Element {
   const sort = searchParams.get("sort") ?? "updated_desc";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const pageSize = Math.max(1, Number(searchParams.get("pageSize") || "50"));
+  const [selectedArtistId, setSelectedArtistId] = React.useState<string | null>(
+    searchParams.get("artist")
+  );
   const [query, setQuery] = React.useState(submittedQuery);
   const [newArtistId, setNewArtistId] = React.useState("");
   const queryClient = useQueryClient();
@@ -66,6 +72,11 @@ export function LibraryPage(): JSX.Element {
       })
   });
   const tags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
+  const selectedArtist = useQuery({
+    queryKey: ["artist", selectedArtistId],
+    queryFn: () => getArtist(selectedArtistId!),
+    enabled: Boolean(selectedArtistId)
+  });
   const addArtist = useMutation({
     mutationFn: (userId: string) => createArtist(userId),
     onSuccess: (response) => {
@@ -78,6 +89,15 @@ export function LibraryPage(): JSX.Element {
   React.useEffect(() => {
     setQuery(submittedQuery);
   }, [submittedQuery]);
+  React.useEffect(() => {
+    const artistId = searchParams.get("artist");
+    if (artistId && artistId !== selectedArtistId) {
+      setSelectedArtistId(artistId);
+    }
+    if (!artistId && selectedArtistId) {
+      setSelectedArtistId(null);
+    }
+  }, [searchParams, selectedArtistId]);
 
   const setFilter = (key: string, value: string) => {
     const nextParams = new URLSearchParams(searchParams);
@@ -87,6 +107,8 @@ export function LibraryPage(): JSX.Element {
       nextParams.delete(key);
     }
     nextParams.set("page", "1");
+    nextParams.delete("artist");
+    setSelectedArtistId(null);
     setSearchParams(nextParams, { replace: true });
   };
   const setPage = (nextPage: number) => {
@@ -98,6 +120,14 @@ export function LibraryPage(): JSX.Element {
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("pageSize", String(nextPageSize));
     nextParams.set("page", "1");
+    nextParams.delete("artist");
+    setSelectedArtistId(null);
+    setSearchParams(nextParams, { replace: true });
+  };
+  const selectArtist = (artist: ArtistSummary) => {
+    setSelectedArtistId(artist.id);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("artist", artist.id);
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -191,30 +221,53 @@ export function LibraryPage(): JSX.Element {
           <Button type="submit">Search</Button>
         </form>
 
-        {artists.isLoading ? (
-          <DataState title="Loading artists" variant="loading" />
-        ) : artists.isError ? (
-          <DataState title="Could not load artists" description={artists.error.message} variant="error" />
-        ) : artists.data.items.length === 0 ? (
-          <DataState title="No artists found" description="Downloaded or scanned artists will appear here." />
-        ) : (
-          <>
-            <ArtistTable artists={artists.data.items} />
-            <Pagination
-              total={artists.data.total}
-              page={page}
-              pageSize={pageSize}
-              onPageChange={setPage}
-              onPageSizeChange={setPageSize}
-            />
-          </>
-        )}
+        <div className="grid gap-4 xl:grid-cols-[minmax(680px,1fr)_360px]">
+          <section className="space-y-3">
+            {artists.isLoading ? (
+              <DataState title="Loading artists" variant="loading" />
+            ) : artists.isError ? (
+              <DataState title="Could not load artists" description={artists.error.message} variant="error" />
+            ) : artists.data.items.length === 0 ? (
+              <DataState title="No artists found" description="Downloaded or scanned artists will appear here." />
+            ) : (
+              <>
+                <ArtistTable artists={artists.data.items} selectedArtistId={selectedArtistId} onSelect={selectArtist} />
+                <Pagination
+                  total={artists.data.total}
+                  page={page}
+                  pageSize={pageSize}
+                  onPageChange={setPage}
+                  onPageSizeChange={setPageSize}
+                />
+              </>
+            )}
+          </section>
+          <aside className="space-y-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start">
+            {selectedArtistId && selectedArtist.data ? (
+              <ArtistDetailPanel artist={selectedArtist.data} />
+            ) : selectedArtist.isLoading ? (
+              <DataState title="Loading artist detail" variant="loading" />
+            ) : selectedArtist.isError ? (
+              <DataState title="Could not load artist" description={selectedArtist.error.message} variant="error" />
+            ) : (
+              <DataState title="Select an artist" description="Artist metadata, tags, and maintenance actions appear here." />
+            )}
+          </aside>
+        </div>
       </div>
     </>
   );
 }
 
-function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
+function ArtistTable({
+  artists,
+  selectedArtistId,
+  onSelect
+}: {
+  artists: ArtistSummary[];
+  selectedArtistId: string | null;
+  onSelect: (artist: ArtistSummary) => void;
+}): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const sync = useMutation({
@@ -247,98 +300,358 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
 
   return (
     <ScrollableTable>
-      <table className="data-table min-w-[1180px]">
+      <table className="data-table min-w-[760px]">
         <thead className="table-head">
           <tr>
             <th className="sticky-col-left px-3 py-2">Artist</th>
-            <th className="px-3 py-2">ID</th>
-            <th className="px-3 py-2">Artworks</th>
             <th className="px-3 py-2">Files</th>
-            <th className="px-3 py-2">Remote</th>
-            <th className="px-3 py-2">Failed</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Latest ID</th>
-            <th className="px-3 py-2">Remote latest</th>
+            <th className="px-3 py-2">Attention</th>
             <th className="px-3 py-2">Tags</th>
             <th className="px-3 py-2">Last checked</th>
             <th className="sticky-col-right px-3 py-2">Actions</th>
           </tr>
         </thead>
         <tbody>
-          {artists.map((artist) => (
-            <tr key={artist.id} className="hover:bg-muted/40">
+          {artists.map((artist) => {
+            const selected = selectedArtistId === artist.id;
+            return (
+            <tr
+              key={artist.id}
+              className="cursor-pointer hover:bg-muted/40"
+              data-selected={selected ? "true" : "false"}
+              onClick={() => onSelect(artist)}
+            >
               <td className="table-cell sticky-col-left min-w-52 max-w-72">
-                <Link to={`/artists/${artist.id}`} className="font-medium text-primary hover:underline">
-                  {artist.name}
-                </Link>
+                <div className="flex items-center gap-3">
+                  {artist.avatar_url ? (
+                    <img
+                      src={artist.avatar_url}
+                      alt=""
+                      className="h-9 w-9 shrink-0 rounded-md border object-cover"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted text-xs font-semibold text-muted-foreground">
+                      {artist.name.slice(0, 1).toUpperCase() || "A"}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{artist.name}</div>
+                    <div className="text-xs text-muted-foreground">Pixiv {artist.id}</div>
+                  </div>
+                </div>
               </td>
-              <td className="table-cell">{artist.id}</td>
-              <td className="table-cell">{artist.artwork_count}</td>
-              <td className="table-cell">{artist.downloaded_file_count}</td>
-              <td className="table-cell">{artist.remote_file_count + artist.pending_file_count}</td>
-              <td className="table-cell">{artist.failed_file_count}</td>
               <td className="table-cell">
-                <ArtistStatusBadges artist={artist} />
+                <FileSummary artist={artist} />
               </td>
-              <td className="table-cell">{artist.latest_downloaded_artwork_id ?? "None"}</td>
-              <td className="table-cell">{artist.remote_latest_artwork_id ?? "Unknown"}</td>
               <td className="table-cell">
-                <TagEditor artist={artist} />
+                <ArtistStatusBadges artist={artist} compact />
+              </td>
+              <td className="table-cell">
+                <TagPreview artist={artist} />
               </td>
               <td className="table-cell">{formatDate(artist.last_checked_at)}</td>
-              <td className="table-cell sticky-col-right min-w-72">
-                <div className="flex flex-wrap items-center gap-2">
+              <td className="table-cell sticky-col-right min-w-44">
+                <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
-                    disabled={sync.isPending}
-                    onClick={() => sync.mutate(artist.id)}
-                  >
-                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                    Sync
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={retryFailed.isPending || artist.failed_file_count === 0}
-                    onClick={() => retryFailed.mutate(artist.id)}
-                  >
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
-                    Retry
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" title="Open Pixiv profile" aria-label="Open Pixiv profile" asChild>
-                    <a href={artist.profile_url} target="_blank" rel="noreferrer">
-                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                    </a>
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
                     size="icon"
-                    title="Remove from library"
-                    aria-label="Remove from library"
-                    disabled={remove.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Remove ${artist.name} from the local library? Local files will not be deleted.`)) {
-                        remove.mutate(artist.id);
-                      }
+                    title="Sync artist"
+                    aria-label="Sync artist"
+                    disabled={sync.isPending}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      sync.mutate(artist.id);
                     }}
                   >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    title="Retry failed files"
+                    aria-label="Retry failed files"
+                    disabled={retryFailed.isPending || artist.failed_file_count === 0}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      retryFailed.mutate(artist.id);
+                    }}
+                  >
+                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={selected ? "secondary" : "ghost"}
+                    size="icon"
+                    title="Show artist details"
+                    aria-label="Show artist details"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onSelect(artist);
+                    }}
+                  >
+                    <Info className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button type="button" variant="ghost" size="icon" title="Open Pixiv profile" aria-label="Open Pixiv profile" asChild>
+                    <a href={artist.profile_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                      <ExternalLink className="h-4 w-4" aria-hidden="true" />
+                    </a>
                   </Button>
                 </div>
               </td>
             </tr>
-          ))}
+          );
+          })}
         </tbody>
       </table>
     </ScrollableTable>
   );
 }
 
-function ArtistStatusBadges({ artist }: { artist: ArtistSummary }): JSX.Element {
+type ArtistDetailTab = "overview" | "details" | "tags";
+
+function ArtistDetailPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
+  const [activeTab, setActiveTab] = React.useState<ArtistDetailTab>("overview");
+  const queryClient = useQueryClient();
+  const { pushToast } = useToast();
+  const sync = useMutation({
+    mutationFn: () => syncArtist(artist.id),
+    onSuccess: (response) => {
+      pushToast({ title: "Sync queued", description: response.job_id, tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (error) => pushToast({ title: "Sync failed", description: error.message, tone: "error" })
+  });
+  const retryFailed = useMutation({
+    mutationFn: () => retryFailedArtist(artist.id),
+    onSuccess: (response) => {
+      pushToast({ title: "Retry queued", description: response.job_id, tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" })
+  });
+  const remove = useMutation({
+    mutationFn: () => deleteArtist(artist.id),
+    onSuccess: () => {
+      pushToast({ title: "Artist removed", tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["artists"] });
+      void queryClient.invalidateQueries({ queryKey: ["local-tags"] });
+    },
+    onError: (error) => pushToast({ title: "Remove failed", description: error.message, tone: "error" })
+  });
+
+  React.useEffect(() => {
+    setActiveTab("overview");
+  }, [artist.id]);
+
+  return (
+    <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
+      <div className="shrink-0">
+        <div className="flex items-start gap-3">
+          {artist.avatar_url ? (
+            <img src={artist.avatar_url} alt="" className="h-12 w-12 shrink-0 rounded-md border object-cover" />
+          ) : (
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border bg-muted text-sm font-semibold text-muted-foreground">
+              {artist.name.slice(0, 1).toUpperCase() || "A"}
+            </div>
+          )}
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-sm font-semibold">{artist.name}</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Pixiv user {artist.id}</p>
+            <div className="mt-2">
+              <ArtistStatusBadges artist={artist} />
+            </div>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => sync.mutate()} disabled={sync.isPending}>
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+            Sync
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => retryFailed.mutate()}
+            disabled={retryFailed.isPending || artist.failed_file_count === 0}
+          >
+            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            Retry
+          </Button>
+          <Button type="button" variant="ghost" size="sm" asChild>
+            <a href={artist.profile_url} target="_blank" rel="noreferrer">
+              <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              Pixiv
+            </a>
+          </Button>
+          <Button type="button" variant="ghost" size="sm" asChild>
+            <Link to={`/artists/${artist.id}`}>Artworks</Link>
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            title="Remove from library"
+            aria-label="Remove from library"
+            disabled={remove.isPending}
+            onClick={() => {
+              if (window.confirm(`Remove ${artist.name} from the local library? Local files will not be deleted.`)) {
+                remove.mutate();
+              }
+            }}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+        <Tabs<ArtistDetailTab>
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="mt-4"
+          items={[
+            { value: "overview", label: "Overview" },
+            { value: "details", label: "Details" },
+            { value: "tags", label: "Tags" }
+          ]}
+        />
+      </div>
+      <div className="mt-4 min-h-0 flex-1 overflow-auto pr-1">
+        {activeTab === "overview" ? <ArtistOverview artist={artist} /> : null}
+        {activeTab === "details" ? <ArtistFullDetails artist={artist} /> : null}
+        {activeTab === "tags" ? <ArtistTagsPanel artist={artist} /> : null}
+      </div>
+    </div>
+  );
+}
+
+function ArtistOverview({ artist }: { artist: ArtistDetail }): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Metric label="Artworks" value={artist.artwork_count} />
+        <Metric label="Downloaded" value={artist.downloaded_file_count} />
+        <Metric label="Remote" value={artist.remote_file_count + artist.pending_file_count} />
+        <Metric label="Failed" value={artist.failed_file_count} tone={artist.failed_file_count > 0 ? "danger" : "normal"} />
+      </div>
+      {artist.account_status_reason ? (
+        <p className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          {artist.account_status_reason}
+        </p>
+      ) : null}
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <Detail label="Last checked" value={formatDate(artist.last_checked_at)} />
+        <Detail label="Remote checked" value={formatDate(artist.remote_latest_checked_at)} />
+        <Detail label="Latest ID" value={artist.latest_downloaded_artwork_id ?? "-"} />
+        <Detail label="Remote latest" value={artist.remote_latest_artwork_id ?? "-"} />
+      </dl>
+    </div>
+  );
+}
+
+function ArtistFullDetails({ artist }: { artist: ArtistDetail }): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-3 text-sm">
+        <Detail label="Pixiv ID" value={artist.id} />
+        <Detail label="Account" value={artist.account ?? "-"} />
+        <Detail label="Status" value={artist.account_status} />
+        <Detail label="Account checked" value={formatDate(artist.account_status_checked_at)} />
+        <Detail label="Latest downloaded" value={artist.latest_downloaded_artwork_id ?? "-"} />
+        <Detail label="Remote latest" value={artist.remote_latest_artwork_id ?? "-"} />
+        <Detail label="Last checked" value={formatDate(artist.last_checked_at)} />
+        <Detail label="Stale threshold" value={`${artist.check_stale_days} days`} />
+      </dl>
+      {artist.comment ? <p className="whitespace-pre-wrap rounded-md border p-3 text-sm text-muted-foreground">{artist.comment}</p> : null}
+      <section>
+        <h3 className="text-sm font-semibold">Name History</h3>
+        {artist.name_history.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">No previous names recorded.</p>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {artist.name_history.map((item) => (
+              <div key={item.id} className="rounded-md border p-3 text-sm">
+                <div className="font-medium">{item.name}</div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {formatDate(item.first_seen_at)} - {formatDate(item.last_seen_at)}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ArtistTagsPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold">Local Tags</h3>
+      <TagEditor artist={artist} />
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  tone = "normal"
+}: {
+  label: string;
+  value: number;
+  tone?: "normal" | "danger";
+}): JSX.Element {
+  return (
+    <div className="rounded-md border bg-muted/25 p-3">
+      <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
+      <p className={tone === "danger" ? "mt-2 text-xl font-semibold text-destructive" : "mt-2 text-xl font-semibold"}>
+        {value.toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div>
+      <dt className="text-xs uppercase text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-words font-medium">{value}</dd>
+    </div>
+  );
+}
+
+function FileSummary({ artist }: { artist: ArtistSummary }): JSX.Element {
+  const remote = artist.remote_file_count + artist.pending_file_count;
+  return (
+    <div className="min-w-48 space-y-1 text-sm">
+      <div className="font-medium">{artist.downloaded_file_count.toLocaleString()} downloaded</div>
+      <div className="flex flex-wrap gap-1">
+        <Badge tone="muted">{artist.artwork_count.toLocaleString()} artworks</Badge>
+        <Badge tone="default">{remote.toLocaleString()} remote</Badge>
+        <Badge tone={artist.failed_file_count > 0 ? "danger" : "muted"}>{artist.failed_file_count.toLocaleString()} failed</Badge>
+      </div>
+    </div>
+  );
+}
+
+function TagPreview({ artist }: { artist: ArtistSummary }): JSX.Element {
+  if (artist.local_tags.length === 0) {
+    return <span className="text-sm text-muted-foreground">-</span>;
+  }
+  const visibleTags = artist.local_tags.slice(0, 2);
+  const hiddenCount = artist.local_tags.length - visibleTags.length;
+  return (
+    <div className="flex min-w-36 flex-wrap gap-1.5">
+      {visibleTags.map((tag) => (
+        <Badge key={tag.id}>{tag.name}</Badge>
+      ))}
+      {hiddenCount > 0 ? <Badge tone="muted">+{hiddenCount}</Badge> : null}
+    </div>
+  );
+}
+
+function ArtistStatusBadges({ artist, compact = false }: { artist: ArtistSummary; compact?: boolean }): JSX.Element {
   const badges: JSX.Element[] = [];
   if (artist.account_status === "unavailable") {
     badges.push(
@@ -374,7 +687,10 @@ function ArtistStatusBadges({ artist }: { artist: ArtistSummary }): JSX.Element 
       </Badge>
     );
   }
-  return <div className="flex min-w-[180px] flex-wrap gap-1.5">{badges}</div>;
+  if (compact && badges.length === 1 && artist.account_status === "available") {
+    return <span className="text-sm text-muted-foreground">Healthy</span>;
+  }
+  return <div className={compact ? "flex min-w-44 flex-wrap gap-1.5" : "flex flex-wrap gap-1.5"}>{badges}</div>;
 }
 
 function TagEditor({ artist }: { artist: ArtistSummary }): JSX.Element {
