@@ -15,6 +15,7 @@ class SettingsResponse(BaseModel):
     min_free_space_gb: float
     overwrite_existing_files: bool
     skip_existing_files: bool
+    library_stale_check_days: int
 
 
 class SettingsUpdateRequest(BaseModel):
@@ -26,6 +27,7 @@ class SettingsUpdateRequest(BaseModel):
     min_free_space_gb: float | None = Field(default=None, ge=0)
     overwrite_existing_files: bool | None = None
     skip_existing_files: bool | None = None
+    library_stale_check_days: int | None = Field(default=None, ge=1)
 
 
 class AuthValidationResponse(BaseModel):

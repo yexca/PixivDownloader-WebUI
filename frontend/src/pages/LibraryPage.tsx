@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Check, ExternalLink, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, ExternalLink, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -30,6 +30,8 @@ export function LibraryPage(): JSX.Element {
   const selectedTag = searchParams.get("localTag") ?? "";
   const fileState = searchParams.get("fileState") ?? "";
   const tagState = searchParams.get("tagState") ?? "";
+  const accountStatus = searchParams.get("accountStatus") ?? "";
+  const updateState = searchParams.get("updateState") ?? "";
   const sort = searchParams.get("sort") ?? "updated_desc";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
   const pageSize = Math.max(1, Number(searchParams.get("pageSize") || "50"));
@@ -38,13 +40,26 @@ export function LibraryPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const artists = useQuery({
-    queryKey: ["artists", submittedQuery, selectedTag, fileState, tagState, sort, pageSize, page],
+    queryKey: [
+      "artists",
+      submittedQuery,
+      selectedTag,
+      fileState,
+      tagState,
+      accountStatus,
+      updateState,
+      sort,
+      pageSize,
+      page
+    ],
     queryFn: () =>
       listArtists({
         q: submittedQuery || undefined,
         local_tag: selectedTag || undefined,
         file_state: fileState || undefined,
         tag_state: tagState || undefined,
+        account_status: accountStatus || undefined,
+        update_state: updateState || undefined,
         sort,
         limit: pageSize,
         offset: (page - 1) * pageSize
@@ -134,11 +149,25 @@ export function LibraryPage(): JSX.Element {
           </div>
           <Select value={sort} onChange={(event) => setFilter("sort", event.target.value)} aria-label="Sort artists">
             <option value="updated_desc">Recently updated</option>
+            <option value="attention_desc">Needs attention</option>
             <option value="name_asc">Name</option>
             <option value="id_asc">ID</option>
             <option value="failed_desc">Most failed</option>
             <option value="pending_desc">Most pending</option>
             <option value="checked_asc">Oldest checked</option>
+            <option value="remote_checked_asc">Oldest remote check</option>
+          </Select>
+          <Select value={updateState} onChange={(event) => setFilter("updateState", event.target.value)} aria-label="Filter by update state">
+            <option value="">Any update state</option>
+            <option value="attention">Needs attention</option>
+            <option value="available">Update available</option>
+            <option value="stale">Check due</option>
+          </Select>
+          <Select value={accountStatus} onChange={(event) => setFilter("accountStatus", event.target.value)} aria-label="Filter by account status">
+            <option value="">Any account</option>
+            <option value="available">Available</option>
+            <option value="unavailable">Unavailable</option>
+            <option value="unknown">Unknown</option>
           </Select>
           <Select value={selectedTag} onChange={(event) => setFilter("localTag", event.target.value)} aria-label="Filter by local tag">
             <option value="">All tags</option>
@@ -227,7 +256,9 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
             <th className="px-3 py-2">Files</th>
             <th className="px-3 py-2">Remote</th>
             <th className="px-3 py-2">Failed</th>
+            <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">Latest ID</th>
+            <th className="px-3 py-2">Remote latest</th>
             <th className="px-3 py-2">Tags</th>
             <th className="px-3 py-2">Last checked</th>
             <th className="sticky-col-right px-3 py-2">Actions</th>
@@ -246,7 +277,11 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
               <td className="table-cell">{artist.downloaded_file_count}</td>
               <td className="table-cell">{artist.remote_file_count + artist.pending_file_count}</td>
               <td className="table-cell">{artist.failed_file_count}</td>
+              <td className="table-cell">
+                <ArtistStatusBadges artist={artist} />
+              </td>
               <td className="table-cell">{artist.latest_downloaded_artwork_id ?? "None"}</td>
+              <td className="table-cell">{artist.remote_latest_artwork_id ?? "Unknown"}</td>
               <td className="table-cell">
                 <TagEditor artist={artist} />
               </td>
@@ -301,6 +336,45 @@ function ArtistTable({ artists }: { artists: ArtistSummary[] }): JSX.Element {
       </table>
     </ScrollableTable>
   );
+}
+
+function ArtistStatusBadges({ artist }: { artist: ArtistSummary }): JSX.Element {
+  const badges: JSX.Element[] = [];
+  if (artist.account_status === "unavailable") {
+    badges.push(
+      <Badge key="unavailable" tone="danger" title={artist.account_status_reason ?? "Pixiv profile is unavailable."}>
+        <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+        Unavailable
+      </Badge>
+    );
+  } else if (artist.account_status === "available") {
+    badges.push(
+      <Badge key="available" tone="success">
+        Available
+      </Badge>
+    );
+  } else {
+    badges.push(
+      <Badge key="unknown" tone="muted">
+        Unknown
+      </Badge>
+    );
+  }
+  if (artist.has_remote_update) {
+    badges.push(
+      <Badge key="update" tone="default">
+        Update
+      </Badge>
+    );
+  }
+  if (artist.is_check_stale) {
+    badges.push(
+      <Badge key="stale" tone="warning">
+        Check due
+      </Badge>
+    );
+  }
+  return <div className="flex min-w-[180px] flex-wrap gap-1.5">{badges}</div>;
 }
 
 function TagEditor({ artist }: { artist: ArtistSummary }): JSX.Element {

@@ -17,7 +17,15 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
 
     applied = migrate_database(db_path, settings_json_path=tmp_path / "ignored.json")
 
-    assert [migration.version for migration in applied] == ["001", "002", "003", "004", "005"]
+    assert [migration.version for migration in applied] == [
+        "001",
+        "002",
+        "003",
+        "004",
+        "005",
+        "006",
+        "007",
+    ]
     assert {
         "schema_migrations",
         "artists",
@@ -29,6 +37,7 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "local_tags",
         "artist_local_tags",
         "scheduled_tasks",
+        "artist_name_history",
     }.issubset(table_names(db_path))
     assert "pic" not in table_names(db_path)
 
@@ -45,6 +54,6 @@ def test_migration_is_idempotent(tmp_path):
     finally:
         conn.close()
 
-    assert len(first_applied) == 5
+    assert len(first_applied) == 7
     assert second_applied == []
-    assert migration_count == 5
+    assert migration_count == 7

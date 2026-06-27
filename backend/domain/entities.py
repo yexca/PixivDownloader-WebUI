@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from backend.domain.types import (
+    ArtistAccountStatus,
     ArtworkFileStatus,
     JobEventLevel,
     JobStatus,
@@ -26,12 +27,27 @@ class Artist:
     comment: str | None = None
     last_download_id: str | None = None
     last_checked_at: str | None = None
+    account_status: ArtistAccountStatus = "unknown"
+    account_status_checked_at: str | None = None
+    account_status_reason: str | None = None
+    remote_latest_artwork_id: str | None = None
+    remote_latest_checked_at: str | None = None
 
 
 @dataclass(frozen=True)
 class LocalTag:
     id: int
     name: str
+
+
+@dataclass(frozen=True)
+class ArtistNameHistory:
+    artist_id: str
+    name: str
+    source: str = "pixiv"
+    id: int | None = None
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,3 +162,4 @@ class ScheduledTaskConfig:
     actions: tuple[ScheduledTaskAction, ...] = ("download_artist",)
     max_artists_per_run: int = 25
     artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
+    skip_unavailable_artists: bool = True

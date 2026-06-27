@@ -8,6 +8,7 @@ from typing import Protocol
 from backend.core.errors import JobCancelledError
 from backend.domain.entities import DownloadProgress, Job, JobEvent
 from backend.repositories._time import utc_now
+from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
@@ -60,6 +61,7 @@ class DownloadWorker:
                 pixiv_client=self.pixiv_client_factory(),
                 file_downloader=self.file_downloader_factory(),
                 artist_repository=ArtistRepository(self.db_path),
+                name_history_repository=ArtistNameHistoryRepository(self.db_path),
                 artwork_repository=ArtworkRepository(self.db_path),
                 file_repository=ArtworkFileRepository(self.db_path),
                 sleeper=lambda: None,
@@ -119,6 +121,7 @@ class DownloadWorker:
         service = LibrarySyncService(
             pixiv_client=self.pixiv_client_factory(),
             artist_repository=ArtistRepository(self.db_path),
+            name_history_repository=ArtistNameHistoryRepository(self.db_path),
             artwork_repository=ArtworkRepository(self.db_path),
             file_repository=ArtworkFileRepository(self.db_path),
         )

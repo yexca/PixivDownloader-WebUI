@@ -21,6 +21,7 @@ export type ScheduledTaskConfig = {
   actions: ScheduledTaskAction[];
   max_artists_per_run: number;
   artist_selection: ScheduledTaskArtistSelection;
+  skip_unavailable_artists: boolean;
 };
 
 export type ScheduledTask = {

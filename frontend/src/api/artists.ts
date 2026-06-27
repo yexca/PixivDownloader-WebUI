@@ -13,12 +13,29 @@ export type ArtistSummary = {
   failed_file_count: number;
   latest_downloaded_artwork_id: string | null;
   last_checked_at: string | null;
+  account_status: "unknown" | "available" | "unavailable";
+  account_status_checked_at: string | null;
+  account_status_reason: string | null;
+  remote_latest_artwork_id: string | null;
+  remote_latest_checked_at: string | null;
+  has_remote_update: boolean;
+  is_check_stale: boolean;
+  check_stale_days: number;
   local_tags: LocalTag[];
 };
 
 export type ArtistDetail = ArtistSummary & {
   account: string | null;
   comment: string | null;
+  name_history: ArtistNameHistory[];
+};
+
+export type ArtistNameHistory = {
+  id: number;
+  name: string;
+  source: string;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
 };
 
 export type ArtistListResponse = {
@@ -77,6 +94,8 @@ export type ListArtistsParams = {
   local_tag?: string;
   file_state?: string;
   tag_state?: string;
+  account_status?: string;
+  update_state?: string;
   sort?: string;
   limit?: number;
   offset?: number;
@@ -95,6 +114,12 @@ export function listArtists(params: ListArtistsParams = {}): Promise<ArtistListR
   }
   if (params.tag_state) {
     search.set("tag_state", params.tag_state);
+  }
+  if (params.account_status) {
+    search.set("account_status", params.account_status);
+  }
+  if (params.update_state) {
+    search.set("update_state", params.update_state);
   }
   if (params.sort) {
     search.set("sort", params.sort);

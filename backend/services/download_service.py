@@ -9,6 +9,7 @@ from backend.core.errors import JobCancelledError
 from backend.domain.entities import Artist, Artwork, ArtworkFile, DownloadProgress
 from backend.domain.types import ArtworkFileStatus
 from backend.repositories._time import utc_now
+from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
@@ -46,6 +47,7 @@ class DownloadService:
         pixiv_client: PixivClientProtocol | None = None,
         file_downloader: FileDownloader | None = None,
         artist_repository: ArtistRepository | None = None,
+        name_history_repository: ArtistNameHistoryRepository | None = None,
         artwork_repository: ArtworkRepository | None = None,
         file_repository: ArtworkFileRepository | None = None,
         sleeper: Callable[[], None] | None = None,
@@ -54,6 +56,7 @@ class DownloadService:
         self.pixiv_client = pixiv_client or PixivClient(sleeper=resolved_sleeper)
         self.file_downloader = file_downloader or FileDownloader()
         self.artist_repository = artist_repository or ArtistRepository()
+        self.name_history_repository = name_history_repository or ArtistNameHistoryRepository()
         self.artwork_repository = artwork_repository
         self.file_repository = file_repository
         self.sleeper = resolved_sleeper
@@ -76,7 +79,12 @@ class DownloadService:
         self._check_cancelled(cancel_callback)
 
         self._report(progress_callback, "Got user info. Getting artworks info...")
-        artworks = list(self.pixiv_client.get_artworks_by_user_id(artist.id))
+        remote_checked_at = utc_now()
+        artworks = (
+            []
+            if artist.account_status == "unavailable"
+            else list(self.pixiv_client.get_artworks_by_user_id(artist.id))
+        )
         self._check_cancelled(cancel_callback)
 
         self._report(progress_callback, "Got artworks info. Getting download links...")
@@ -187,6 +195,12 @@ class DownloadService:
                 comment=artist.comment,
                 last_download_id=str(last_download_id),
                 last_checked_at=artist.last_checked_at,
+                account_status=artist.account_status,
+                account_status_checked_at=artist.account_status_checked_at,
+                account_status_reason=artist.account_status_reason,
+                remote_latest_artwork_id=latest_artwork_id(artworks)
+                or artist.remote_latest_artwork_id,
+                remote_latest_checked_at=remote_checked_at,
             )
         )
         self._report(progress_callback, "Inserted database")
@@ -283,9 +297,23 @@ class DownloadService:
     def _resolve_artist(self, *, user_id: str | None, artwork_id: str | None) -> Artist:
         if user_id:
             existing_artist = self.artist_repository.get_by_id(user_id)
-            if existing_artist is not None:
-                return existing_artist
-            return self.pixiv_client.get_artist_by_user_id(user_id)
+            fetched_artist = self.pixiv_client.get_artist_by_user_id(user_id)
+            now = utc_now()
+            record_name_change(
+                self.name_history_repository,
+                existing_artist=existing_artist,
+                fetched_artist=fetched_artist,
+            )
+            if existing_artist is None:
+                return Artist(
+                    **{
+                        **fetched_artist.__dict__,
+                        "last_checked_at": now,
+                        "account_status_checked_at": now,
+                        "remote_latest_checked_at": now,
+                    }
+                )
+            return merge_fetched_artist(existing_artist, fetched_artist, now=now)
 
         if artwork_id is None:
             raise ValueError("artwork_id is required")
@@ -299,8 +327,92 @@ class DownloadService:
         if progress_callback is not None:
             progress_callback(message)
 
+    def close(self) -> None:
+        self.artist_repository.close()
+        self.name_history_repository.close()
+        if self.artwork_repository is not None:
+            self.artwork_repository.close()
+        if self.file_repository is not None:
+            self.file_repository.close()
+
 
 def artwork_id_from_url(url: str) -> int:
     file_name = url.split("/")[-1]
     artwork_part = file_name.split("_")[0].split("-")[0]
     return int(artwork_part)
+
+
+def latest_artwork_id(artworks: list[Artwork]) -> str | None:
+    ids: list[int] = []
+    for artwork in artworks:
+        try:
+            ids.append(int(artwork.id))
+        except ValueError:
+            continue
+    if not ids:
+        return None
+    return str(max(ids))
+
+
+def merge_fetched_artist(existing: Artist, fetched: Artist, *, now: str) -> Artist:
+    return Artist(
+        id=fetched.id,
+        name=next_artist_text(
+            fetched.name,
+            existing.name,
+            account_status=fetched.account_status,
+        ),
+        profile_url=fetched.profile_url or existing.profile_url,
+        account=next_optional_artist_text(
+            fetched.account,
+            existing.account,
+            account_status=fetched.account_status,
+        ),
+        avatar_url=next_optional_artist_text(
+            fetched.avatar_url,
+            existing.avatar_url,
+            account_status=fetched.account_status,
+        ),
+        comment=next_optional_artist_text(
+            fetched.comment,
+            existing.comment,
+            account_status=fetched.account_status,
+        ),
+        last_download_id=existing.last_download_id,
+        last_checked_at=now,
+        account_status=fetched.account_status,
+        account_status_checked_at=now,
+        account_status_reason=fetched.account_status_reason,
+        remote_latest_artwork_id=existing.remote_latest_artwork_id,
+        remote_latest_checked_at=existing.remote_latest_checked_at,
+    )
+
+
+def record_name_change(
+    repository: ArtistNameHistoryRepository,
+    *,
+    existing_artist: Artist | None,
+    fetched_artist: Artist,
+) -> None:
+    if existing_artist is not None:
+        repository.record_name(existing_artist.id, existing_artist.name)
+    if fetched_artist.account_status == "available":
+        repository.record_name(fetched_artist.id, fetched_artist.name)
+
+
+def next_artist_text(value: str, fallback: str | None, *, account_status: str) -> str:
+    text = value.strip()
+    if account_status == "available" and text:
+        return text
+    return fallback or value
+
+
+def next_optional_artist_text(
+    value: str | None,
+    fallback: str | None,
+    *,
+    account_status: str,
+) -> str | None:
+    if account_status == "available" and value:
+        return value
+    return fallback

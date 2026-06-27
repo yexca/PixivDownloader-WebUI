@@ -29,10 +29,15 @@ class ArtistRepository:
                         comment,
                         latest_downloaded_artwork_id,
                         last_checked_at,
+                        account_status,
+                        account_status_checked_at,
+                        account_status_reason,
+                        remote_latest_artwork_id,
+                        remote_latest_checked_at,
                         created_at,
                         updated_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(id) DO UPDATE SET
                         name = excluded.name,
                         account = excluded.account,
@@ -41,6 +46,11 @@ class ArtistRepository:
                         comment = excluded.comment,
                         latest_downloaded_artwork_id = excluded.latest_downloaded_artwork_id,
                         last_checked_at = excluded.last_checked_at,
+                        account_status = excluded.account_status,
+                        account_status_checked_at = excluded.account_status_checked_at,
+                        account_status_reason = excluded.account_status_reason,
+                        remote_latest_artwork_id = excluded.remote_latest_artwork_id,
+                        remote_latest_checked_at = excluded.remote_latest_checked_at,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -52,6 +62,11 @@ class ArtistRepository:
                         artist.comment,
                         artist.last_download_id,
                         artist.last_checked_at or now,
+                        artist.account_status,
+                        artist.account_status_checked_at,
+                        artist.account_status_reason,
+                        artist.remote_latest_artwork_id,
+                        artist.remote_latest_checked_at,
                         now,
                         now,
                     ),
@@ -76,6 +91,9 @@ class ArtistRepository:
         local_tag: str | None = None,
         file_state: str | None = None,
         tag_state: str | None = None,
+        account_status: str | None = None,
+        update_state: str | None = None,
+        stale_days: int | None = None,
         sort: str = "updated_desc",
     ) -> list[Artist]:
         sql = "SELECT DISTINCT artists.* FROM artists"
@@ -92,7 +110,15 @@ class ArtistRepository:
             where.append("(artists.id LIKE ? OR artists.name LIKE ?)")
             like_query = f"%{query}%"
             params.extend([like_query, like_query])
-        add_artist_filters(where, tag_state=tag_state, file_state=file_state)
+        add_artist_filters(
+            where,
+            params,
+            tag_state=tag_state,
+            file_state=file_state,
+            account_status=account_status,
+            update_state=update_state,
+            stale_days=stale_days,
+        )
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += f" ORDER BY {artist_sort_expression(sort)} LIMIT ? OFFSET ?"
@@ -111,6 +137,9 @@ class ArtistRepository:
         local_tag: str | None = None,
         file_state: str | None = None,
         tag_state: str | None = None,
+        account_status: str | None = None,
+        update_state: str | None = None,
+        stale_days: int | None = None,
     ) -> int:
         sql = "SELECT COUNT(DISTINCT artists.id) AS total FROM artists"
         params: list[object] = []
@@ -126,7 +155,15 @@ class ArtistRepository:
             where.append("(artists.id LIKE ? OR artists.name LIKE ?)")
             like_query = f"%{query}%"
             params.extend([like_query, like_query])
-        add_artist_filters(where, tag_state=tag_state, file_state=file_state)
+        add_artist_filters(
+            where,
+            params,
+            tag_state=tag_state,
+            file_state=file_state,
+            account_status=account_status,
+            update_state=update_state,
+            stale_days=stale_days,
+        )
         if where:
             sql += " WHERE " + " AND ".join(where)
         try:
@@ -205,14 +242,31 @@ def artist_from_row(row: sqlite3.Row) -> Artist:
         if row["latest_downloaded_artwork_id"]
         else None,
         last_checked_at=str(row["last_checked_at"]) if row["last_checked_at"] else None,
+        account_status=row["account_status"],
+        account_status_checked_at=str(row["account_status_checked_at"])
+        if row["account_status_checked_at"]
+        else None,
+        account_status_reason=str(row["account_status_reason"])
+        if row["account_status_reason"]
+        else None,
+        remote_latest_artwork_id=str(row["remote_latest_artwork_id"])
+        if row["remote_latest_artwork_id"]
+        else None,
+        remote_latest_checked_at=str(row["remote_latest_checked_at"])
+        if row["remote_latest_checked_at"]
+        else None,
     )
 
 
 def add_artist_filters(
     where: list[str],
+    params: list[object],
     *,
     tag_state: str | None,
     file_state: str | None,
+    account_status: str | None,
+    update_state: str | None,
+    stale_days: int | None,
 ) -> None:
     if tag_state == "untagged":
         where.append(
@@ -249,6 +303,24 @@ def add_artist_filters(
                 JOIN artwork_files ON artwork_files.artwork_id = artworks.id
                 WHERE artworks.artist_id = artists.id
                   AND artwork_files.status NOT IN ('downloaded', 'skipped')
+            )
+            """
+        )
+    if account_status in {"unknown", "available", "unavailable"}:
+        where.append("artists.account_status = ?")
+        params.append(account_status)
+    if update_state == "available":
+        where.append(artist_has_remote_update())
+    if update_state == "stale":
+        where.append(artist_is_stale_sql(stale_days or 30))
+    if update_state == "attention":
+        where.append(
+            f"""
+            (
+                artists.account_status = 'unavailable'
+                OR {artist_has_remote_update()}
+                OR {artist_is_stale_sql(stale_days or 30)}
+                OR {status_exists("failed")}
             )
             """
         )
@@ -293,4 +365,39 @@ def artist_sort_expression(sort: str) -> str:
         """
     if sort == "checked_asc":
         return "artists.last_checked_at IS NOT NULL ASC, artists.last_checked_at ASC"
+    if sort == "attention_desc":
+        return """
+            CASE WHEN artists.account_status = 'unavailable' THEN 1 ELSE 0 END DESC,
+            CASE WHEN (
+                artists.remote_latest_artwork_id IS NOT NULL
+                AND CAST(artists.remote_latest_artwork_id AS INTEGER) >
+                    CAST(COALESCE(artists.latest_downloaded_artwork_id, '0') AS INTEGER)
+            ) THEN 1 ELSE 0 END DESC,
+            artists.remote_latest_checked_at IS NOT NULL ASC,
+            artists.remote_latest_checked_at ASC,
+            artists.updated_at DESC
+        """
+    if sort == "remote_checked_asc":
+        return (
+            "artists.remote_latest_checked_at IS NOT NULL ASC, artists.remote_latest_checked_at ASC"
+        )
     return "artists.updated_at DESC"
+
+
+def artist_has_remote_update() -> str:
+    return """
+        artists.remote_latest_artwork_id IS NOT NULL
+        AND CAST(artists.remote_latest_artwork_id AS INTEGER) >
+            CAST(COALESCE(artists.latest_downloaded_artwork_id, '0') AS INTEGER)
+    """
+
+
+def artist_is_stale_sql(days: int) -> str:
+    safe_days = max(1, int(days))
+    return f"""
+        (
+            artists.remote_latest_checked_at IS NULL
+            OR datetime(replace(artists.remote_latest_checked_at, 'Z', '+00:00')) <=
+                datetime('now', '-{safe_days} days')
+        )
+    """

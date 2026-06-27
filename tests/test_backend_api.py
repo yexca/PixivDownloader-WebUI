@@ -7,6 +7,7 @@ from backend.api import routes_settings
 from backend.app import create_app
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Job, JobEvent
+from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
@@ -56,6 +57,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
             "request_random_delay_seconds": 0.3,
             "max_concurrent_downloads": 2,
             "min_free_space_gb": 10.0,
+            "library_stale_check_days": 14,
             "overwrite_existing_files": False,
             "skip_existing_files": True,
         },
@@ -67,6 +69,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["download_path_editable"] is True
     assert body["runtime_mode"] == "local"
     assert body["min_free_space_gb"] == 10.0
+    assert body["library_stale_check_days"] == 14
     assert body["refresh_token_configured"] is True
     assert body["refresh_token_preview"] == "secr...oken"
 
@@ -82,6 +85,7 @@ def test_settings_partial_update_preserves_other_values(tmp_path):
     assert body["refresh_token_configured"] is True
     assert body["refresh_token_preview"] == "secr...oken"
     assert body["request_base_delay_seconds"] == 0.1
+    assert body["library_stale_check_days"] == 30
     assert body["skip_existing_files"] is True
 
 
@@ -98,6 +102,7 @@ def test_settings_download_path_is_fixed_in_docker_runtime(tmp_path, monkeypatch
             "request_random_delay_seconds": 0.3,
             "max_concurrent_downloads": 2,
             "min_free_space_gb": 10.0,
+            "library_stale_check_days": 30,
             "overwrite_existing_files": False,
             "skip_existing_files": True,
         },
@@ -715,6 +720,84 @@ def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
         repository.close()
 
 
+def test_scheduled_task_builder_skips_unavailable_artists_by_default(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Open"))
+        artist_repository.upsert(Artist(id="456", name="Closed", account_status="unavailable"))
+    finally:
+        artist_repository.close()
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Skip unavailable",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+            "config": {
+                "target": {"type": "all_artists"},
+                "filters": [],
+                "actions": ["sync_artist"],
+                "max_artists_per_run": 25,
+            },
+        },
+    )
+    assert create_response.status_code == 200
+    assert create_response.json()["config"]["skip_unavailable_artists"] is True
+
+    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
+        assert {job.input_user_id for job in jobs if job is not None} == {"123"}
+    finally:
+        repository.close()
+
+
+def test_scheduled_task_builder_can_include_unavailable_artists(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Open"))
+        artist_repository.upsert(Artist(id="456", name="Closed", account_status="unavailable"))
+    finally:
+        artist_repository.close()
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Include unavailable",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+            "config": {
+                "target": {"type": "all_artists"},
+                "filters": [],
+                "actions": ["sync_artist"],
+                "max_artists_per_run": 25,
+                "skip_unavailable_artists": False,
+            },
+        },
+    )
+    assert create_response.status_code == 200
+
+    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+
+    assert run_response.status_code == 200
+    body = run_response.json()
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
+        assert {job.input_user_id for job in jobs if job is not None} == {"123", "456"}
+    finally:
+        repository.close()
+
+
 def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     create_response = client.post(
@@ -782,6 +865,66 @@ def test_artist_tags_and_filter_endpoint(tmp_path):
     assert list_response.status_code == 200
     assert [artist["id"] for artist in list_response.json()["items"]] == ["123"]
     assert tags_response.json()["items"][0]["name"] == "favorite"
+
+
+def test_artist_list_reports_status_flags_and_filters(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(
+            Artist(
+                id="123",
+                name="Needs Update",
+                last_download_id="100",
+                account_status="available",
+                remote_latest_artwork_id="200",
+                remote_latest_checked_at="2023-01-01T00:00:00Z",
+            )
+        )
+        artist_repository.upsert(
+            Artist(
+                id="456",
+                name="Unavailable",
+                account_status="unavailable",
+                account_status_reason="Page not found",
+                remote_latest_checked_at="2999-01-01T00:00:00Z",
+            )
+        )
+    finally:
+        artist_repository.close()
+
+    update_response = client.get("/api/artists?update_state=available")
+    unavailable_response = client.get("/api/artists?account_status=unavailable")
+
+    assert update_response.status_code == 200
+    update_artist = update_response.json()["items"][0]
+    assert update_artist["id"] == "123"
+    assert update_artist["has_remote_update"] is True
+    assert update_artist["is_check_stale"] is True
+    assert update_artist["check_stale_days"] == 30
+    assert unavailable_response.status_code == 200
+    unavailable_artist = unavailable_response.json()["items"][0]
+    assert unavailable_artist["id"] == "456"
+    assert unavailable_artist["account_status"] == "unavailable"
+
+
+def test_artist_detail_includes_name_history(tmp_path):
+    client = make_client(tmp_path)
+    artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
+    name_history_repository = ArtistNameHistoryRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        artist_repository.upsert(Artist(id="123", name="Current Name"))
+        name_history_repository.record_name("123", "Old Name")
+        name_history_repository.record_name("123", "Current Name")
+    finally:
+        artist_repository.close()
+        name_history_repository.close()
+
+    response = client.get("/api/artists/123")
+
+    assert response.status_code == 200
+    names = {item["name"] for item in response.json()["name_history"]}
+    assert names == {"Old Name", "Current Name"}
 
 
 def test_delete_artist_removes_database_records(tmp_path):
@@ -907,6 +1050,7 @@ def make_client(tmp_path, queue=None):
             "request_random_delay_seconds": 0.2,
             "max_concurrent_downloads": 1,
             "min_free_space_gb": 10.0,
+            "library_stale_check_days": 30,
             "overwrite_existing_files": false,
             "skip_existing_files": true
         }}

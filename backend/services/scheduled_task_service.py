@@ -280,6 +280,8 @@ class ScheduledTaskService:
             artists = [artist for artist in artists if artist_is_stale(artist, days)]
         for item in config.filters:
             artists = self._apply_filter(artists, item)
+        if config.skip_unavailable_artists:
+            artists = [artist for artist in artists if artist.account_status != "unavailable"]
         return select_artists(artists, config)
 
     def _apply_filter(
@@ -381,8 +383,8 @@ def artist_checked_sort_key(artist: Artist) -> datetime:
 
 def next_time(from_time: str, interval_days: int) -> str:
     return (
-        parse_time(from_time) + timedelta(days=interval_days)
-    ).isoformat().replace("+00:00", "Z")
+        (parse_time(from_time) + timedelta(days=interval_days)).isoformat().replace("+00:00", "Z")
+    )
 
 
 def parse_time(value: str) -> datetime:

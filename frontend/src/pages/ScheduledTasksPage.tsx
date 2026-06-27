@@ -39,6 +39,7 @@ type FormState = {
   actions: ScheduledTaskAction[];
   max_artists_per_run: number;
   artist_selection: ScheduledTaskArtistSelection;
+  skip_unavailable_artists: boolean;
 };
 
 type FormField = "artist_id" | "tag" | "interval_days" | "max_artists_per_run" | "stale_target_days" | "stale_filter_days" | "actions";
@@ -58,7 +59,8 @@ const initialForm: FormState = {
   stale_filter_days: 30,
   actions: ["download_artist"],
   max_artists_per_run: 25,
-  artist_selection: "oldest_checked_first"
+  artist_selection: "oldest_checked_first",
+  skip_unavailable_artists: true
 };
 
 const actionLabels: Record<ScheduledTaskAction, string> = {
@@ -234,6 +236,14 @@ export function ScheduledTasksPage(): JSX.Element {
                   onChange={(event) => setForm({ ...form, run_after_startup: event.target.checked })}
                 />
                 Run on restart
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.skip_unavailable_artists}
+                  onChange={(event) => setForm({ ...form, skip_unavailable_artists: event.target.checked })}
+                />
+                Skip unavailable accounts
               </label>
             </div>
           </section>
@@ -515,7 +525,8 @@ function formToConfig(form: FormState): ScheduledTaskConfig {
     })),
     actions: form.actions,
     max_artists_per_run: form.max_artists_per_run,
-    artist_selection: form.artist_selection
+    artist_selection: form.artist_selection,
+    skip_unavailable_artists: form.skip_unavailable_artists
   };
 }
 
@@ -605,7 +616,8 @@ function taskSummary(task: ScheduledTask): string {
   const target = targetLabels[config.target.type] ?? config.target.type;
   const actions = config.actions.map((action) => actionLabels[action]).join(" then ");
   const selection = artistSelectionLabels[config.artist_selection] ?? config.artist_selection;
-  return `${target} · ${selection} · ${actions} · every ${task.interval_days} days`;
+  const unavailable = config.skip_unavailable_artists ? "skip unavailable" : "include unavailable";
+  return `${target} · ${selection} · ${unavailable} · ${actions} · every ${task.interval_days} days`;
 }
 
 function lastJobCount(task: ScheduledTask): string {

@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
+from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.tag_repository import LocalTagRepository
@@ -22,6 +23,7 @@ from backend.schemas.artists import (
 )
 from backend.schemas.downloads import DownloadCreateResponse
 from backend.services.job_service import JobService
+from backend.services.settings_service import AppSettingsService
 
 router = APIRouter(prefix="/api/artists", tags=["artists"])
 
@@ -29,17 +31,22 @@ router = APIRouter(prefix="/api/artists", tags=["artists"])
 @router.get("", response_model=ArtistListResponse)
 def list_artists(
     db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
     q: str | None = None,
     local_tag: str | None = None,
     file_state: str | None = None,
     tag_state: str | None = None,
+    account_status: str | None = None,
+    update_state: str | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
     sort: str = "updated_desc",
 ) -> ArtistListResponse:
     repository = ArtistRepository(db_path)
     tag_repository = LocalTagRepository(db_path)
+    settings_service = AppSettingsService(db_path=db_path, settings_json_path=settings_json_path)
     try:
+        stale_days = settings_service.load().library_stale_check_days
         artists = repository.list(
             limit=limit,
             offset=offset,
@@ -47,6 +54,9 @@ def list_artists(
             local_tag=local_tag,
             file_state=file_state,
             tag_state=tag_state,
+            account_status=account_status,
+            update_state=update_state,
+            stale_days=stale_days,
             sort=sort,
         )
         return ArtistListResponse(
@@ -55,6 +65,7 @@ def list_artists(
                     artist,
                     repository.get_counts(artist.id),
                     tag_repository.list_for_artist(artist.id),
+                    stale_days=stale_days,
                 )
                 for artist in artists
             ],
@@ -63,11 +74,15 @@ def list_artists(
                 local_tag=local_tag,
                 file_state=file_state,
                 tag_state=tag_state,
+                account_status=account_status,
+                update_state=update_state,
+                stale_days=stale_days,
             ),
         )
     finally:
         repository.close()
         tag_repository.close()
+        settings_service.close()
 
 
 @router.post("", response_model=DownloadCreateResponse)
@@ -100,21 +115,32 @@ def list_local_tags(db_path: DbPath) -> LocalTagListResponse:
 
 
 @router.get("/{artist_id}", response_model=ArtistDetailResponse)
-def get_artist(artist_id: str, db_path: DbPath) -> ArtistDetailResponse:
+def get_artist(
+    artist_id: str,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> ArtistDetailResponse:
     repository = ArtistRepository(db_path)
     tag_repository = LocalTagRepository(db_path)
+    name_history_repository = ArtistNameHistoryRepository(db_path)
+    settings_service = AppSettingsService(db_path=db_path, settings_json_path=settings_json_path)
     try:
         artist = repository.get_by_id(artist_id)
         if artist is None:
             raise HTTPException(status_code=404, detail="artist not found")
+        stale_days = settings_service.load().library_stale_check_days
         return artist_detail_response(
             artist,
             repository.get_counts(artist.id),
             tag_repository.list_for_artist(artist.id),
+            name_history_repository.list_for_artist(artist.id),
+            stale_days=stale_days,
         )
     finally:
         repository.close()
         tag_repository.close()
+        name_history_repository.close()
+        settings_service.close()
 
 
 @router.delete("/{artist_id}", status_code=204)

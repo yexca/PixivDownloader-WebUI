@@ -238,6 +238,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig) -> dict[str, obje
         "actions": list(config.actions),
         "max_artists_per_run": config.max_artists_per_run,
         "artist_selection": config.artist_selection,
+        "skip_unavailable_artists": config.skip_unavailable_artists,
     }
 
 
@@ -297,6 +298,7 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
         actions=actions,
         max_artists_per_run=max(1, optional_int(data.get("max_artists_per_run")) or 25),
         artist_selection=artist_selection,
+        skip_unavailable_artists=bool(data.get("skip_unavailable_artists", True)),
     )
 
 

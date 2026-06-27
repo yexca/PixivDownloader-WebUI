@@ -1,6 +1,7 @@
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile, Job, JobEvent
 from backend.repositories import (
+    ArtistNameHistoryRepository,
     ArtistRepository,
     ArtworkFileRepository,
     ArtworkRepository,
@@ -29,6 +30,49 @@ def test_artist_repository_crud(tmp_path):
     assert artist.last_download_id == "456"
     assert repository.count() == 1
     assert repository.list(query="Art")[0].id == "123"
+
+
+def test_artist_repository_filters_update_and_account_status(tmp_path):
+    db_path = migrated_db(tmp_path)
+    repository = ArtistRepository(db_path)
+
+    repository.upsert(
+        Artist(
+            id="123",
+            name="Needs Update",
+            last_download_id="100",
+            account_status="available",
+            remote_latest_artwork_id="200",
+            remote_latest_checked_at="2023-01-01T00:00:00Z",
+        )
+    )
+    repository.upsert(
+        Artist(
+            id="456",
+            name="Closed",
+            account_status="unavailable",
+            account_status_reason="Page not found",
+            remote_latest_checked_at="2999-01-01T00:00:00Z",
+        )
+    )
+
+    assert [artist.id for artist in repository.list(update_state="available")] == ["123"]
+    assert [artist.id for artist in repository.list(account_status="unavailable")] == ["456"]
+    assert repository.count(update_state="attention", stale_days=30) == 2
+
+
+def test_artist_name_history_repository_records_seen_names(tmp_path):
+    db_path = migrated_db(tmp_path)
+    ArtistRepository(db_path).upsert(Artist(id="123", name="Current"))
+    repository = ArtistNameHistoryRepository(db_path)
+
+    repository.record_name("123", "Old Name")
+    repository.record_name("123", "Old Name")
+    repository.record_name("123", "Current")
+
+    names = repository.list_for_artist("123")
+    assert {item.name for item in names} == {"Old Name", "Current"}
+    assert len(names) == 2
 
 
 def test_artwork_and_file_repositories_crud(tmp_path):

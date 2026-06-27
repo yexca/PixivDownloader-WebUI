@@ -49,6 +49,7 @@ type BasicForm = Pick<
   | "request_random_delay_seconds"
   | "max_concurrent_downloads"
   | "min_free_space_gb"
+  | "library_stale_check_days"
   | "overwrite_existing_files"
   | "skip_existing_files"
 >;
@@ -517,6 +518,15 @@ function BasicSettingsTab({
               tooltip="Download jobs are not created when the download disk has less free space than this value."
               onChange={(value) => onChange({ ...form, min_free_space_gb: Math.max(0, value) })}
             />
+            <NumberField
+              label="Library stale days"
+              value={form.library_stale_check_days}
+              error={errors.library_stale_check_days}
+              min={1}
+              step={1}
+              tooltip="Artists checked before this many days ago are shown as check due in Library."
+              onChange={(value) => onChange({ ...form, library_stale_check_days: Math.max(1, Math.trunc(value)) })}
+            />
           </div>
         </div>
       </SettingsSection>
@@ -899,6 +909,7 @@ function toBasicForm(settings: SettingsResponse): BasicForm {
     request_random_delay_seconds: settings.request_random_delay_seconds,
     max_concurrent_downloads: settings.max_concurrent_downloads,
     min_free_space_gb: settings.min_free_space_gb,
+    library_stale_check_days: settings.library_stale_check_days,
     overwrite_existing_files: settings.overwrite_existing_files,
     skip_existing_files: settings.skip_existing_files
   };
@@ -920,6 +931,9 @@ function validateBasic(form: BasicForm, downloadPathEditable: boolean): Record<s
   }
   if (form.min_free_space_gb < 0) {
     errors.min_free_space_gb = "Must be zero or greater.";
+  }
+  if (form.library_stale_check_days < 1 || !Number.isInteger(form.library_stale_check_days)) {
+    errors.library_stale_check_days = "Must be a whole number of at least 1.";
   }
   return errors;
 }

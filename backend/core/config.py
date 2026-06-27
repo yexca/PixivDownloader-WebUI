@@ -21,6 +21,7 @@ class Settings:
     min_free_space_gb: float = 10.0
     overwrite_existing_files: bool = False
     skip_existing_files: bool = True
+    library_stale_check_days: int = 30
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Settings:
@@ -41,6 +42,10 @@ class Settings:
         if min_free_space_gb < 0:
             raise ConfigError("minimum free space must be non-negative")
 
+        library_stale_check_days = int(data.get("library_stale_check_days", 30))
+        if library_stale_check_days < 1:
+            raise ConfigError("library stale check days must be at least 1")
+
         return cls(
             download_path=download_path,
             refresh_token=str(data.get("refresh_token", "")),
@@ -50,6 +55,7 @@ class Settings:
             min_free_space_gb=min_free_space_gb,
             overwrite_existing_files=bool(data.get("overwrite_existing_files", False)),
             skip_existing_files=bool(data.get("skip_existing_files", True)),
+            library_stale_check_days=library_stale_check_days,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,6 +68,7 @@ class Settings:
             "min_free_space_gb": self.min_free_space_gb,
             "overwrite_existing_files": self.overwrite_existing_files,
             "skip_existing_files": self.skip_existing_files,
+            "library_stale_check_days": self.library_stale_check_days,
         }
 
 
@@ -133,6 +140,7 @@ class SettingsService:
             "min_free_space_gb": settings.min_free_space_gb,
             "overwrite_existing_files": settings.overwrite_existing_files,
             "skip_existing_files": settings.skip_existing_files,
+            "library_stale_check_days": settings.library_stale_check_days,
         }
 
 

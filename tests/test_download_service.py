@@ -3,6 +3,7 @@ import pytest
 from backend.core.errors import JobCancelledError
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile
+from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
@@ -82,6 +83,7 @@ def test_download_user_id_path_downloads_and_updates_artist(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
 
@@ -106,6 +108,7 @@ def test_download_artwork_id_path_resolves_artist_then_downloads_artist(tmp_path
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
 
@@ -129,6 +132,7 @@ def test_incremental_skip_uses_latest_downloaded_artwork_id(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
 
@@ -164,6 +168,7 @@ def test_retry_failed_ignores_latest_downloaded_artwork_id(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
         artwork_repository=artwork_repository,
         file_repository=file_repository,
         sleeper=lambda: None,
@@ -188,6 +193,7 @@ def test_library_sync_persists_remote_only_files_and_preserves_download_cursor(t
     service = LibrarySyncService(
         pixiv_client=pixiv_client,
         artist_repository=artist_repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
         artwork_repository=artwork_repository,
         file_repository=file_repository,
     )
@@ -219,6 +225,7 @@ def test_cancellation_marks_active_file_failed(tmp_path):
         pixiv_client=pixiv_client,
         file_downloader=file_downloader,
         artist_repository=repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
         artwork_repository=artwork_repository,
         file_repository=file_repository,
         sleeper=lambda: None,

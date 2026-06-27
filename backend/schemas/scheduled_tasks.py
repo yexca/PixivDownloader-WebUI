@@ -36,6 +36,7 @@ class ScheduledTaskConfigRequest(BaseModel):
     actions: list[ScheduledTaskAction] = Field(default_factory=lambda: ["download_artist"])
     max_artists_per_run: int = Field(default=25, ge=1, le=500)
     artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
+    skip_unavailable_artists: bool = True
 
 
 class ScheduledTaskCreateRequest(BaseModel):
@@ -141,12 +142,12 @@ def scheduled_task_config_from_request(
             days=request.target.days,
         ),
         filters=tuple(
-            ScheduledTaskFilter(type=item.type, days=item.days)
-            for item in request.filters
+            ScheduledTaskFilter(type=item.type, days=item.days) for item in request.filters
         ),
         actions=tuple(request.actions) or ("download_artist",),
         max_artists_per_run=request.max_artists_per_run,
         artist_selection=request.artist_selection,
+        skip_unavailable_artists=request.skip_unavailable_artists,
     )
 
 
@@ -171,6 +172,7 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[st
         "actions": list(config.actions),
         "max_artists_per_run": config.max_artists_per_run,
         "artist_selection": config.artist_selection,
+        "skip_unavailable_artists": config.skip_unavailable_artists,
     }
 
 

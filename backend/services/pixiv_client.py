@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from backend.core.config import SettingsService
 from backend.core.errors import PixivApiError, PixivAuthError
 from backend.domain.entities import Artist, Artwork, ArtworkFile
+from backend.domain.types import ArtistAccountStatus
 
 
 class PixivApi(Protocol):
@@ -56,10 +57,27 @@ class PixivClient:
 
     def get_artist_by_user_id(self, user_id: str) -> Artist:
         try:
-            user = self.api.user_detail(user_id).user
+            result = self.api.user_detail(user_id)
         except Exception as exc:
             raise PixivApiError(f"failed to fetch Pixiv user {user_id}") from exc
-        return artist_from_pixiv_user(user, fallback_id=user_id)
+        status, reason = account_status_from_user_detail(result)
+        user = _get_value(result, "user", None)
+        if status == "unavailable":
+            return Artist(
+                id=user_id,
+                name=user_id,
+                profile_url=f"https://www.pixiv.net/users/{user_id}",
+                account_status=status,
+                account_status_reason=reason,
+            )
+        if user is None:
+            raise PixivApiError(f"failed to fetch Pixiv user {user_id}")
+        return artist_from_pixiv_user(
+            user,
+            fallback_id=user_id,
+            account_status=status,
+            account_status_reason=reason,
+        )
 
     def get_artist_by_artwork_id(self, artwork_id: str) -> Artist:
         try:
@@ -94,7 +112,13 @@ class PixivClient:
         return [artwork_from_pixiv_illust(illust) for illust in illusts]
 
 
-def artist_from_pixiv_user(user: Any, fallback_id: str | None = None) -> Artist:
+def artist_from_pixiv_user(
+    user: Any,
+    fallback_id: str | None = None,
+    *,
+    account_status: ArtistAccountStatus = "available",
+    account_status_reason: str | None = None,
+) -> Artist:
     artist_id = str(_get_value(user, "id", fallback_id or ""))
     return Artist(
         id=artist_id,
@@ -103,6 +127,8 @@ def artist_from_pixiv_user(user: Any, fallback_id: str | None = None) -> Artist:
         account=str(_get_value(user, "account", "")) or None,
         avatar_url=_image_url(_get_value(user, "profile_image_urls", None)),
         comment=str(_get_value(user, "comment", "")) or None,
+        account_status=account_status,
+        account_status_reason=account_status_reason,
     )
 
 
@@ -208,6 +234,19 @@ def _image_url(value: Any) -> str | None:
         if image:
             return str(image)
     return None
+
+
+def account_status_from_user_detail(result: Any) -> tuple[ArtistAccountStatus, str | None]:
+    error = _get_value(result, "error", None)
+    user_message = str(_get_value(error, "user_message", "") or "")
+    message = str(_get_value(error, "message", "") or "")
+    reason = str(_get_value(error, "reason", "") or "")
+    combined = " ".join(part for part in (user_message, message, reason) if part).strip()
+    if combined and "page not found" in combined.lower():
+        return "unavailable", combined
+    if error:
+        raise PixivApiError(combined or "failed to fetch Pixiv user")
+    return "available", None
 
 
 class PixivClientProtocol(Protocol):
