@@ -49,9 +49,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { cn, formatDate } from "@/lib/utils";
 
-type SubmittedView = "runs" | "schedules";
-type RunTab = "active" | "failed" | "completed";
-type ScheduleTab = "enabled" | "paused" | "blocked";
+type WorkflowStatusTab = "active" | "failed" | "completed";
 type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "rule";
 type WorkflowTarget =
   | "single_artist"
@@ -173,25 +171,14 @@ const initialForm: WorkflowForm = {
   }
 };
 
-const submittedViewItems: Array<{ value: SubmittedView; label: string }> = [
-  { value: "runs", label: "Runs" },
-  { value: "schedules", label: "Schedules" }
-];
-
-const runTabItems: Array<{ value: RunTab; label: string }> = [
+const workflowStatusItems: Array<{ value: WorkflowStatusTab; label: string }> = [
   { value: "active", label: "Active" },
   { value: "failed", label: "Failed" },
   { value: "completed", label: "Complete" }
 ];
 
-const scheduleTabItems: Array<{ value: ScheduleTab; label: string }> = [
-  { value: "enabled", label: "Enabled" },
-  { value: "paused", label: "Paused" },
-  { value: "blocked", label: "Blocked" }
-];
-
 const moduleLabels: Record<ModuleKey, string> = {
-  schedule: "Schedule",
+  schedule: "Trigger",
   target: "Target",
   filters: "Filters",
   actions: "Actions",
@@ -235,9 +222,7 @@ export function WorkflowsPage(): JSX.Element {
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<WorkflowForm>(initialForm);
   const [submitted, setSubmitted] = React.useState(false);
-  const [submittedView, setSubmittedView] = React.useState<SubmittedView>("runs");
-  const [runTab, setRunTab] = React.useState<RunTab>("active");
-  const [scheduleTab, setScheduleTab] = React.useState<ScheduleTab>("enabled");
+  const [statusTab, setStatusTab] = React.useState<WorkflowStatusTab>("active");
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
 
@@ -293,7 +278,7 @@ export function WorkflowsPage(): JSX.Element {
       setSelectedDraftId((current) => (current === draft.id ? null : current));
       pushToast({
         title: "Workflow submitted",
-        description: response.jobIds.length ? `${response.jobIds.length} job(s)` : "Schedule created",
+        description: response.jobIds.length ? `${response.jobIds.length} job(s)` : "Trigger created",
         tone: "success"
       });
       invalidateRuntimeQueries(queryClient);
@@ -383,15 +368,22 @@ export function WorkflowsPage(): JSX.Element {
     closeBuilder();
   }
 
-  const visibleRuns = filterWorkflowRuns(workflowRuns.data?.items ?? [], runTab);
-  const visibleSchedules = filterScheduledWorkflows(schedules.data?.items ?? [], scheduleTab);
-  const submittedCount = submittedView === "runs" ? visibleRuns.length : visibleSchedules.length;
+  const allRuns = workflowRuns.data?.items ?? [];
+  const allSchedules = schedules.data?.items ?? [];
+  const runGroups = workflowRunGroups(allRuns);
+  const triggerGroups = workflowTriggerGroups(allSchedules);
+  const waitingJobs = workflowWaitingJobs(jobs.data?.items ?? []);
+  const activeCount = runGroups.active.length + waitingJobs.length + triggerGroups.active.length;
+  const failedCount = runGroups.failed.length + triggerGroups.blocked.length;
+  const completedCount = runGroups.completed.length + triggerGroups.inactive.length;
+  const submittedCount =
+    statusTab === "active" ? activeCount : statusTab === "failed" ? failedCount : completedCount;
 
   return (
     <>
       <PageHeader
         title="Workflows"
-        description="Stage workflow drafts, then submit them into jobs or schedules."
+        description="Stage workflow drafts, then submit them into runs or triggers."
         actions={
           <>
             <Button
@@ -488,12 +480,6 @@ export function WorkflowsPage(): JSX.Element {
                 Clear
               </Button>
             </div>
-            <WorkflowLimitPanel
-              jobs={jobs.data?.items ?? []}
-              settings={settings.data}
-              disabled={settings.isLoading || limitMutation.isPending}
-              onSync={(key, value) => limitMutation.mutate({ [key]: value })}
-            />
           </section>
 
           {selectedDraft ? (
@@ -505,22 +491,25 @@ export function WorkflowsPage(): JSX.Element {
 
         <section className="space-y-4">
           <div className="surface p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
                 <h2 className="text-sm font-semibold">Submitted</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Runs are execution history. Schedules are saved triggers that create future runs.
+                  Runs are execution records. Triggers create future runs automatically.
                 </p>
               </div>
-              <Tabs value={submittedView} onValueChange={setSubmittedView} items={submittedViewItems} />
-            </div>
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              {submittedView === "runs" ? (
-                <Tabs value={runTab} onValueChange={setRunTab} items={runTabItems} />
-              ) : (
-                <Tabs value={scheduleTab} onValueChange={setScheduleTab} items={scheduleTabItems} />
-              )}
-              <p className="text-sm text-muted-foreground">{submittedCount} item(s)</p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center xl:justify-end">
+                {statusTab === "active" ? (
+                  <WorkflowLimitPanel
+                    jobs={jobs.data?.items ?? []}
+                    settings={settings.data}
+                    disabled={settings.isLoading || limitMutation.isPending}
+                    onSync={(key, value) => limitMutation.mutate({ [key]: value })}
+                  />
+                ) : null}
+                <Tabs value={statusTab} onValueChange={setStatusTab} items={workflowStatusItems} />
+                <p className="whitespace-nowrap text-sm text-muted-foreground">{submittedCount} item(s)</p>
+              </div>
             </div>
           </div>
           {jobs.isError ? (
@@ -528,28 +517,54 @@ export function WorkflowsPage(): JSX.Element {
           ) : workflowRuns.isError ? (
             <DataState title="Could not load workflow runs" description={workflowRuns.error.message} variant="error" />
           ) : schedules.isError ? (
-            <DataState title="Could not load schedules" description={schedules.error.message} variant="error" />
+            <DataState title="Could not load triggers" description={schedules.error.message} variant="error" />
           ) : jobs.isLoading || workflowRuns.isLoading || schedules.isLoading ? (
             <DataState title="Loading submitted workflows" variant="loading" />
-          ) : submittedView === "runs" && visibleRuns.length === 0 ? (
-            <DataState title="No workflow runs here" description="Submit a draft or choose another run state." />
-          ) : submittedView === "schedules" && visibleSchedules.length === 0 ? (
-            <DataState title="No schedules here" description="Create a scheduled draft or choose another schedule state." />
-          ) : submittedView === "runs" ? (
-            <div className="grid gap-3">
-              {visibleRuns.map((run) => (
-                <RunWorkflowCard key={run.id} run={run} />
-              ))}
+          ) : submittedCount === 0 ? (
+            <DataState title="No submitted workflows here" description="Submit a draft or choose another state." />
+          ) : statusTab === "active" ? (
+            <div className="space-y-4">
+              <WorkflowGroupSection title="Running Runs" count={runGroups.active.length}>
+                {runGroups.active.map((run) => (
+                  <RunWorkflowCard key={run.id} run={run} />
+                ))}
+              </WorkflowGroupSection>
+              <WorkflowGroupSection title="Waiting Queue" count={waitingJobs.length}>
+                {waitingJobs.map((job) => (
+                  <WaitingJobCard key={job.id} job={job} />
+                ))}
+              </WorkflowGroupSection>
+              <WorkflowGroupSection title="Active Triggers" count={triggerGroups.active.length}>
+                {triggerGroups.active.map((task) => (
+                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+                ))}
+              </WorkflowGroupSection>
+            </div>
+          ) : statusTab === "failed" ? (
+            <div className="space-y-4">
+              <WorkflowGroupSection title="Failed Runs" count={runGroups.failed.length}>
+                {runGroups.failed.map((run) => (
+                  <RunWorkflowCard key={run.id} run={run} />
+                ))}
+              </WorkflowGroupSection>
+              <WorkflowGroupSection title="Blocked Triggers" count={triggerGroups.blocked.length}>
+                {triggerGroups.blocked.map((task) => (
+                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+                ))}
+              </WorkflowGroupSection>
             </div>
           ) : (
-            <div className="grid gap-3">
-              {visibleSchedules.map((task) => (
-                <ScheduleWorkflowCard
-                  key={`schedule-${task.id}`}
-                  task={task}
-                  lastRun={latestScheduleRun(task, workflowRuns.data?.items ?? [])}
-                />
-              ))}
+            <div className="space-y-4">
+              <WorkflowGroupSection title="Completed Runs" count={runGroups.completed.length}>
+                {runGroups.completed.map((run) => (
+                  <RunWorkflowCard key={run.id} run={run} />
+                ))}
+              </WorkflowGroupSection>
+              <WorkflowGroupSection title="Inactive Triggers" count={triggerGroups.inactive.length}>
+                {triggerGroups.inactive.map((task) => (
+                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+                ))}
+              </WorkflowGroupSection>
             </div>
           )}
         </section>
@@ -614,7 +629,7 @@ export function WorkflowsPage(): JSX.Element {
               </div>
               {form.modules.schedule && form.download_scope === "full" ? (
                 <p className="rounded-md border border-amber-500/30 bg-amber-50 p-3 text-sm text-amber-800">
-                  Full download schedules re-check already tracked works every run.
+                  Full download triggers re-check already tracked works every run.
                 </p>
               ) : null}
             </aside>
@@ -1118,7 +1133,7 @@ function RunWorkflowCard({ run }: { run: WorkflowBatchRun }): JSX.Element {
             <WorkflowRunStatusPill status={run.status} />
             <Badge tone="muted">run</Badge>
             {run.source === "schedule" || run.source === "manual_schedule" ? (
-              <Badge tone="default">{run.source === "manual_schedule" ? "manual schedule" : "schedule"}</Badge>
+              <Badge tone="default">{run.source === "manual_schedule" ? "manual trigger" : "trigger"}</Badge>
             ) : null}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -1155,6 +1170,57 @@ function RunWorkflowCard({ run }: { run: WorkflowBatchRun }): JSX.Element {
   );
 }
 
+function WorkflowGroupSection({
+  title,
+  count,
+  children
+}: {
+  title: string;
+  count: number;
+  children: React.ReactNode;
+}): JSX.Element {
+  if (count === 0) {
+    return (
+      <section className="rounded-md border bg-muted/20 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <Badge tone="muted">0</Badge>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between gap-2 px-1">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        <Badge tone="muted">{count}</Badge>
+      </div>
+      <div className="grid gap-3">{children}</div>
+    </section>
+  );
+}
+
+function WaitingJobCard({ job }: { job: Job }): JSX.Element {
+  return (
+    <article className="surface p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="break-words text-sm font-semibold">{jobLabel(job)}</h2>
+            <Badge tone="muted">waiting</Badge>
+            {job.workflow_source ? <Badge tone="default">{sourceLabel(job.workflow_source)}</Badge> : null}
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
+        </div>
+        <div className="text-left text-sm text-muted-foreground sm:text-right">
+          <div>{formatDate(job.created_at)}</div>
+          <div className="mt-1">{job.completed_files}/{job.total_files || 0} files</div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function DraftQueueItem({
   draft,
   selected,
@@ -1180,7 +1246,7 @@ function DraftQueueItem({
         <div className="flex items-center justify-between gap-2">
           <h3 className="truncate text-sm font-semibold">{draftTitle(draft.form)}</h3>
           <Badge tone={draft.form.modules.schedule ? "default" : "muted"}>
-            {draft.form.modules.schedule ? "schedule" : "one-off"}
+            {draft.form.modules.schedule ? "trigger" : "one-off"}
           </Badge>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{previewText(draft.form)}</p>
@@ -1248,32 +1314,32 @@ function ScheduleWorkflowCard({
     onSuccess: (response) => {
       pushToast({
         title: response.workflow_run_id
-          ? "Schedule run submitted"
+          ? "Trigger run submitted"
           : response.skipped
-            ? "Schedule skipped"
-            : "Schedule checked",
+            ? "Trigger skipped"
+            : "Trigger checked",
         description: response.workflow_run_id ?? (response.job_ids.length ? response.job_ids.join(", ") : undefined),
         tone: response.skipped ? "info" : "success"
       });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Schedule could not run", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Trigger could not run", description: error.message, tone: "error" })
   });
   const statusMutation = useMutation({
     mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
     onSuccess: () => {
-      pushToast({ title: task.status === "active" ? "Schedule paused" : "Schedule activation requested", tone: "success" });
+      pushToast({ title: task.status === "active" ? "Trigger paused" : "Trigger activation requested", tone: "success" });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Schedule could not be updated", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Trigger could not be updated", description: error.message, tone: "error" })
   });
   const deleteMutation = useMutation({
     mutationFn: () => deleteScheduledTask(task.id),
     onSuccess: () => {
-      pushToast({ title: "Schedule deleted", tone: "success" });
+      pushToast({ title: "Trigger deleted", tone: "success" });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Schedule could not be deleted", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Trigger could not be deleted", description: error.message, tone: "error" })
   });
   const busy = runMutation.isPending || statusMutation.isPending || deleteMutation.isPending;
 
@@ -1286,7 +1352,7 @@ function ScheduleWorkflowCard({
             <Badge tone={task.status === "active" ? "success" : task.status === "blocked" ? "danger" : "muted"}>
               {task.status}
             </Badge>
-            <Badge tone="default">schedule</Badge>
+            <Badge tone="default">trigger</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{scheduleSummary(task)}</p>
         </div>
@@ -1340,7 +1406,7 @@ function WorkflowLimitPanel({
   const runStats = workflowJobStats(jobs);
 
   return (
-    <div className="mt-3 space-y-2 rounded-md border bg-muted/20 p-3">
+    <div className="min-w-0">
       <WorkflowLimitControl
         label="Run limit"
         value={settings?.max_active_one_time_tasks ?? 1}
@@ -1391,21 +1457,19 @@ function WorkflowLimitControl({
   }
 
   return (
-    <div className="grid gap-2 rounded-md border bg-background p-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium">{label}</span>
-        <span className="text-xs text-muted-foreground">
-          active {active} / waiting {waiting}
-        </span>
-      </div>
-      <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="whitespace-nowrap text-xs font-medium">{label}</span>
+      <span className="whitespace-nowrap text-xs text-muted-foreground">
+        {active}/{waiting}
+      </span>
+      <div className="flex flex-wrap items-center gap-1">
         {[1, 2, 3, 4, 5].map((item) => (
           <Button
             key={item}
             type="button"
             size="icon"
             variant={value === item ? "default" : "outline"}
-            className="h-8 w-8 shrink-0 text-xs"
+            className="h-7 w-7 shrink-0 text-xs"
             disabled={disabled}
             title={`Set ${label} limit to ${item}`}
             onClick={() => {
@@ -1422,7 +1486,7 @@ function WorkflowLimitControl({
             min={6}
             value={draftValue}
             disabled={disabled}
-            className="h-8 w-16 px-2 text-center"
+            className="h-7 w-14 px-2 text-center text-xs"
             title={`Custom ${label} limit, minimum 6`}
             onChange={(event) => setDraftValue(event.target.value)}
             onBlur={normalizeCustomEdit}
@@ -1437,7 +1501,7 @@ function WorkflowLimitControl({
             type="button"
             size="sm"
             variant={customActive ? "default" : "outline"}
-            className="h-8 min-w-12 shrink-0 px-2 text-xs"
+            className="h-7 min-w-10 shrink-0 px-2 text-xs"
             disabled={disabled}
             title={`Edit custom ${label} limit`}
             onClick={() => setEditingCustom(true)}
@@ -1449,7 +1513,7 @@ function WorkflowLimitControl({
           type="button"
           size="icon"
           variant={customChanged ? "default" : "outline"}
-          className="h-8 w-8 shrink-0"
+          className="h-7 w-7 shrink-0"
           disabled={disabled}
           title={`Sync ${label} limit`}
           onClick={() => {
@@ -1727,24 +1791,32 @@ function validateForm(form: WorkflowForm): string[] {
   return errors;
 }
 
-function filterWorkflowRuns(runs: WorkflowBatchRun[], tab: RunTab): WorkflowBatchRun[] {
-  if (tab === "active") {
-    return runs.filter((run) => run.status === "running");
-  }
-  if (tab === "failed") {
-    return runs.filter((run) => run.status === "failed" || run.status === "partial");
-  }
-  return runs.filter((run) => run.status === "completed" || run.status === "skipped");
+function workflowRunGroups(runs: WorkflowBatchRun[]): {
+  active: WorkflowBatchRun[];
+  failed: WorkflowBatchRun[];
+  completed: WorkflowBatchRun[];
+} {
+  return {
+    active: runs.filter((run) => run.status === "running"),
+    failed: runs.filter((run) => run.status === "failed" || run.status === "partial"),
+    completed: runs.filter((run) => run.status === "completed" || run.status === "skipped")
+  };
 }
 
-function filterScheduledWorkflows(tasks: ScheduledTask[], tab: ScheduleTab): ScheduledTask[] {
-  if (tab === "enabled") {
-    return tasks.filter((task) => task.status === "active");
-  }
-  if (tab === "blocked") {
-    return tasks.filter((task) => task.status === "blocked");
-  }
-  return tasks.filter((task) => task.status === "paused" || task.status === "inactive");
+function workflowTriggerGroups(tasks: ScheduledTask[]): {
+  active: ScheduledTask[];
+  blocked: ScheduledTask[];
+  inactive: ScheduledTask[];
+} {
+  return {
+    active: tasks.filter((task) => task.status === "active"),
+    blocked: tasks.filter((task) => task.status === "blocked"),
+    inactive: tasks.filter((task) => task.status === "paused" || task.status === "inactive")
+  };
+}
+
+function workflowWaitingJobs(jobs: Job[]): Job[] {
+  return jobs.filter((job) => job.options.activation_scope === "one_time" && job.status === "inactive");
 }
 
 function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>) {
@@ -1899,7 +1971,7 @@ function lastRunItemStatus(draftId: string, runs: WorkflowBatchRun[]): WorkflowB
 }
 
 function draftTitle(form: WorkflowForm): string {
-  return form.name.trim() || `${form.modules.schedule ? "Schedule" : "Workflow"}: ${targetLabels[form.target_type]}`;
+  return form.name.trim() || `${form.modules.schedule ? "Trigger" : "Workflow"}: ${targetLabels[form.target_type]}`;
 }
 
 function scheduleSummary(task: ScheduledTask): string {
@@ -1951,6 +2023,33 @@ function workflowJobStats(jobs: Job[]): { active: number; waiting: number } {
     active: oneTimeJobs.filter((job) => job.status === "queued" || job.status === "running").length,
     waiting: oneTimeJobs.filter((job) => job.status === "inactive").length
   };
+}
+
+function jobLabel(job: Job): string {
+  return job.type.replaceAll("_", " ");
+}
+
+function jobTarget(job: Job): string {
+  if (job.input_user_id) {
+    return `Artist ${job.input_user_id}`;
+  }
+  if (job.input_artwork_id) {
+    return `Artwork ${job.input_artwork_id}`;
+  }
+  return "No target";
+}
+
+function sourceLabel(source: string): string {
+  if (source === "manual_schedule" || source === "schedule") {
+    return "trigger";
+  }
+  if (source === "workflow_batch") {
+    return "manual";
+  }
+  if (source.includes("shortcut")) {
+    return "shortcut";
+  }
+  return source.replaceAll("_", " ");
 }
 
 function runTitle(run: WorkflowBatchRun): string {
