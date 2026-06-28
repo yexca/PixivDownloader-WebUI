@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollableTable } from "@/components/ScrollableTable";
-import { cn, formatDate, isCancellable, isRerunnable, isRetryable, percent } from "@/lib/utils";
+import { actionIconClass, cn, formatDate, isCancellable, isRerunnable, isRetryable, percent } from "@/lib/utils";
 
 type JobTableProps = {
   jobs: Job[];
@@ -117,14 +117,14 @@ export function JobTable({
                   </div>
                 </td>
                 <td className="table-cell">{formatDate(job.created_at)}</td>
-                <td className="table-cell sticky-col-right min-w-36">
+                <td className="table-cell sticky-col-right min-w-36 cursor-default" onClick={(event) => event.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     {onRetry && isRetryable(job.status) ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="icon"
-                        className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                        className={actionIconClass("warning")}
                         title={retryTitle(job)}
                         aria-label={retryTitle(job)}
                         disabled={busyRetryJobId === job.id || Boolean(activeRelatedJob(job, "retry"))}
@@ -141,6 +141,7 @@ export function JobTable({
                         type="button"
                         variant="outline"
                         size="icon"
+                        className={actionIconClass()}
                         title={rerunTitle(job)}
                         aria-label={rerunTitle(job)}
                         disabled={busyRerunJobId === job.id || Boolean(activeRelatedJob(job, "rerun"))}
@@ -154,8 +155,9 @@ export function JobTable({
                     ) : null}
                     <Button
                       type="button"
-                      variant={selected ? "secondary" : "ghost"}
+                      variant="outline"
                       size="icon"
+                      className={actionIconClass(selected ? "selected" : "default")}
                       title="Show job details"
                       aria-label="Show job details"
                       onClick={(event) => {
@@ -168,9 +170,9 @@ export function JobTable({
                     {onCancel && isCancellable(job.status) ? (
                       <Button
                         type="button"
-                        variant={job.status === "running" ? "outline" : "ghost"}
+                        variant="outline"
                         size="icon"
-                        className="text-destructive hover:bg-destructive/10"
+                        className={actionIconClass("danger")}
                         title={job.status === "running" ? "Request job cancellation" : "Cancel job"}
                         aria-label={job.status === "running" ? "Request job cancellation" : "Cancel job"}
                         disabled={job.cancel_requested}

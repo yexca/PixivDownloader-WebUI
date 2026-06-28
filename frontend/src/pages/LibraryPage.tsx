@@ -26,7 +26,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Pagination } from "@/components/Pagination";
 import { ScrollableTable } from "@/components/ScrollableTable";
 import { useToast } from "@/components/ToastProvider";
-import { formatDate } from "@/lib/utils";
+import { actionIconClass, formatDate } from "@/lib/utils";
 
 export function LibraryPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -216,7 +216,7 @@ export function LibraryPage(): JSX.Element {
               </>
             )}
           </section>
-          <aside className="space-y-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start">
+          <aside className="space-y-3 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:self-start">
             {selectedArtistId && selectedArtist.data ? (
               <ArtistDetailPanel
                 artist={selectedArtist.data}
@@ -317,12 +317,13 @@ function ArtistTable({
                 <TagPreview artist={artist} />
               </td>
               <td className="table-cell">{formatDate(artist.last_checked_at)}</td>
-              <td className="table-cell sticky-col-right min-w-44">
+              <td className="table-cell sticky-col-right min-w-44 cursor-default" onClick={(event) => event.stopPropagation()}>
                 <div className="flex items-center gap-1">
                   <Button
                     type="button"
                     variant="outline"
                     size="icon"
+                    className={actionIconClass()}
                     title="Sync artist"
                     aria-label="Sync artist"
                     disabled={isSyncing}
@@ -338,7 +339,7 @@ function ArtistTable({
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                    className={actionIconClass("warning")}
                     title="Retry failed files"
                     aria-label="Retry failed files"
                     disabled={isRetrying || artist.failed_file_count === 0}
@@ -352,8 +353,9 @@ function ArtistTable({
                   </Button>
                   <Button
                     type="button"
-                    variant={selected ? "secondary" : "ghost"}
+                    variant="outline"
                     size="icon"
+                    className={actionIconClass(selected ? "selected" : "default")}
                     title="Show artist details"
                     aria-label="Show artist details"
                     onClick={(event) => {
@@ -363,7 +365,15 @@ function ArtistTable({
                   >
                     <Info className="h-4 w-4" aria-hidden="true" />
                   </Button>
-                  <Button type="button" variant="ghost" size="icon" title="Open Pixiv profile" aria-label="Open Pixiv profile" asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className={actionIconClass()}
+                    title="Open Pixiv profile"
+                    aria-label="Open Pixiv profile"
+                    asChild
+                  >
                     <a href={artist.profile_url} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
                       <ExternalLink className="h-4 w-4" aria-hidden="true" />
                     </a>
@@ -506,7 +516,7 @@ function ArtistDetailPanel({
             type="button"
             variant="outline"
             size="sm"
-            className="border-amber-300 text-amber-700 hover:bg-amber-50"
+            className={actionIconClass("warning")}
             onClick={() => {
               setRetryPending(true);
               retryFailed.mutate();
@@ -638,7 +648,7 @@ function ArtistDangerZone({
           type="button"
           variant="outline"
           size="icon"
-          className="h-9 w-9 shrink-0 self-start border-destructive/30 p-0 text-destructive hover:bg-destructive/10"
+          className={`h-9 w-9 shrink-0 self-start p-0 ${actionIconClass("danger")}`}
           title="Remove from local library. Downloaded files on disk will not be deleted."
           aria-label="Remove from local library. Downloaded files on disk will not be deleted."
           disabled={isRemoving || hasActiveJob}

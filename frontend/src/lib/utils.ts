@@ -37,3 +37,16 @@ export function isRetryable(status: string): boolean {
 export function isRerunnable(status: string): boolean {
   return status === "completed" || status === "failed" || status === "cancelled";
 }
+
+export function actionIconClass(tone: "default" | "selected" | "warning" | "danger" = "default"): string {
+  if (tone === "selected") {
+    return "border-primary/50 bg-transparent text-primary hover:bg-primary/10";
+  }
+  if (tone === "warning") {
+    return "border-amber-300 bg-transparent text-amber-700 hover:bg-amber-50";
+  }
+  if (tone === "danger") {
+    return "border-destructive/30 bg-transparent text-destructive hover:bg-destructive/10";
+  }
+  return "border-border bg-transparent text-foreground hover:bg-muted";
+}
