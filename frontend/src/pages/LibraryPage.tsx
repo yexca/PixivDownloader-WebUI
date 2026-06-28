@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertCircle, AlertTriangle, Check, ExternalLink, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, ExternalLink, Images, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -317,7 +317,7 @@ function ArtistTable({
                 <TagPreview artist={artist} />
               </td>
               <td className="table-cell">{formatDate(artist.last_checked_at)}</td>
-              <td className="table-cell sticky-col-right min-w-44 cursor-default" onClick={(event) => event.stopPropagation()}>
+              <td className="table-cell sticky-col-right min-w-52 cursor-default" onClick={(event) => event.stopPropagation()}>
                 <div className="flex items-center gap-1">
                   <Button
                     type="button"
@@ -364,6 +364,19 @@ function ArtistTable({
                     }}
                   >
                     <Info className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className={actionIconClass()}
+                    title="View artist artworks"
+                    aria-label="View artist artworks"
+                    asChild
+                  >
+                    <Link to={`/artists/${artist.id}`} onClick={(event) => event.stopPropagation()}>
+                      <Images className="h-4 w-4" aria-hidden="true" />
+                    </Link>
                   </Button>
                   <Button
                     type="button"
@@ -497,6 +510,34 @@ function ArtistDetailPanel({
               </div>
             ) : null}
           </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className={actionIconClass()}
+              title="View artist artworks"
+              aria-label="View artist artworks"
+              asChild
+            >
+              <Link to={`/artists/${artist.id}`}>
+                <Images className="h-4 w-4" aria-hidden="true" />
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className={actionIconClass()}
+              title="Open Pixiv profile"
+              aria-label="Open Pixiv profile"
+              asChild
+            >
+              <a href={artist.profile_url} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" aria-hidden="true" />
+              </a>
+            </Button>
+          </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
@@ -526,15 +567,6 @@ function ArtistDetailPanel({
           >
             <RetryFailedIcon spinning={isRetrying} />
             Retry Failed
-          </Button>
-          <Button type="button" variant="ghost" size="sm" asChild>
-            <a href={artist.profile_url} target="_blank" rel="noreferrer">
-              <ExternalLink className="h-4 w-4" aria-hidden="true" />
-              Pixiv
-            </a>
-          </Button>
-          <Button type="button" variant="ghost" size="sm" asChild>
-            <Link to={`/artists/${artist.id}`}>Artworks</Link>
           </Button>
         </div>
         <Tabs<ArtistDetailTab>
