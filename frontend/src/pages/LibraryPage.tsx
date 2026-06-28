@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertTriangle, Check, ExternalLink, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, ExternalLink, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -265,22 +265,12 @@ function ArtistTable({
   const retryFailed = useMutation({
     mutationFn: (artistId: string) => retryFailedArtist(artistId),
     onSuccess: (response) => {
-      pushToast({ title: "Retry queued", description: response.job_id, tone: "success" });
+      pushToast({ title: "Retry failed queued", description: response.job_id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
     onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
     onSettled: () => setPendingRetryArtistId(null)
   });
-  const remove = useMutation({
-    mutationFn: (artistId: string) => deleteArtist(artistId),
-    onSuccess: () => {
-      pushToast({ title: "Artist removed", tone: "success" });
-      void queryClient.invalidateQueries({ queryKey: ["artists"] });
-      void queryClient.invalidateQueries({ queryKey: ["local-tags"] });
-    },
-    onError: (error) => pushToast({ title: "Remove failed", description: error.message, tone: "error" })
-  });
-
   return (
     <ScrollableTable>
       <table className="data-table min-w-[760px]">
@@ -348,6 +338,7 @@ function ArtistTable({
                     type="button"
                     variant="outline"
                     size="icon"
+                    className="border-amber-300 text-amber-700 hover:bg-amber-50"
                     title="Retry failed files"
                     aria-label="Retry failed files"
                     disabled={isRetrying || artist.failed_file_count === 0}
@@ -357,7 +348,7 @@ function ArtistTable({
                       retryFailed.mutate(artist.id);
                     }}
                   >
-                    <RotateCcw className={isRetrying ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                    <RetryFailedIcon spinning={isRetrying} />
                   </Button>
                   <Button
                     type="button"
@@ -444,6 +435,7 @@ function ArtistDetailPanel({
   const [removeDialogOpen, setRemoveDialogOpen] = React.useState(false);
   const isSyncing = syncPending || Boolean(jobState?.sync);
   const isRetrying = retryPending || Boolean(jobState?.retry);
+  const hasActiveJob = Boolean(jobState && Object.keys(jobState).length > 0);
   const sync = useMutation({
     mutationFn: () => syncArtist(artist.id),
     onSuccess: (response) => {
@@ -456,7 +448,7 @@ function ArtistDetailPanel({
   const retryFailed = useMutation({
     mutationFn: () => retryFailedArtist(artist.id),
     onSuccess: (response) => {
-      pushToast({ title: "Retry queued", description: response.job_id, tone: "success" });
+      pushToast({ title: "Retry failed queued", description: response.job_id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
     onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
@@ -514,14 +506,16 @@ function ArtistDetailPanel({
             type="button"
             variant="outline"
             size="sm"
+            className="border-amber-300 text-amber-700 hover:bg-amber-50"
             onClick={() => {
               setRetryPending(true);
               retryFailed.mutate();
             }}
             disabled={isRetrying || artist.failed_file_count === 0}
+            title={isRetrying ? "Retry failed files already queued or running" : "Retry failed files"}
           >
-            <RotateCcw className={isRetrying ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
-            Retry
+            <RetryFailedIcon spinning={isRetrying} />
+            Retry Failed
           </Button>
           <Button type="button" variant="ghost" size="sm" asChild>
             <a href={artist.profile_url} target="_blank" rel="noreferrer">
@@ -531,17 +525,6 @@ function ArtistDetailPanel({
           </Button>
           <Button type="button" variant="ghost" size="sm" asChild>
             <Link to={`/artists/${artist.id}`}>Artworks</Link>
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            title="Remove from library"
-            aria-label="Remove from library"
-            disabled={remove.isPending}
-            onClick={() => setRemoveDialogOpen(true)}
-          >
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
           </Button>
         </div>
         <Tabs<ArtistDetailTab>
@@ -559,12 +542,19 @@ function ArtistDetailPanel({
         {activeTab === "overview" ? <ArtistOverview artist={artist} /> : null}
         {activeTab === "details" ? <ArtistFullDetails artist={artist} /> : null}
         {activeTab === "tags" ? <ArtistTagsPanel artist={artist} /> : null}
+        <ArtistDangerZone
+          artist={artist}
+          hasActiveJob={hasActiveJob}
+          isRemoving={remove.isPending}
+          onRemove={() => setRemoveDialogOpen(true)}
+        />
       </div>
       </div>
       <RemoveArtistConfirmDialog
         artist={artist}
         open={removeDialogOpen}
         isRemoving={remove.isPending}
+        hasActiveJob={hasActiveJob}
         onOpenChange={setRemoveDialogOpen}
         onConfirm={() => remove.mutate()}
       />
@@ -576,33 +566,88 @@ function RemoveArtistConfirmDialog({
   artist,
   open,
   isRemoving,
+  hasActiveJob,
   onOpenChange,
   onConfirm
 }: {
   artist: ArtistDetail;
   open: boolean;
   isRemoving: boolean;
+  hasActiveJob: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void;
 }): JSX.Element {
   return (
     <Dialog
       open={open}
-      title="Remove artist"
-      description={`${artist.name} will be removed from the local library. Local files will not be deleted.`}
+      title="Remove from Library"
+      description={`${artist.name} will be removed from the local database. Downloaded files on disk will not be deleted.`}
       onOpenChange={onOpenChange}
+      bodyClassName="space-y-3"
       footer={
         <>
           <Button type="button" variant="outline" disabled={isRemoving} onClick={() => onOpenChange(false)}>
-            Cancel
+            Keep Artist
           </Button>
-          <Button type="button" variant="destructive" disabled={isRemoving} onClick={onConfirm}>
+          <Button type="button" variant="destructive" disabled={isRemoving || hasActiveJob} onClick={onConfirm}>
             <Trash2 className="h-4 w-4" aria-hidden="true" />
-            Remove
+            Remove from Library
           </Button>
         </>
       }
-    />
+    >
+      <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+        This removes artist metadata, artwork records, file status, and local tags from the app database.
+      </div>
+      <p className="text-sm text-muted-foreground">
+        Future syncs or downloads may add this artist back to the library.
+      </p>
+      {hasActiveJob ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          This artist has active work queued or running. Wait for it to finish or cancel the job before removing the artist.
+        </p>
+      ) : null}
+    </Dialog>
+  );
+}
+
+function ArtistDangerZone({
+  artist,
+  hasActiveJob,
+  isRemoving,
+  onRemove
+}: {
+  artist: ArtistDetail;
+  hasActiveJob: boolean;
+  isRemoving: boolean;
+  onRemove: () => void;
+}): JSX.Element {
+  return (
+    <section className="mt-5 border-t pt-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-sm font-semibold text-destructive">Danger Zone</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Remove {artist.name} from the local library without deleting downloaded files.
+          </p>
+          {hasActiveJob ? (
+            <p className="mt-2 text-xs text-amber-700">Active artist jobs must finish or be cancelled first.</p>
+          ) : null}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="h-9 w-9 shrink-0 self-start border-destructive/30 p-0 text-destructive hover:bg-destructive/10"
+          title="Remove from local library. Downloaded files on disk will not be deleted."
+          aria-label="Remove from local library. Downloaded files on disk will not be deleted."
+          disabled={isRemoving || hasActiveJob}
+          onClick={onRemove}
+        >
+          <Trash2 className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </div>
+    </section>
   );
 }
 
@@ -730,6 +775,15 @@ function Detail({ label, value }: { label: string; value: string }): JSX.Element
   );
 }
 
+function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+      <RotateCcw className={spinning ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-amber-700" />
+    </span>
+  );
+}
+
 function FileSummary({ artist }: { artist: ArtistSummary }): JSX.Element {
   const remote = artist.remote_file_count + artist.pending_file_count;
   return (
@@ -831,7 +885,7 @@ function artistJobLabel(job: ArtistRunningJob, compact: boolean): string {
   const labels = {
     sync: "Sync",
     download: "Download",
-    retry: "Retry"
+    retry: compact ? "Retry" : "Retry Failed"
   };
   if (compact) {
     return labels[job.type];
