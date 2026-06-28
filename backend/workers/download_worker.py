@@ -255,7 +255,7 @@ class DownloadWorker:
             settings_service.close()
         return FileDownloader(
             settings.download_path,
-            skip_existing=settings.skip_existing_files,
+            existing_file_behavior=settings.existing_file_behavior,
         )
 
 

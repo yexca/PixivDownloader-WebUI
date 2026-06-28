@@ -167,8 +167,7 @@ def test_worker_file_downloader_uses_runtime_enforced_download_path(tmp_path, mo
                 "request_base_delay_seconds": 0,
                 "request_random_delay_seconds": 0,
                 "max_concurrent_downloads": 1,
-                "overwrite_existing_files": False,
-                "skip_existing_files": True,
+                "existing_file_behavior": "skip",
             }
         ),
         encoding="utf-8",

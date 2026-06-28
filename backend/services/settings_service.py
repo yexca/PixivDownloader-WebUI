@@ -38,8 +38,17 @@ class AppSettingsService:
         refresh_token_value = values.get("refresh_token", "")
         refresh_token = refresh_token_value.strip() if isinstance(refresh_token_value, str) else ""
         update_values = {key: value for key, value in values.items() if key != "refresh_token"}
+        if "existing_file_behavior" not in update_values:
+            if update_values.get("overwrite_existing_files") is True:
+                update_values["existing_file_behavior"] = "overwrite"
+            elif update_values.get("skip_existing_files") is True:
+                update_values["existing_file_behavior"] = "skip"
+            elif update_values.get("skip_existing_files") is False:
+                update_values["existing_file_behavior"] = "save_duplicate"
         if is_docker_runtime():
             update_values.pop("download_path", None)
+        update_values.pop("overwrite_existing_files", None)
+        update_values.pop("skip_existing_files", None)
         merged = {
             **current,
             **update_values,
@@ -86,8 +95,9 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
         "max_active_one_time_tasks": settings.max_active_one_time_tasks,
         "min_free_space_gb": settings.min_free_space_gb,
-        "overwrite_existing_files": settings.overwrite_existing_files,
-        "skip_existing_files": settings.skip_existing_files,
+        "existing_file_behavior": settings.existing_file_behavior,
+        "overwrite_existing_files": settings.existing_file_behavior == "overwrite",
+        "skip_existing_files": settings.existing_file_behavior == "skip",
         "library_stale_check_days": settings.library_stale_check_days,
     }
 

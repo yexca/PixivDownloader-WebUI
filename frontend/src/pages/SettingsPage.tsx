@@ -52,8 +52,7 @@ type BasicForm = Pick<
   | "max_active_one_time_tasks"
   | "min_free_space_gb"
   | "library_stale_check_days"
-  | "overwrite_existing_files"
-  | "skip_existing_files"
+  | "existing_file_behavior"
 >;
 type TokenStatusState = "unconfigured" | "checking" | "valid" | "invalid";
 
@@ -453,29 +452,43 @@ function BasicSettingsTab({
 
       <SettingsSection title="Download behavior" description="Control download concurrency and existing file handling.">
         <div className="space-y-4">
-          <div className="grid gap-3 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
-            <label
-              className="flex items-center gap-2 text-sm"
-              title="When a target file already exists, leave it untouched and mark that file as skipped."
-            >
-              <input
-                type="checkbox"
-                checked={form.skip_existing_files}
-                onChange={(event) => onChange({ ...form, skip_existing_files: event.target.checked })}
-              />
-              Skip existing files
-            </label>
-            <label
-              className="flex items-center gap-2 text-sm"
-              title="Allow downloads to replace files that already exist at the target path."
-            >
-              <input
-                type="checkbox"
-                checked={form.overwrite_existing_files}
-                onChange={(event) => onChange({ ...form, overwrite_existing_files: event.target.checked })}
-              />
-              Overwrite existing files
-            </label>
+          <div className="grid gap-2 rounded-md border bg-muted/30 p-2 sm:grid-cols-3">
+            {[
+              {
+                value: "skip",
+                label: "Skip",
+                title: "Leave existing files untouched and mark them as skipped."
+              },
+              {
+                value: "overwrite",
+                label: "Overwrite",
+                title: "Replace files that already exist at the target path."
+              },
+              {
+                value: "save_duplicate",
+                label: "Save duplicate",
+                title: "Keep existing files and save new downloads with numbered names."
+              }
+            ].map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                className={
+                  form.existing_file_behavior === item.value
+                    ? "rounded-md border border-primary bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+                    : "rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
+                }
+                title={item.title}
+                onClick={() =>
+                  onChange({
+                    ...form,
+                    existing_file_behavior: item.value as SettingsUpdateRequest["existing_file_behavior"]
+                  })
+                }
+              >
+                {item.label}
+              </button>
+            ))}
           </div>
         </div>
       </SettingsSection>
@@ -932,8 +945,7 @@ function toBasicForm(settings: SettingsResponse): BasicForm {
     max_active_one_time_tasks: settings.max_active_one_time_tasks,
     min_free_space_gb: settings.min_free_space_gb,
     library_stale_check_days: settings.library_stale_check_days,
-    overwrite_existing_files: settings.overwrite_existing_files,
-    skip_existing_files: settings.skip_existing_files
+    existing_file_behavior: settings.existing_file_behavior
   };
 }
 

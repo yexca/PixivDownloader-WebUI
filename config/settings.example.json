@@ -7,7 +7,6 @@
     "max_active_scheduled_tasks": 1,
     "max_active_one_time_tasks": 1,
     "min_free_space_gb": 10.0,
-    "library_stale_check_days": 30,
-    "overwrite_existing_files": false,
-    "skip_existing_files": true
+    "existing_file_behavior": "skip",
+    "library_stale_check_days": 30
 }

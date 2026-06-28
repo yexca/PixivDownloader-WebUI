@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from backend.core.config import ExistingFileBehavior
+
 
 class SettingsResponse(BaseModel):
     download_path: str
@@ -15,6 +17,7 @@ class SettingsResponse(BaseModel):
     max_active_scheduled_tasks: int
     max_active_one_time_tasks: int
     min_free_space_gb: float
+    existing_file_behavior: ExistingFileBehavior
     overwrite_existing_files: bool
     skip_existing_files: bool
     library_stale_check_days: int
@@ -29,6 +32,7 @@ class SettingsUpdateRequest(BaseModel):
     max_active_scheduled_tasks: int | None = Field(default=None, ge=1)
     max_active_one_time_tasks: int | None = Field(default=None, ge=1)
     min_free_space_gb: float | None = Field(default=None, ge=0)
+    existing_file_behavior: ExistingFileBehavior | None = None
     overwrite_existing_files: bool | None = None
     skip_existing_files: bool | None = None
     library_stale_check_days: int | None = Field(default=None, ge=1)

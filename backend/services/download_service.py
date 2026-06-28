@@ -39,7 +39,6 @@ class DownloadSummary:
 class DownloadOptions:
     force_rescan: bool = False
     retry_failed: bool = False
-    skip_existing_files: bool = True
     full_download: bool = False
     max_artworks: int | None = None
     min_artwork_id: str | None = None

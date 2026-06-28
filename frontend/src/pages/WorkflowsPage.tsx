@@ -951,7 +951,7 @@ function OptionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
         />
         Force rescan
       </label>
-      <p className="text-sm text-muted-foreground">Existing file handling still follows Settings for skip existing files.</p>
+      <p className="text-sm text-muted-foreground">Existing file handling follows the Settings download behavior.</p>
     </>
   );
 }

@@ -4,11 +4,14 @@ import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from backend.core.errors import ConfigError
 from backend.core.paths import settings_example_path as default_settings_example_path
 from backend.core.paths import settings_path as default_settings_path
+
+
+ExistingFileBehavior = Literal["skip", "overwrite", "save_duplicate"]
 
 
 @dataclass(frozen=True)
@@ -21,8 +24,7 @@ class Settings:
     max_active_scheduled_tasks: int = 1
     max_active_one_time_tasks: int = 1
     min_free_space_gb: float = 10.0
-    overwrite_existing_files: bool = False
-    skip_existing_files: bool = True
+    existing_file_behavior: ExistingFileBehavior = "skip"
     library_stale_check_days: int = 30
 
     @classmethod
@@ -56,6 +58,15 @@ class Settings:
         if library_stale_check_days < 1:
             raise ConfigError("library stale check days must be at least 1")
 
+        existing_file_behavior = str(
+            data.get(
+                "existing_file_behavior",
+                legacy_existing_file_behavior(data),
+            )
+        )
+        if existing_file_behavior not in {"skip", "overwrite", "save_duplicate"}:
+            raise ConfigError("existing_file_behavior must be skip, overwrite, or save_duplicate")
+
         return cls(
             download_path=download_path,
             refresh_token=str(data.get("refresh_token", "")),
@@ -65,8 +76,7 @@ class Settings:
             max_active_scheduled_tasks=max_active_scheduled_tasks,
             max_active_one_time_tasks=max_active_one_time_tasks,
             min_free_space_gb=min_free_space_gb,
-            overwrite_existing_files=bool(data.get("overwrite_existing_files", False)),
-            skip_existing_files=bool(data.get("skip_existing_files", True)),
+            existing_file_behavior=existing_file_behavior,
             library_stale_check_days=library_stale_check_days,
         )
 
@@ -80,8 +90,9 @@ class Settings:
             "max_active_scheduled_tasks": self.max_active_scheduled_tasks,
             "max_active_one_time_tasks": self.max_active_one_time_tasks,
             "min_free_space_gb": self.min_free_space_gb,
-            "overwrite_existing_files": self.overwrite_existing_files,
-            "skip_existing_files": self.skip_existing_files,
+            "existing_file_behavior": self.existing_file_behavior,
+            "overwrite_existing_files": self.existing_file_behavior == "overwrite",
+            "skip_existing_files": self.existing_file_behavior == "skip",
             "library_stale_check_days": self.library_stale_check_days,
         }
 
@@ -154,10 +165,19 @@ class SettingsService:
             "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
             "max_active_one_time_tasks": settings.max_active_one_time_tasks,
             "min_free_space_gb": settings.min_free_space_gb,
-            "overwrite_existing_files": settings.overwrite_existing_files,
-            "skip_existing_files": settings.skip_existing_files,
+            "existing_file_behavior": settings.existing_file_behavior,
+            "overwrite_existing_files": settings.existing_file_behavior == "overwrite",
+            "skip_existing_files": settings.existing_file_behavior == "skip",
             "library_stale_check_days": settings.library_stale_check_days,
         }
+
+
+def legacy_existing_file_behavior(data: dict[str, Any]) -> ExistingFileBehavior:
+    if bool(data.get("overwrite_existing_files", False)):
+        return "overwrite"
+    if bool(data.get("skip_existing_files", True)):
+        return "skip"
+    return "save_duplicate"
 
 
 def mask_token(token: str) -> str:

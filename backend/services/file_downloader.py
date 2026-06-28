@@ -7,6 +7,7 @@ from typing import Protocol
 
 import requests
 
+from backend.core.config import ExistingFileBehavior
 from backend.core.config import SettingsService
 from backend.core.errors import DownloadError
 
@@ -44,14 +45,17 @@ class FileDownloader:
         *,
         http_client: HttpClient | None = None,
         skip_existing: bool = False,
+        existing_file_behavior: ExistingFileBehavior | None = None,
     ) -> None:
         if download_path is None:
             settings = SettingsService().load()
             self.download_path = Path(settings.download_path)
-            self.skip_existing = settings.skip_existing_files
+            self.existing_file_behavior = settings.existing_file_behavior
         else:
             self.download_path = Path(download_path)
-            self.skip_existing = skip_existing
+            self.existing_file_behavior = existing_file_behavior or (
+                "skip" if skip_existing else "overwrite"
+            )
         self.http_client = http_client or requests
         try:
             self.download_path.mkdir(parents=True, exist_ok=True)
@@ -79,7 +83,7 @@ class FileDownloader:
         except OSError as exc:
             raise DownloadError(f"download path is not writable: {parent_dir}") from exc
 
-        if self.skip_existing and local_path.exists():
+        if self.existing_file_behavior == "skip" and local_path.exists():
             return FileDownloadResult(
                 url=url,
                 file_name=file_name,
@@ -87,6 +91,9 @@ class FileDownloader:
                 size_bytes=local_path.stat().st_size,
                 skipped=True,
             )
+        if self.existing_file_behavior == "save_duplicate":
+            local_path = unique_download_path(local_path)
+            file_name = local_path.name
 
         headers = {
             "Referer": "https://www.pixiv.net/",
@@ -128,3 +135,17 @@ def safe_download_path(base_path: Path, relative_path: str) -> Path:
     if not cleaned_parts:
         raise DownloadError("download file name is empty")
     return base_path.joinpath(*cleaned_parts)
+
+
+def unique_download_path(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    parent = path.parent
+    counter = 1
+    while True:
+        candidate = parent / f"{stem} ({counter}){suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1

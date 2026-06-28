@@ -1,5 +1,7 @@
 import { apiRequest } from "./client";
 
+export type ExistingFileBehavior = "skip" | "overwrite" | "save_duplicate";
+
 export type SettingsResponse = {
   download_path: string;
   download_path_editable: boolean;
@@ -12,6 +14,7 @@ export type SettingsResponse = {
   max_active_scheduled_tasks: number;
   max_active_one_time_tasks: number;
   min_free_space_gb: number;
+  existing_file_behavior: ExistingFileBehavior;
   library_stale_check_days: number;
   overwrite_existing_files: boolean;
   skip_existing_files: boolean;
@@ -26,6 +29,7 @@ export type SettingsUpdateRequest = {
   max_active_scheduled_tasks?: number;
   max_active_one_time_tasks?: number;
   min_free_space_gb?: number;
+  existing_file_behavior?: ExistingFileBehavior;
   library_stale_check_days?: number;
   overwrite_existing_files?: boolean;
   skip_existing_files?: boolean;
