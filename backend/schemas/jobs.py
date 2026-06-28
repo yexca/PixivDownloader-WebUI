@@ -20,6 +20,9 @@ class JobResponse(BaseModel):
     input_user_id: str | None
     input_artwork_id: str | None
     options: dict[str, object]
+    workflow_run_id: str | None
+    workflow_item_id: int | None
+    workflow_source: str | None
     total_files: int
     completed_files: int
     skipped_files: int
@@ -107,6 +110,9 @@ def job_response(job: Job, *, related_jobs: list[Job] | None = None) -> JobRespo
         input_user_id=job.input_user_id,
         input_artwork_id=job.input_artwork_id,
         options=job.options,
+        workflow_run_id=job.workflow_run_id,
+        workflow_item_id=job.workflow_item_id,
+        workflow_source=job.workflow_source,
         total_files=job.total_files,
         completed_files=job.completed_files,
         skipped_files=job.skipped_files,

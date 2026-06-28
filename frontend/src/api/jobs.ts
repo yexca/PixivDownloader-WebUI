@@ -17,6 +17,9 @@ export type Job = {
   input_user_id: string | null;
   input_artwork_id: string | null;
   options: Record<string, unknown>;
+  workflow_run_id: string | null;
+  workflow_item_id: number | null;
+  workflow_source: string | null;
   total_files: number;
   completed_files: number;
   skipped_files: number;

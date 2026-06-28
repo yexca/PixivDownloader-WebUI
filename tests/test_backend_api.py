@@ -356,8 +356,9 @@ def test_create_download_job(tmp_path):
         job = repository.get_by_id(body["job_id"])
         assert job is not None
         assert job.input_user_id == "123"
+        assert job.workflow_source == "download_api"
         assert job.options["workflow_source"] == "download_api"
-        run_id = job.options["workflow_run_id"]
+        run_id = job.workflow_run_id
     finally:
         repository.close()
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
@@ -1139,6 +1140,8 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     finally:
         repository.close()
     assert batch_job is not None
+    assert batch_job.workflow_run_id == body["id"]
+    assert batch_job.workflow_source == "workflow_batch"
     assert batch_job.options["workflow_run_id"] == body["id"]
     assert batch_job.options["workflow_source"] == "workflow_batch"
 
@@ -1285,6 +1288,7 @@ def test_create_artist_queues_sync_job(tmp_path):
         assert job is not None
         assert job.type == "sync_artist"
         assert job.input_user_id == "123"
+        assert job.workflow_source == "library_shortcut"
         assert job.options["workflow_source"] == "library_shortcut"
     finally:
         repository.close()
