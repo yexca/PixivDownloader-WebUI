@@ -522,6 +522,64 @@ def test_library_sync_persists_remote_only_files_and_preserves_download_cursor(t
     assert file_repository.list_by_artwork("101")[0].status == "remote_only"
 
 
+def test_pending_only_downloads_known_pending_files(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Existing", last_download_id="101"))
+    artwork_repository.upsert(Artwork(id="100", artist_id="123"))
+    artwork_repository.upsert(Artwork(id="101", artist_id="123"))
+    artwork_repository.upsert(Artwork(id="102", artist_id="123"))
+    remote_file_id = file_repository.upsert(
+        ArtworkFile(
+            artwork_id="100",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+            file_name="100_p0.jpg",
+            status="remote_only",
+        )
+    )
+    failed_file_id = file_repository.upsert(
+        ArtworkFile(
+            artwork_id="101",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/101_p0.jpg",
+            file_name="101_p0.jpg",
+            status="failed",
+        )
+    )
+    file_repository.upsert(
+        ArtworkFile(
+            artwork_id="102",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/102_p0.jpg",
+            file_name="102_p0.jpg",
+            status="downloaded",
+        )
+    )
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=artist_repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+        sleeper=lambda: None,
+    )
+
+    summary = service.download(user_id="123", options=DownloadOptions(pending_only=True))
+
+    assert summary.downloaded_files == 1
+    assert len(file_downloader.calls) == 1
+    assert file_downloader.calls[0][2].endswith("100_p0.jpg")
+    assert file_repository.get_by_id(remote_file_id).status == "downloaded"
+    assert file_repository.get_by_id(failed_file_id).status == "failed"
+
+
 def test_cancellation_marks_active_file_failed(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")

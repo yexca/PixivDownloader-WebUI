@@ -397,11 +397,15 @@ DOWNLOAD_JOB_TYPES = {
 
 def clean_job_options(options: dict[str, object]) -> dict[str, object]:
     cleaned: dict[str, object] = {}
-    for key in ("full_download", "max_artworks", "min_artwork_id", "max_artwork_id"):
+    for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
         value = options.get(key)
         if value is None or value == "":
             continue
         cleaned[key] = value
+    if options.get("full_download") is True:
+        cleaned["full_download"] = True
+    if options.get("pending_only") is True:
+        cleaned["pending_only"] = True
     if options.get("only_new_artworks") is True:
         cleaned["only_new_artworks"] = True
     stop_if_artwork_count_above = options.get("stop_if_artwork_count_above")

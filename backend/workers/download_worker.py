@@ -79,6 +79,7 @@ class DownloadWorker:
                 force_rescan=job.type == "rescan_artist",
                 retry_failed=job.type in {"retry_failed", "retry_failed_artist"},
                 full_download=bool(job.options.get("full_download", False)),
+                pending_only=bool(job.options.get("pending_only", False)),
                 max_artworks=positive_int_option(job.options.get("max_artworks")),
                 min_artwork_id=string_option(job.options.get("min_artwork_id")),
                 max_artwork_id=string_option(job.options.get("max_artwork_id")),

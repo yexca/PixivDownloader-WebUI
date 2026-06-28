@@ -40,6 +40,7 @@ class DownloadOptions:
     force_rescan: bool = False
     retry_failed: bool = False
     full_download: bool = False
+    pending_only: bool = False
     max_artworks: int | None = None
     min_artwork_id: str | None = None
     max_artwork_id: str | None = None
@@ -121,6 +122,7 @@ class DownloadService:
             artist=artist,
             artworks=artworks,
             retry_failed=resolved_options.retry_failed,
+            pending_only=resolved_options.pending_only,
         )
         artwork_by_id = {artwork.id: artwork for artwork in artworks}
 
@@ -169,6 +171,7 @@ class DownloadService:
                     not resolved_options.retry_failed
                     and not resolved_options.force_rescan
                     and not resolved_options.full_download
+                    and not resolved_options.pending_only
                     and artist.last_download_id
                     and current_download_id <= int(artist.last_download_id)
                 ):
@@ -286,6 +289,7 @@ class DownloadService:
         artist: Artist,
         artworks: list[Artwork],
         retry_failed: bool,
+        pending_only: bool,
     ) -> list[ArtworkFile]:
         self.artist_repository.upsert(artist)
         self.avatar_cache_service.cache_artist_avatar(artist)
@@ -298,6 +302,8 @@ class DownloadService:
             for file in artwork.files:
                 existing = self._existing_file(file)
                 if retry_failed and (existing is None or existing.status != "failed"):
+                    continue
+                if pending_only and (existing is None or existing.status not in {"pending", "remote_only"}):
                     continue
                 file_id = self.file_repository.upsert(
                     ArtworkFile(

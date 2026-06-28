@@ -12,6 +12,7 @@ class DownloadCreateRequest(BaseModel):
     force_rescan: bool = False
     retry_failed: bool = False
     full_download: bool = False
+    pending_only: bool = False
     max_artworks: int | None = None
     min_artwork_id: str | None = None
     max_artwork_id: str | None = None
@@ -27,6 +28,8 @@ class DownloadCreateRequest(BaseModel):
             raise ValueError("exactly one of user_id or artwork_id must be provided")
         if self.full_download and self.retry_failed:
             raise ValueError("full_download and retry_failed cannot both be enabled")
+        if self.pending_only and (self.full_download or self.retry_failed):
+            raise ValueError("pending_only cannot be combined with full_download or retry_failed")
         if self.max_artworks is not None and self.max_artworks < 1:
             raise ValueError("max_artworks must be at least 1")
         if self.stop_if_artwork_count_above is not None and self.stop_if_artwork_count_above < 1:

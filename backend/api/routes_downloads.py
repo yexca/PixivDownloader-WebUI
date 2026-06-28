@@ -25,6 +25,7 @@ def create_download(
             retry_failed=request.retry_failed,
             options={
                 "full_download": request.full_download,
+                "pending_only": request.pending_only,
                 "max_artworks": request.max_artworks,
                 "min_artwork_id": request.min_artwork_id.strip()
                 if request.min_artwork_id

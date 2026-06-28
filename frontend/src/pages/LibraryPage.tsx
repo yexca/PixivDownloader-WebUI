@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertCircle, AlertTriangle, Check, ExternalLink, Images, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, Download, ExternalLink, Images, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -14,6 +14,7 @@ import {
   type ArtistDetail,
   type ArtistSummary
 } from "@/api/artists";
+import { createDownloadJob, type DownloadCreateRequest } from "@/api/downloads";
 import { listJobs, type Job } from "@/api/jobs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -251,6 +252,7 @@ function ArtistTable({
   const { pushToast } = useToast();
   const [pendingSyncArtistId, setPendingSyncArtistId] = React.useState<string | null>(null);
   const [pendingRetryArtistId, setPendingRetryArtistId] = React.useState<string | null>(null);
+  const [pendingDownloadArtistId, setPendingDownloadArtistId] = React.useState<string | null>(null);
   const sync = useMutation({
     mutationFn: (artistId: string) => syncArtist(artistId),
     onSuccess: (response) => {
@@ -271,6 +273,15 @@ function ArtistTable({
     onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
     onSettled: () => setPendingRetryArtistId(null)
   });
+  const downloadNew = useMutation({
+    mutationFn: (artistId: string) => createArtistDownloadJob(artistId, "new"),
+    onSuccess: (response) => {
+      pushToast({ title: "Download new queued", description: response.job_id, tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (error) => pushToast({ title: "Download failed", description: error.message, tone: "error" }),
+    onSettled: () => setPendingDownloadArtistId(null)
+  });
   return (
     <ScrollableTable>
       <table className="data-table min-w-[760px]">
@@ -290,6 +301,7 @@ function ArtistTable({
             const jobState = artistJobs.get(artist.id);
             const isSyncing = pendingSyncArtistId === artist.id || Boolean(jobState?.sync);
             const isRetrying = pendingRetryArtistId === artist.id || Boolean(jobState?.retry);
+            const isDownloading = pendingDownloadArtistId === artist.id || Boolean(jobState?.download);
             return (
             <tr
               key={artist.id}
@@ -317,8 +329,24 @@ function ArtistTable({
                 <TagPreview artist={artist} />
               </td>
               <td className="table-cell">{formatDate(artist.last_checked_at)}</td>
-              <td className="table-cell sticky-col-right min-w-52 cursor-default" onClick={(event) => event.stopPropagation()}>
+              <td className="table-cell sticky-col-right min-w-60 cursor-default" onClick={(event) => event.stopPropagation()}>
                 <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className={actionIconClass()}
+                    title="Download new works"
+                    aria-label="Download new works"
+                    disabled={isDownloading}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPendingDownloadArtistId(artist.id);
+                      downloadNew.mutate(artist.id);
+                    }}
+                  >
+                    <Download className={isDownloading ? "h-4 w-4 animate-pulse" : "h-4 w-4"} aria-hidden="true" />
+                  </Button>
                   <Button
                     type="button"
                     variant="outline"
@@ -403,6 +431,7 @@ function ArtistTable({
 }
 
 type ArtistDetailTab = "overview" | "details" | "tags";
+type DownloadScope = "new" | "pending" | "all";
 type ArtistRunningJob = {
   type: "sync" | "download" | "retry";
   status: Job["status"];
@@ -455,9 +484,11 @@ function ArtistDetailPanel({
   const { pushToast } = useToast();
   const [syncPending, setSyncPending] = React.useState(false);
   const [retryPending, setRetryPending] = React.useState(false);
+  const [downloadPending, setDownloadPending] = React.useState<DownloadScope | null>(null);
   const [removeDialogOpen, setRemoveDialogOpen] = React.useState(false);
   const isSyncing = syncPending || Boolean(jobState?.sync);
   const isRetrying = retryPending || Boolean(jobState?.retry);
+  const isDownloading = Boolean(downloadPending) || Boolean(jobState?.download);
   const hasActiveJob = Boolean(jobState && Object.keys(jobState).length > 0);
   const sync = useMutation({
     mutationFn: () => syncArtist(artist.id),
@@ -476,6 +507,15 @@ function ArtistDetailPanel({
     },
     onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
     onSettled: () => setRetryPending(false)
+  });
+  const download = useMutation({
+    mutationFn: (scope: DownloadScope) => createArtistDownloadJob(artist.id, scope),
+    onSuccess: (response, scope) => {
+      pushToast({ title: downloadToastTitle(scope), description: response.job_id, tone: "success" });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (error) => pushToast({ title: "Download failed", description: error.message, tone: "error" }),
+    onSettled: () => setDownloadPending(null)
   });
   const remove = useMutation({
     mutationFn: () => deleteArtist(artist.id),
@@ -538,6 +578,47 @@ function ArtistDetailPanel({
               </a>
             </Button>
           </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isDownloading}
+            onClick={() => {
+              setDownloadPending("new");
+              download.mutate("new");
+            }}
+          >
+            <Download className={downloadPending === "new" ? "h-4 w-4 animate-pulse" : "h-4 w-4"} aria-hidden="true" />
+            New
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isDownloading || artist.remote_file_count + artist.pending_file_count === 0}
+            onClick={() => {
+              setDownloadPending("pending");
+              download.mutate("pending");
+            }}
+          >
+            <Download className={downloadPending === "pending" ? "h-4 w-4 animate-pulse" : "h-4 w-4"} aria-hidden="true" />
+            Pending
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isDownloading}
+            onClick={() => {
+              setDownloadPending("all");
+              download.mutate("all");
+            }}
+          >
+            <Download className={downloadPending === "all" ? "h-4 w-4 animate-pulse" : "h-4 w-4"} aria-hidden="true" />
+            All
+          </Button>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button
@@ -944,6 +1025,36 @@ function artistJobTitle(job: ArtistRunningJob): string {
     return "Queued for the download worker.";
   }
   return "Currently running.";
+}
+
+function createArtistDownloadJob(artistId: string, scope: DownloadScope): Promise<{ job_id: string; status: string }> {
+  const request: DownloadCreateRequest = {
+    user_id: artistId,
+    artwork_id: null,
+    mode: "artist",
+    force_rescan: false,
+    retry_failed: false
+  };
+  if (scope === "new") {
+    request.only_new_artworks = true;
+  }
+  if (scope === "pending") {
+    request.pending_only = true;
+  }
+  if (scope === "all") {
+    request.full_download = true;
+  }
+  return createDownloadJob(request);
+}
+
+function downloadToastTitle(scope: DownloadScope): string {
+  if (scope === "pending") {
+    return "Download pending queued";
+  }
+  if (scope === "all") {
+    return "Download all queued";
+  }
+  return "Download new queued";
 }
 
 function TagEditor({ artist }: { artist: ArtistSummary }): JSX.Element {

@@ -9,6 +9,7 @@ export type DownloadCreateRequest = {
   force_rescan: boolean;
   retry_failed: boolean;
   full_download?: boolean;
+  pending_only?: boolean;
   max_artworks?: number | null;
   min_artwork_id?: string | null;
   max_artwork_id?: string | null;
