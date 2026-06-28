@@ -159,7 +159,7 @@ export function LibraryPage(): JSX.Element {
           <Select value={updateState} onChange={(event) => setFilter("updateState", event.target.value)} aria-label="Filter by update state">
             <option value="">Any update state</option>
             <option value="attention">Needs attention</option>
-            <option value="available">Update available</option>
+            <option value="available">New works</option>
             <option value="stale">Check due</option>
           </Select>
           <Select value={accountStatus} onChange={(event) => setFilter("accountStatus", event.target.value)} aria-label="Filter by account status">
@@ -698,9 +698,9 @@ function ArtistOverview({ artist }: { artist: ArtistDetail }): JSX.Element {
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <Metric label="Artworks" value={artist.artwork_count} />
-        <Metric label="Downloaded" value={artist.downloaded_file_count} />
-        <Metric label="Remote" value={artist.remote_file_count + artist.pending_file_count} />
-        <Metric label="Failed" value={artist.failed_file_count} tone={artist.failed_file_count > 0 ? "danger" : "normal"} />
+        <Metric label="Downloaded files" value={artist.downloaded_file_count} />
+        <Metric label="Pending files" value={artist.remote_file_count + artist.pending_file_count} />
+        <Metric label="Failed files" value={artist.failed_file_count} tone={artist.failed_file_count > 0 ? "danger" : "normal"} />
       </div>
       {artist.account_status_reason ? (
         <p className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
@@ -709,9 +709,9 @@ function ArtistOverview({ artist }: { artist: ArtistDetail }): JSX.Element {
       ) : null}
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <Detail label="Last checked" value={formatDate(artist.last_checked_at)} />
-        <Detail label="Remote checked" value={formatDate(artist.remote_latest_checked_at)} />
-        <Detail label="Latest ID" value={artist.latest_downloaded_artwork_id ?? "-"} />
-        <Detail label="Remote latest" value={artist.remote_latest_artwork_id ?? "-"} />
+        <Detail label="Pixiv checked" value={formatDate(artist.remote_latest_checked_at)} />
+        <Detail label="Latest downloaded" value={artist.latest_downloaded_artwork_id ?? "-"} />
+        <Detail label="Pixiv latest" value={artist.remote_latest_artwork_id ?? "-"} />
       </dl>
     </div>
   );
@@ -726,7 +726,7 @@ function ArtistFullDetails({ artist }: { artist: ArtistDetail }): JSX.Element {
         <Detail label="Status" value={artist.account_status} />
         <Detail label="Account checked" value={formatDate(artist.account_status_checked_at)} />
         <Detail label="Latest downloaded" value={artist.latest_downloaded_artwork_id ?? "-"} />
-        <Detail label="Remote latest" value={artist.remote_latest_artwork_id ?? "-"} />
+        <Detail label="Pixiv latest" value={artist.remote_latest_artwork_id ?? "-"} />
         <Detail label="Last checked" value={formatDate(artist.last_checked_at)} />
         <Detail label="Stale threshold" value={`${artist.check_stale_days} days`} />
       </dl>
@@ -827,13 +827,13 @@ function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
 }
 
 function FileSummary({ artist }: { artist: ArtistSummary }): JSX.Element {
-  const remote = artist.remote_file_count + artist.pending_file_count;
+  const pendingFiles = artist.remote_file_count + artist.pending_file_count;
   return (
     <div className="min-w-48 space-y-1 text-sm">
       <div className="font-medium">{artist.downloaded_file_count.toLocaleString()} downloaded</div>
       <div className="flex flex-wrap gap-1">
         <Badge tone="muted">{artist.artwork_count.toLocaleString()} artworks</Badge>
-        <Badge tone="default">{remote.toLocaleString()} remote</Badge>
+        <Badge tone={pendingFiles > 0 ? "default" : "muted"}>{pendingFiles.toLocaleString()} pending</Badge>
         <Badge tone={artist.failed_file_count > 0 ? "danger" : "muted"}>{artist.failed_file_count.toLocaleString()} failed</Badge>
       </div>
     </div>
@@ -865,23 +865,18 @@ function ArtistStatusBadges({ artist, compact = false }: { artist: ArtistSummary
         Unavailable
       </Badge>
     );
-  } else if (artist.account_status === "available") {
-    badges.push(
-      <Badge key="available" tone="success">
-        Available
-      </Badge>
-    );
-  } else {
-    badges.push(
-      <Badge key="unknown" tone="muted">
-        Unknown
-      </Badge>
-    );
   }
   if (artist.has_remote_update) {
     badges.push(
-      <Badge key="update" tone="default">
-        Update
+      <Badge key="new-works" tone="default" title="Pixiv has newer artwork than the latest downloaded item.">
+        New works
+      </Badge>
+    );
+  }
+  if (artist.failed_file_count > 0) {
+    badges.push(
+      <Badge key="failed" tone="danger" title={`${artist.failed_file_count.toLocaleString()} failed file(s).`}>
+        {compact ? `${artist.failed_file_count.toLocaleString()} failed` : "Failed files"}
       </Badge>
     );
   }
@@ -892,8 +887,8 @@ function ArtistStatusBadges({ artist, compact = false }: { artist: ArtistSummary
       </Badge>
     );
   }
-  if (compact && badges.length === 1 && artist.account_status === "available") {
-    return <span className="text-sm text-muted-foreground">Healthy</span>;
+  if (badges.length === 0) {
+    return <span className="text-sm text-muted-foreground">-</span>;
   }
   return <div className={compact ? "flex min-w-44 flex-wrap gap-1.5" : "flex flex-wrap gap-1.5"}>{badges}</div>;
 }

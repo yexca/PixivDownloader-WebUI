@@ -90,9 +90,10 @@ export function ArtistDetailPage(): JSX.Element {
           <DataState title="Could not load artist" description={artist.error.message} variant="error" />
         ) : (
           <>
-            <div className="grid gap-3 sm:grid-cols-3">
+            <div className="grid gap-3 sm:grid-cols-4">
               <Metric label="Artworks" value={artist.data.artwork_count} />
               <Metric label="Downloaded files" value={artist.data.downloaded_file_count} />
+              <Metric label="Pending files" value={artist.data.remote_file_count + artist.data.pending_file_count} />
               <Metric label="Failed files" value={artist.data.failed_file_count} />
             </div>
             <ArtistMetadata artist={artist.data} />
@@ -126,18 +127,32 @@ export function ArtistDetailPage(): JSX.Element {
 }
 
 function ArtistMetadata({ artist }: { artist: ArtistDetail }): JSX.Element {
-  const accountTone = artist.account_status === "unavailable" ? "danger" : artist.account_status === "available" ? "success" : "muted";
+  const hasAttention =
+    artist.account_status === "unavailable" ||
+    artist.has_remote_update ||
+    artist.failed_file_count > 0 ||
+    artist.is_check_stale;
   return (
     <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,420px)]">
       <div className="surface p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="text-sm font-semibold">Account</h2>
-          <Badge tone={accountTone}>
-            {artist.account_status === "unavailable" ? <AlertTriangle className="h-3 w-3" aria-hidden="true" /> : null}
-            {artist.account_status}
-          </Badge>
-          {artist.has_remote_update ? <Badge>Update available</Badge> : null}
+          <h2 className="text-sm font-semibold">Attention</h2>
+          {artist.account_status === "unavailable" ? (
+            <Badge tone="danger" title={artist.account_status_reason ?? "Pixiv profile is unavailable."}>
+              <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+              Unavailable
+            </Badge>
+          ) : null}
+          {artist.has_remote_update ? (
+            <Badge title="Pixiv has newer artwork than the latest downloaded item.">New works</Badge>
+          ) : null}
+          {artist.failed_file_count > 0 ? (
+            <Badge tone="danger" title={`${artist.failed_file_count.toLocaleString()} failed file(s).`}>
+              {artist.failed_file_count.toLocaleString()} failed
+            </Badge>
+          ) : null}
           {artist.is_check_stale ? <Badge tone="warning">Check due</Badge> : null}
+          {!hasAttention ? <span className="text-sm text-muted-foreground">-</span> : null}
         </div>
         {artist.account_status_reason ? (
           <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
@@ -148,9 +163,9 @@ function ArtistMetadata({ artist }: { artist: ArtistDetail }): JSX.Element {
           <Detail label="Pixiv ID" value={artist.id} />
           <Detail label="Account" value={artist.account ?? "-"} />
           <Detail label="Latest downloaded" value={artist.latest_downloaded_artwork_id ?? "-"} />
-          <Detail label="Remote latest" value={artist.remote_latest_artwork_id ?? "-"} />
+          <Detail label="Pixiv latest" value={artist.remote_latest_artwork_id ?? "-"} />
           <Detail label="Last checked" value={formatDate(artist.last_checked_at)} />
-          <Detail label="Remote checked" value={formatDate(artist.remote_latest_checked_at)} />
+          <Detail label="Pixiv checked" value={formatDate(artist.remote_latest_checked_at)} />
           <Detail label="Account checked" value={formatDate(artist.account_status_checked_at)} />
           <Detail label="Stale threshold" value={`${artist.check_stale_days} days`} />
         </dl>
