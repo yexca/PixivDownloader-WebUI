@@ -29,3 +29,11 @@ export function percent(completed: number, total: number): number {
 export function isCancellable(status: string): boolean {
   return status === "inactive" || status === "queued" || status === "running";
 }
+
+export function isRetryable(status: string): boolean {
+  return status === "failed";
+}
+
+export function isRerunnable(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}

@@ -164,6 +164,29 @@ export function JobsPage(): JSX.Element {
   });
   const selectedCount = selectedIds.size;
   const queuedJobIds = jobs.data?.items.filter((job) => job.status === "queued").map((job) => job.id) ?? [];
+  const selectJobId = (jobId: string) => {
+    setSelectedJobId(jobId);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("job", jobId);
+    setSearchParams(nextParams, { replace: true });
+  };
+  const onActionSuccess = (response: JobActionResponse) => {
+    const title = response.action === "rerun" ? "Job queued again" : "Retry queued";
+    pushToast({ title, description: response.job_id, tone: "success" });
+    void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    void queryClient.invalidateQueries({ queryKey: ["job"] });
+    selectJobId(response.job_id);
+  };
+  const retryOne = useMutation({
+    mutationFn: (job: Job) => retryJob(job.id),
+    onSuccess: onActionSuccess,
+    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" })
+  });
+  const rerunOne = useMutation({
+    mutationFn: (job: Job) => rerunJob(job.id),
+    onSuccess: onActionSuccess,
+    onError: (error) => pushToast({ title: "Rerun failed", description: error.message, tone: "error" })
+  });
 
   return (
     <>
@@ -191,12 +214,26 @@ export function JobsPage(): JSX.Element {
               Refresh
             </Button>
             {queueState.data?.paused ? (
-              <Button type="button" variant="outline" onClick={() => resumeQueue.mutate()} disabled={resumeQueue.isPending}>
+              <Button
+                type="button"
+                variant="outline"
+                title="Resume the queue so queued jobs can start again."
+                aria-label="Resume queue so queued jobs can start again"
+                onClick={() => resumeQueue.mutate()}
+                disabled={resumeQueue.isPending}
+              >
                 <Play className="h-4 w-4" aria-hidden="true" />
                 Resume Queue
               </Button>
             ) : (
-              <Button type="button" variant="outline" onClick={() => pauseQueue.mutate()} disabled={pauseQueue.isPending}>
+              <Button
+                type="button"
+                variant="outline"
+                title="Pause the queue. Running jobs continue; new queued jobs will not start."
+                aria-label="Pause queue. Running jobs continue; new queued jobs will not start"
+                onClick={() => pauseQueue.mutate()}
+                disabled={pauseQueue.isPending}
+              >
                 <Pause className="h-4 w-4" aria-hidden="true" />
                 Pause Queue
               </Button>
@@ -265,8 +302,12 @@ export function JobsPage(): JSX.Element {
                 jobs={jobs.data.items}
                 onSelect={selectJob}
                 onCancel={(job) => cancelOne.mutate(job)}
+                onRetry={(job) => retryOne.mutate(job)}
+                onRerun={(job) => rerunOne.mutate(job)}
                 selectedJobId={selectedJobId}
                 selectedIds={selectedIds}
+                busyRetryJobId={retryOne.variables?.id ?? null}
+                busyRerunJobId={rerunOne.variables?.id ?? null}
                 onToggleSelected={toggleSelected}
                 onToggleAllVisible={toggleAllVisible}
               />
@@ -284,12 +325,7 @@ export function JobsPage(): JSX.Element {
           {selectedJobId && selectedJob.data ? (
             <JobDetailPanel
               job={selectedJob.data}
-              onSelectJob={(jobId) => {
-                setSelectedJobId(jobId);
-                const nextParams = new URLSearchParams(searchParams);
-                nextParams.set("job", jobId);
-                setSearchParams(nextParams, { replace: true });
-              }}
+              onSelectJob={selectJobId}
             />
           ) : selectedJob.isLoading ? (
             <DataState title="Loading job detail" variant="loading" />

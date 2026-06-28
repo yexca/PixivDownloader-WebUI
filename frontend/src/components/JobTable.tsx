@@ -1,18 +1,23 @@
 import { Link } from "react-router-dom";
+import { Info, RefreshCw, RotateCcw, XCircle } from "lucide-react";
 
 import type { Job } from "@/api/jobs";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollableTable } from "@/components/ScrollableTable";
-import { formatDate, isCancellable, percent } from "@/lib/utils";
+import { formatDate, isCancellable, isRerunnable, isRetryable, percent } from "@/lib/utils";
 
 type JobTableProps = {
   jobs: Job[];
   onSelect?: (job: Job) => void;
   onCancel?: (job: Job) => void;
+  onRetry?: (job: Job) => void;
+  onRerun?: (job: Job) => void;
   selectedJobId?: string | null;
   selectedIds?: Set<string>;
+  busyRetryJobId?: string | null;
+  busyRerunJobId?: string | null;
   onToggleSelected?: (jobId: string) => void;
   onToggleAllVisible?: () => void;
 };
@@ -21,8 +26,12 @@ export function JobTable({
   jobs,
   onSelect,
   onCancel,
+  onRetry,
+  onRerun,
   selectedJobId,
   selectedIds,
+  busyRetryJobId,
+  busyRerunJobId,
   onToggleSelected,
   onToggleAllVisible
 }: JobTableProps): JSX.Element {
@@ -52,7 +61,7 @@ export function JobTable({
             <th className="px-3 py-2">Status</th>
             <th className="px-3 py-2">Progress</th>
             <th className="px-3 py-2">Created</th>
-            <th className="sticky-col-right px-3 py-2">Action</th>
+            <th className="sticky-col-right px-3 py-2">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -105,31 +114,67 @@ export function JobTable({
                   </div>
                 </td>
                 <td className="table-cell">{formatDate(job.created_at)}</td>
-                <td className="table-cell sticky-col-right min-w-44">
-                  <div className="flex items-center gap-2">
+                <td className="table-cell sticky-col-right min-w-36">
+                  <div className="flex items-center gap-1">
+                    {onRetry && isRetryable(job.status) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        title={job.type === "hydrate_legacy_import" ? "Retry failed artists" : "Retry job"}
+                        aria-label={job.type === "hydrate_legacy_import" ? "Retry failed artists" : "Retry job"}
+                        disabled={busyRetryJobId === job.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onRetry(job);
+                        }}
+                      >
+                        <RotateCcw className={busyRetryJobId === job.id ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                      </Button>
+                    ) : null}
+                    {onRerun && isRerunnable(job.status) ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        title="Rerun job"
+                        aria-label="Rerun job"
+                        disabled={busyRerunJobId === job.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onRerun(job);
+                        }}
+                      >
+                        <RefreshCw className={busyRerunJobId === job.id ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
-                      variant={selected ? "secondary" : "outline"}
-                      size="sm"
+                      variant={selected ? "secondary" : "ghost"}
+                      size="icon"
+                      title="Show job details"
+                      aria-label="Show job details"
                       onClick={(event) => {
                         event.stopPropagation();
                         onSelect?.(job);
                       }}
                     >
-                      Details
+                      <Info className="h-4 w-4" aria-hidden="true" />
                     </Button>
                     {onCancel && isCancellable(job.status) ? (
                       <Button
                         type="button"
                         variant="ghost"
-                        size="sm"
+                        size="icon"
+                        title={job.status === "running" ? "Request job cancellation" : "Cancel job"}
+                        aria-label={job.status === "running" ? "Request job cancellation" : "Cancel job"}
                         disabled={job.cancel_requested}
                         onClick={(event) => {
                           event.stopPropagation();
                           onCancel(job);
                         }}
                       >
-                        Cancel
+                        <XCircle className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     ) : null}
                   </div>
