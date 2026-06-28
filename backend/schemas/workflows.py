@@ -41,6 +41,7 @@ class WorkflowRunItemResponse(BaseModel):
     job_ids: list[str]
     error_message: str | None
     config: dict[str, object]
+    request: dict[str, object]
     created_at: str | None
     finished_at: str | None
 
@@ -88,6 +89,7 @@ def workflow_run_item_response(item: WorkflowRunItem) -> WorkflowRunItemResponse
         job_ids=item.job_ids,
         error_message=item.error_message,
         config=item.config,
+        request=item.request,
         created_at=item.created_at,
         finished_at=item.finished_at,
     )

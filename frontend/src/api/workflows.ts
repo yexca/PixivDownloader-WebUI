@@ -15,10 +15,11 @@ export type WorkflowBatchRunItem = {
   run_id: string;
   draft_id: string;
   title: string;
-  status: "completed" | "failed" | "skipped" | "running";
+  status: "pending" | "completed" | "failed" | "skipped" | "running";
   job_ids: string[];
   error_message: string | null;
   config: Record<string, unknown>;
+  request: Record<string, unknown>;
   created_at: string | null;
   finished_at: string | null;
 };

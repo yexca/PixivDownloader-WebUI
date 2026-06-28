@@ -36,6 +36,7 @@ from backend.core.paths import project_root
 from backend.db.migrate import migrate_database
 from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
 from backend.services.pixiv_oauth import PixivOAuthFlowStore
+from backend.services.workflow_run_service import WorkflowRunService
 from backend.workers.job_queue import JobQueue
 from backend.workers.scheduled_task_runner import ScheduledTaskRunner
 
@@ -54,8 +55,14 @@ def create_app(
         migrate_database(db_path, settings_json_path=settings_json_path)
         queue = app.state.job_queue
         scheduler = app.state.scheduled_task_runner
+        recovered_workflow_runs = recover_interrupted_workflow_runs(
+            db_path,
+            settings_json_path=settings_json_path,
+        )
         if start_queue:
             await queue.start()
+            if recovered_workflow_runs:
+                queue.wake()
             await scheduler.start()
         try:
             yield
@@ -93,6 +100,24 @@ def create_app(
     register_exception_handlers(app)
     register_frontend_routes(app)
     return app
+
+
+def recover_interrupted_workflow_runs(
+    db_path: Path | str | None,
+    *,
+    settings_json_path: Path | str | None,
+):
+    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
+    try:
+        runs = service.recover_interrupted_runs()
+        if runs:
+            logger.warning("recovered %s interrupted workflow run(s)", len(runs))
+        return runs
+    except Exception:
+        logger.exception("workflow run recovery failed")
+        return []
+    finally:
+        service.close()
 
 
 def register_exception_handlers(app: FastAPI) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,6 +21,7 @@ class WorkflowRunItem:
     job_ids: list[str] = field(default_factory=list)
     error_message: str | None = None
     config: dict[str, object] = field(default_factory=dict)
+    request: dict[str, object] = field(default_factory=dict)
     created_at: str | None = None
     finished_at: str | None = None
 
@@ -106,9 +108,9 @@ class WorkflowRunRepository:
                     """
                     INSERT INTO workflow_run_items(
                         run_id, draft_id, title, status, job_ids_json,
-                        error_message, config_json, created_at, finished_at
+                        error_message, config_json, request_json, created_at, finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         item.run_id,
@@ -118,6 +120,7 @@ class WorkflowRunRepository:
                         json.dumps(item.job_ids),
                         item.error_message,
                         json.dumps(item.config),
+                        json.dumps(item.request) if item.request else None,
                         created_at,
                         item.finished_at,
                     ),
@@ -138,6 +141,7 @@ class WorkflowRunRepository:
                         job_ids_json = ?,
                         error_message = ?,
                         config_json = ?,
+                        request_json = ?,
                         finished_at = ?
                     WHERE id = ?
                     """,
@@ -146,6 +150,7 @@ class WorkflowRunRepository:
                         json.dumps(item.job_ids),
                         item.error_message,
                         json.dumps(item.config),
+                        json.dumps(item.request) if item.request else None,
                         item.finished_at,
                         item.id,
                     ),
@@ -179,6 +184,20 @@ class WorkflowRunRepository:
             raise DatabaseError("failed to list workflow runs") from exc
         return [workflow_run_from_row(row, self.list_items(str(row["id"]))) for row in rows]
 
+    def list_runs_by_status(self, status: str) -> list[WorkflowRun]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM workflow_runs
+                WHERE status = ?
+                ORDER BY created_at
+                """,
+                (status,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list workflow runs with status {status}") from exc
+        return [workflow_run_from_row(row, self.list_items(str(row["id"]))) for row in rows]
+
     def count_runs(self) -> int:
         try:
             row = self.conn.execute("SELECT COUNT(*) AS total FROM workflow_runs").fetchone()
@@ -200,16 +219,22 @@ class WorkflowRunRepository:
             raise DatabaseError(f"failed to list workflow run items for {run_id}") from exc
         return [workflow_run_item_from_row(row) for row in rows]
 
-    def last_item_status(self, draft_id: str) -> str | None:
+    def last_item_status(self, draft_id: str, *, exclude_run_id: str | None = None) -> str | None:
+        params: list[object] = [draft_id]
+        excluded = ""
+        if exclude_run_id is not None:
+            excluded = "AND run_id != ?"
+            params.append(exclude_run_id)
         try:
             row = self.conn.execute(
-                """
+                f"""
                 SELECT status FROM workflow_run_items
                 WHERE draft_id = ?
+                  {excluded}
                 ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """,
-                (draft_id,),
+                params,
             ).fetchone()
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to fetch last workflow item for {draft_id}") from exc
@@ -235,6 +260,9 @@ def workflow_run_from_row(row: sqlite3.Row, items: list[WorkflowRunItem]) -> Wor
 
 
 def workflow_run_item_from_row(row: sqlite3.Row) -> WorkflowRunItem:
+    request_json = None
+    with suppress(IndexError):
+        request_json = row["request_json"]
     return WorkflowRunItem(
         id=int(row["id"]),
         run_id=str(row["run_id"]),
@@ -244,6 +272,7 @@ def workflow_run_item_from_row(row: sqlite3.Row) -> WorkflowRunItem:
         job_ids=parse_json_list(row["job_ids_json"]),
         error_message=row["error_message"],
         config=parse_json_dict(row["config_json"]),
+        request=parse_json_dict(request_json),
         created_at=row["created_at"],
         finished_at=row["finished_at"],
     )

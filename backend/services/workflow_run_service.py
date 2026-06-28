@@ -48,31 +48,75 @@ class WorkflowRunService:
             created_at=now,
         )
         self.repository.create_run(run)
+        for request in items:
+            config = scheduled_task_config_from_request(request.config)
+            config_dict = scheduled_task_config_to_dict(config)
+            self.repository.create_item(
+                WorkflowRunItem(
+                    id=None,
+                    run_id=run.id,
+                    draft_id=request.draft_id,
+                    title=request.title,
+                    status="pending",
+                    config=config_dict,
+                    request=workflow_item_request_to_dict(request),
+                    created_at=utc_now(),
+                )
+            )
+        return self.process_run(run.id)
 
+    def process_run(self, run_id: str) -> WorkflowRun:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ValueError(f"workflow run not found: {run_id}")
         completed = 0
         failed = 0
         skipped = 0
         previous_failed: set[str] = set()
 
-        for request in items:
-            config = scheduled_task_config_from_request(request.config)
-            config_dict = scheduled_task_config_to_dict(config)
-            previous_status = self.repository.last_item_status(request.draft_id)
-            item = WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=request.draft_id,
-                title=request.title,
-                status="running",
-                config=config_dict,
-                created_at=utc_now(),
-            )
-            item_id = self.repository.create_item(item)
-            item = replace(item, id=item_id)
+        for item in self.repository.list_items(run.id):
+            if item.status in {"completed", "failed", "skipped"}:
+                completed += 1 if item.status == "completed" else 0
+                failed += 1 if item.status == "failed" else 0
+                skipped += 1 if item.status == "skipped" else 0
+                if item.status == "failed":
+                    previous_failed.add(item.draft_id)
+                continue
+            if item.status == "running" and item.job_ids:
+                completed += 1
+                self.repository.update_item(
+                    replace(
+                        item,
+                        status="completed",
+                        finished_at=item.finished_at or utc_now(),
+                    )
+                )
+                continue
+            request = workflow_item_request_from_dict(item.request)
+            if request is None:
+                failed += 1
+                previous_failed.add(item.draft_id)
+                self.repository.update_item(
+                    replace(
+                        item,
+                        status="failed",
+                        error_message=(
+                            "Workflow item cannot be recovered: request metadata is missing."
+                        ),
+                        finished_at=utc_now(),
+                    )
+                )
+                continue
 
-            if (
-                request.skip_if_last_run_failed
-                and (request.draft_id in previous_failed or previous_status == "failed")
+            self.repository.update_item(replace(item, status="running"))
+            config = scheduled_task_config_from_request(request.config)
+            previous_status = self.repository.last_item_status(
+                request.draft_id,
+                exclude_run_id=run.id,
+            )
+
+            if request.skip_if_last_run_failed and (
+                request.draft_id in previous_failed or previous_status == "failed"
             ):
                 skipped += 1
                 self.repository.update_item(
@@ -129,14 +173,7 @@ class WorkflowRunService:
             finally:
                 task_service.close()
 
-        status = "completed"
-        if failed and completed:
-            status = "partial"
-        elif failed and not completed:
-            status = "failed"
-        elif skipped and not completed:
-            status = "skipped"
-
+        status = workflow_run_status(completed=completed, failed=failed, skipped=skipped)
         run = replace(
             run,
             status=status,
@@ -148,6 +185,12 @@ class WorkflowRunService:
         )
         self.repository.update_run(run)
         return run
+
+    def recover_interrupted_runs(self) -> list[WorkflowRun]:
+        recovered: list[WorkflowRun] = []
+        for run in self.repository.list_runs_by_status("running"):
+            recovered.append(self.process_run(run.id))
+        return recovered
 
     def list_runs(self, *, limit: int = 5, offset: int = 0) -> tuple[list[WorkflowRun], int]:
         return self.repository.list_runs(limit=limit, offset=offset), self.repository.count_runs()
@@ -161,3 +204,36 @@ class WorkflowRunService:
 
 def request_config_to_dict(request: ScheduledTaskConfigRequest) -> dict[str, object]:
     return scheduled_task_config_to_dict(scheduled_task_config_from_request(request))
+
+
+def workflow_item_request_to_dict(request: WorkflowBatchItemRequest) -> dict[str, object]:
+    return {
+        "draft_id": request.draft_id,
+        "title": request.title,
+        "config": request_config_to_dict(request.config),
+        "skip_if_last_run_failed": request.skip_if_last_run_failed,
+        "schedule": request.schedule,
+        "name": request.name,
+        "interval_days": request.interval_days,
+        "enabled": request.enabled,
+        "run_after_startup": request.run_after_startup,
+    }
+
+
+def workflow_item_request_from_dict(data: dict[str, object]) -> WorkflowBatchItemRequest | None:
+    if not data:
+        return None
+    try:
+        return WorkflowBatchItemRequest.model_validate(data)
+    except ValueError:
+        return None
+
+
+def workflow_run_status(*, completed: int, failed: int, skipped: int) -> str:
+    if failed and completed:
+        return "partial"
+    if failed and not completed:
+        return "failed"
+    if skipped and not completed:
+        return "skipped"
+    return "completed"
