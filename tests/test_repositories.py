@@ -185,6 +185,41 @@ def test_job_repository_crud(tmp_path):
     assert events[0].payload == {"file": "a.jpg"}
 
 
+def test_job_repository_requeues_running_jobs(tmp_path):
+    db_path = migrated_db(tmp_path)
+    repository = JobRepository(db_path)
+
+    repository.create(Job(id="running-job", type="download_artist", status="queued"))
+    repository.create(Job(id="queued-job", type="download_artist", status="queued"))
+    running = repository.get_by_id("running-job")
+    assert running is not None
+    repository.update(
+        Job(
+            id=running.id,
+            type=running.type,
+            status="running",
+            total_files=10,
+            completed_files=4,
+            skipped_files=1,
+            failed_files=1,
+            started_at="2026-06-28T00:00:00Z",
+        )
+    )
+
+    jobs = repository.requeue_running()
+
+    recovered = repository.get_by_id("running-job")
+    queued = repository.get_by_id("queued-job")
+    assert [job.id for job in jobs] == ["running-job"]
+    assert recovered.status == "queued"
+    assert recovered.total_files == 0
+    assert recovered.completed_files == 0
+    assert recovered.skipped_files == 0
+    assert recovered.failed_files == 0
+    assert recovered.started_at is None
+    assert queued.status == "queued"
+
+
 def test_settings_repository_crud(tmp_path):
     db_path = migrated_db(tmp_path)
     repository = SettingsRepository(db_path)

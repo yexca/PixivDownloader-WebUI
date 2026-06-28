@@ -296,7 +296,8 @@ def test_pixiv_browser_auth_callback_rejects_bad_token(tmp_path, monkeypatch):
 
 
 def test_import_legacy_database_endpoint(tmp_path):
-    client = make_client(tmp_path)
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
     legacy_db_path = tmp_path / "legacy-pixiv.db"
     create_legacy_database(legacy_db_path)
 
@@ -311,10 +312,22 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert body["imported_artists"] == 2
     assert body["skipped_rows"] == 0
     assert body["total_rows"] == 2
+    assert body["hydration_job_id"]
+    assert queue.wake_count == 1
 
     artist_response = client.get("/api/artists/100058387")
     assert artist_response.status_code == 200
     assert artist_response.json()["latest_downloaded_artwork_id"] == "113381074"
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["hydration_job_id"])
+    finally:
+        repository.close()
+    assert job is not None
+    assert job.type == "hydrate_legacy_import"
+    assert job.options["source"] == "legacy_database"
+    assert job.options["artist_ids"] == ["100058387", "101013492"]
+    assert job.options["legacy_latest_download_id_by_artist"]["100058387"] == "113381074"
 
 
 def test_create_download_job(tmp_path):

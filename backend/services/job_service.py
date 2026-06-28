@@ -70,7 +70,9 @@ class JobService:
             JobEvent(
                 job_id=job.id,
                 level="info",
-                message="Job queued" if status == "queued" else "Job waiting for one-time task capacity",
+                message=(
+                    "Job queued" if status == "queued" else "Job waiting for one-time task capacity"
+                ),
                 payload={
                     "force_rescan": force_rescan,
                     "retry_failed": retry_failed,
@@ -78,6 +80,40 @@ class JobService:
                     "retry_failed_artist": retry_failed_artist,
                     "options": cleaned_options,
                 },
+            )
+        )
+        return self.repository.get_by_id(job.id) or job
+
+    def create_legacy_import_hydration_job(
+        self,
+        *,
+        artist_ids: tuple[str, ...],
+        legacy_latest_download_id_by_artist: dict[str, str | None],
+    ) -> Job | None:
+        if not artist_ids:
+            return None
+        options = {
+            "source": "legacy_database",
+            "artist_ids": list(artist_ids),
+            "legacy_latest_download_id_by_artist": legacy_latest_download_id_by_artist,
+            "activation_scope": "one_time",
+        }
+        status: JobStatus = self._next_one_time_status()
+        job = Job(
+            id=str(uuid4()),
+            type="hydrate_legacy_import",
+            status=status,
+            options=options,
+        )
+        self.repository.create(job)
+        self.repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Legacy import hydration queued"
+                if status == "queued"
+                else "Legacy import hydration waiting for one-time task capacity",
+                payload=options,
             )
         )
         return self.repository.get_by_id(job.id) or job
@@ -185,6 +221,18 @@ class JobService:
             )
             activated.append(self.repository.get_by_id(job.id) or updated)
         return activated
+
+    def requeue_interrupted_running_jobs(self) -> list[Job]:
+        jobs = self.repository.requeue_running()
+        for job in jobs:
+            self.repository.add_event(
+                JobEvent(
+                    job_id=job.id,
+                    level="warning",
+                    message="Job requeued after service restart",
+                )
+            )
+        return jobs
 
     def _next_one_time_status(self) -> JobStatus:
         return "queued" if self._one_time_activation_capacity() > 0 else "inactive"

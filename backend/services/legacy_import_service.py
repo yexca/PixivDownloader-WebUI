@@ -16,6 +16,8 @@ class LegacyDatabaseImportSummary:
     imported_artists: int
     skipped_rows: int
     total_rows: int
+    imported_artist_ids: tuple[str, ...] = ()
+    legacy_latest_download_id_by_artist: dict[str, str | None] | None = None
 
 
 class LegacyDatabaseImportService:
@@ -37,6 +39,8 @@ class LegacyDatabaseImportService:
         repository = ArtistRepository(self.db_path)
         imported = 0
         skipped = 0
+        imported_artist_ids: list[str] = []
+        legacy_latest_download_id_by_artist: dict[str, str | None] = {}
         try:
             for row in rows:
                 artist = legacy_row_to_artist(row)
@@ -44,6 +48,8 @@ class LegacyDatabaseImportService:
                     skipped += 1
                     continue
                 repository.upsert(artist)
+                imported_artist_ids.append(artist.id)
+                legacy_latest_download_id_by_artist[artist.id] = artist.last_download_id
                 imported += 1
         finally:
             repository.close()
@@ -51,6 +57,8 @@ class LegacyDatabaseImportService:
             imported_artists=imported,
             skipped_rows=skipped,
             total_rows=len(rows),
+            imported_artist_ids=tuple(imported_artist_ids),
+            legacy_latest_download_id_by_artist=legacy_latest_download_id_by_artist,
         )
 
     def _read_legacy_rows(self, legacy_db_path: Path) -> list[sqlite3.Row]:

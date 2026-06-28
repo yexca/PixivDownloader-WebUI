@@ -83,6 +83,7 @@ export type LegacyDatabaseImportResponse = {
   imported_artists: number;
   skipped_rows: number;
   total_rows: number;
+  hydration_job_id?: string | null;
   message: string;
 };
 

@@ -15,6 +15,13 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
+from backend.services.legacy_import_hydration_service import (
+    LegacyImportHydrationArtistResult,
+    LegacyImportHydrationRetryableError,
+    LegacyImportHydrationService,
+    LegacyImportHydrationSummary,
+    legacy_hydration_targets_from_options,
+)
 from backend.services.library_sync_service import LibrarySyncService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.random_sleep import RandomSleep
@@ -55,6 +62,8 @@ class DownloadWorker:
                 return self._finish(repository, job, "cancelled", "Job cancelled before start")
 
             job = self._start(repository, job)
+            if job.type == "hydrate_legacy_import":
+                return self._run_legacy_import_hydration_job(repository, job)
             if job.type == "sync_artist":
                 return self._run_sync_job(repository, job)
             service = DownloadService(
@@ -129,6 +138,116 @@ class DownloadWorker:
             )
         finally:
             repository.close()
+
+    def _run_legacy_import_hydration_job(self, repository: JobRepository, job: Job) -> Job:
+        targets = legacy_hydration_targets_from_options(job.options)
+        service = LegacyImportHydrationService(
+            pixiv_client=self.pixiv_client_factory(),
+            artist_repository=ArtistRepository(self.db_path),
+            name_history_repository=ArtistNameHistoryRepository(self.db_path),
+            artwork_repository=ArtworkRepository(self.db_path),
+            file_repository=ArtworkFileRepository(self.db_path),
+        )
+        summary: LegacyImportHydrationSummary | None = None
+        try:
+            repository.add_event(
+                JobEvent(
+                    job_id=job.id,
+                    level="info",
+                    message=f"Hydrating {len(targets)} legacy imported artist(s)",
+                )
+            )
+            summary = service.hydrate(
+                targets,
+                progress_callback=lambda result: self._record_legacy_hydration_progress(
+                    repository,
+                    job.id,
+                    result,
+                ),
+            )
+        except LegacyImportHydrationRetryableError as exc:
+            summary = exc.summary
+            latest = repository.get_by_id(job.id) or job
+            failed = replace(
+                latest,
+                status="failed",
+                total_files=summary.file_count,
+                completed_files=summary.downloaded_file_count,
+                skipped_files=summary.remote_file_count,
+                failed_files=summary.failed_retryable_artists,
+                error_message=str(exc),
+                finished_at=utc_now(),
+            )
+            repository.update(failed)
+            repository.add_event(
+                JobEvent(
+                    job_id=job.id,
+                    level="error",
+                    message=str(exc),
+                    payload=legacy_hydration_summary_payload(summary),
+                )
+            )
+            return repository.get_by_id(job.id) or failed
+        finally:
+            service.close()
+
+        latest = repository.get_by_id(job.id) or job
+        finished = replace(
+            latest,
+            status="completed",
+            total_files=summary.file_count if summary else 0,
+            completed_files=summary.downloaded_file_count if summary else 0,
+            skipped_files=summary.remote_file_count if summary else 0,
+            failed_files=0,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Legacy import hydration completed",
+                payload=legacy_hydration_summary_payload(summary),
+            )
+        )
+        return repository.get_by_id(job.id) or finished
+
+    def _record_legacy_hydration_progress(
+        self,
+        repository: JobRepository,
+        job_id: str,
+        result: LegacyImportHydrationArtistResult,
+    ) -> None:
+        job = repository.get_by_id(job_id)
+        if job is None:
+            return
+        completed_artist_count = job.completed_files + (
+            1 if result.status != "failed_retryable" else 0
+        )
+        failed_artist_count = job.failed_files + (1 if result.status == "failed_retryable" else 0)
+        updated = replace(
+            job,
+            completed_files=completed_artist_count,
+            failed_files=failed_artist_count,
+        )
+        repository.update(updated)
+        level = "error" if result.status == "failed_retryable" else "info"
+        repository.add_event(
+            JobEvent(
+                job_id=job_id,
+                level=level,
+                message=f"Legacy import hydration artist {result.artist_id}: {result.status}",
+                payload={
+                    "artist_id": result.artist_id,
+                    "status": result.status,
+                    "artwork_count": result.artwork_count,
+                    "file_count": result.file_count,
+                    "downloaded_file_count": result.downloaded_file_count,
+                    "remote_file_count": result.remote_file_count,
+                    "reason": result.reason,
+                },
+            )
+        )
 
     def _run_sync_job(self, repository: JobRepository, job: Job) -> Job:
         if not job.input_user_id:
@@ -268,6 +387,24 @@ def user_safe_error_message(exc: Exception) -> str:
     return message.replace("\n", " ")[:500]
 
 
+def legacy_hydration_summary_payload(
+    summary: LegacyImportHydrationSummary | None,
+) -> dict[str, object]:
+    if summary is None:
+        return {}
+    return {
+        "total_artists": summary.total_artists,
+        "completed_artists": summary.completed_artists,
+        "completed_unavailable_artists": summary.completed_unavailable_artists,
+        "skipped_no_legacy_cursor_artists": summary.skipped_no_legacy_cursor_artists,
+        "failed_retryable_artists": summary.failed_retryable_artists,
+        "artwork_count": summary.artwork_count,
+        "file_count": summary.file_count,
+        "downloaded_file_count": summary.downloaded_file_count,
+        "remote_file_count": summary.remote_file_count,
+    }
+
+
 def positive_int_option(value: object) -> int | None:
     if value is None or value == "":
         return None
@@ -329,7 +466,13 @@ def tuple_tag_variant_option(
 def legacy_tag_variant_option(value: object, action: object) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
-    behavior = "retry_failed" if action == "retry_failed_artist" else "skip" if action == "sync_artist" else "download"
+    behavior = (
+        "retry_failed"
+        if action == "retry_failed_artist"
+        else "skip"
+        if action == "sync_artist"
+        else "download"
+    )
     result: list[dict[str, str]] = []
     for item in value:
         if not isinstance(item, dict):

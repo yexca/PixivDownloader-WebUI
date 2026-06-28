@@ -176,6 +176,37 @@ class JobRepository:
             raise DatabaseError("failed to list inactive one-time jobs") from exc
         return [job_from_row(row) for row in rows]
 
+    def requeue_running(self) -> list[Job]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE status = 'running'
+                ORDER BY created_at
+                """
+            ).fetchall()
+            jobs = [job_from_row(row) for row in rows]
+            with self.conn:
+                for job in jobs:
+                    self.conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'queued',
+                            total_files = 0,
+                            completed_files = 0,
+                            skipped_files = 0,
+                            failed_files = 0,
+                            error_message = NULL,
+                            started_at = NULL,
+                            finished_at = NULL
+                        WHERE id = ?
+                        """,
+                        (job.id,),
+                    )
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to requeue running jobs") from exc
+        return [self.get_by_id(job.id) or job for job in jobs]
+
     def find_active(
         self,
         *,

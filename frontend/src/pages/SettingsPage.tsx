@@ -87,6 +87,7 @@ export function SettingsPage(): JSX.Element {
   const [authFlow, setAuthFlow] = React.useState<PixivAuthStartResponse | null>(null);
   const [browserAuthFlow, setBrowserAuthFlow] = React.useState<PixivBrowserAuthStartResponse | null>(null);
   const [authBrowserDialog, setAuthBrowserDialog] = React.useState<AuthBrowserDialog | null>(null);
+  const [legacyImportDialogOpen, setLegacyImportDialogOpen] = React.useState(false);
   const [authCode, setAuthCode] = React.useState("");
   const [tokenStatus, setTokenStatus] = React.useState<TokenStatus>({
     state: "checking",
@@ -276,12 +277,16 @@ export function SettingsPage(): JSX.Element {
   const importLegacyDatabaseMutation = useMutation({
     mutationFn: importLegacyDatabase,
     onSuccess: (response) => {
+      const hydrationMessage = response.hydration_job_id
+        ? ` Legacy hydration job has started: ${response.hydration_job_id}.`
+        : "";
       pushToast({
         title: "Legacy database imported",
-        description: `${response.imported_artists} artists imported, ${response.skipped_rows} rows skipped.`,
+        description: `${response.imported_artists} artists imported, ${response.skipped_rows} rows skipped.${hydrationMessage}`,
         tone: "success"
       });
       void queryClient.invalidateQueries({ queryKey: ["artists"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
     onError: (error) =>
       pushToast({ title: "Legacy database import failed", description: error.message, tone: "error" })
@@ -393,11 +398,17 @@ export function SettingsPage(): JSX.Element {
                 isImporting={importLegacyDatabaseMutation.isPending}
                 legacyDatabaseInputId={legacyDatabaseInputId}
                 onImportLegacyDatabase={(file) => importLegacyDatabaseMutation.mutate(file)}
+                onRequestLegacyImport={() => setLegacyImportDialogOpen(true)}
               />
             ) : null}
           </div>
         )}
       </div>
+      <LegacyImportConfirmDialog
+        open={legacyImportDialogOpen}
+        inputId={legacyDatabaseInputId}
+        onOpenChange={setLegacyImportDialogOpen}
+      />
       <AuthBrowserCommandDialog
         dialog={authBrowserDialog}
         onClose={() => setAuthBrowserDialog(null)}
@@ -790,12 +801,14 @@ function AdvancedSettingsTab({
   importLegacyDatabaseData,
   isImporting,
   legacyDatabaseInputId,
-  onImportLegacyDatabase
+  onImportLegacyDatabase,
+  onRequestLegacyImport
 }: {
   importLegacyDatabaseData?: { imported_artists: number; total_rows: number };
   isImporting: boolean;
   legacyDatabaseInputId: string;
   onImportLegacyDatabase: (file: File) => void;
+  onRequestLegacyImport: () => void;
 }): JSX.Element {
   return (
     <div className="mt-5 divide-y">
@@ -821,7 +834,7 @@ function AdvancedSettingsTab({
               variant="outline"
               title="Import artists and artwork metadata from an old PyQt pixiv.db or SQLite database."
               disabled={isImporting}
-              onClick={() => document.getElementById(legacyDatabaseInputId)?.click()}
+              onClick={onRequestLegacyImport}
             >
               <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
               Import Legacy Database
@@ -835,6 +848,42 @@ function AdvancedSettingsTab({
         </div>
       </SettingsSection>
     </div>
+  );
+}
+
+function LegacyImportConfirmDialog({
+  open,
+  inputId,
+  onOpenChange
+}: {
+  open: boolean;
+  inputId: string;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  return (
+    <Dialog
+      open={open}
+      title="Import legacy database"
+      description="This will start a full legacy hydration job after import. Pixiv metadata will be scanned for imported artists, but files will not be downloaded."
+      onOpenChange={onOpenChange}
+      footer={
+        <>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button
+            type="button"
+            onClick={() => {
+              onOpenChange(false);
+              document.getElementById(inputId)?.click();
+            }}
+          >
+            <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
+            Continue Import
+          </Button>
+        </>
+      }
+    />
   );
 }
 

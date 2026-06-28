@@ -17,6 +17,7 @@ import {
 import { listJobs, type Job } from "@/api/jobs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Tabs } from "@/components/ui/tabs";
@@ -440,6 +441,7 @@ function ArtistDetailPanel({
   const { pushToast } = useToast();
   const [syncPending, setSyncPending] = React.useState(false);
   const [retryPending, setRetryPending] = React.useState(false);
+  const [removeDialogOpen, setRemoveDialogOpen] = React.useState(false);
   const isSyncing = syncPending || Boolean(jobState?.sync);
   const isRetrying = retryPending || Boolean(jobState?.retry);
   const sync = useMutation({
@@ -466,6 +468,7 @@ function ArtistDetailPanel({
       pushToast({ title: "Artist removed", tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["artists"] });
       void queryClient.invalidateQueries({ queryKey: ["local-tags"] });
+      setRemoveDialogOpen(false);
     },
     onError: (error) => pushToast({ title: "Remove failed", description: error.message, tone: "error" })
   });
@@ -475,7 +478,8 @@ function ArtistDetailPanel({
   }, [artist.id]);
 
   return (
-    <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
+    <>
+      <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
       <div className="shrink-0">
         <div className="flex items-start gap-3">
           <ArtistAvatar artist={artist} size="lg" />
@@ -535,11 +539,7 @@ function ArtistDetailPanel({
             title="Remove from library"
             aria-label="Remove from library"
             disabled={remove.isPending}
-            onClick={() => {
-              if (window.confirm(`Remove ${artist.name} from the local library? Local files will not be deleted.`)) {
-                remove.mutate();
-              }
-            }}
+            onClick={() => setRemoveDialogOpen(true)}
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
           </Button>
@@ -560,7 +560,49 @@ function ArtistDetailPanel({
         {activeTab === "details" ? <ArtistFullDetails artist={artist} /> : null}
         {activeTab === "tags" ? <ArtistTagsPanel artist={artist} /> : null}
       </div>
-    </div>
+      </div>
+      <RemoveArtistConfirmDialog
+        artist={artist}
+        open={removeDialogOpen}
+        isRemoving={remove.isPending}
+        onOpenChange={setRemoveDialogOpen}
+        onConfirm={() => remove.mutate()}
+      />
+    </>
+  );
+}
+
+function RemoveArtistConfirmDialog({
+  artist,
+  open,
+  isRemoving,
+  onOpenChange,
+  onConfirm
+}: {
+  artist: ArtistDetail;
+  open: boolean;
+  isRemoving: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  return (
+    <Dialog
+      open={open}
+      title="Remove artist"
+      description={`${artist.name} will be removed from the local library. Local files will not be deleted.`}
+      onOpenChange={onOpenChange}
+      footer={
+        <>
+          <Button type="button" variant="outline" disabled={isRemoving} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" disabled={isRemoving} onClick={onConfirm}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Remove
+          </Button>
+        </>
+      }
+    />
   );
 }
 

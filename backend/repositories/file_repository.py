@@ -83,6 +83,21 @@ class ArtworkFileRepository:
             )
         )
 
+    def upsert_legacy_downloaded(self, file: ArtworkFile) -> int:
+        existing = self._get_by_artwork_page(file.artwork_id, file.page_index)
+        if existing is not None:
+            return self._update_legacy_downloaded(existing.id, file)
+        return self.upsert(
+            ArtworkFile(
+                artwork_id=file.artwork_id,
+                page_index=file.page_index,
+                original_url=file.original_url,
+                file_name=file.file_name,
+                status="downloaded",
+                downloaded_at=utc_now(),
+            )
+        )
+
     def list_by_artwork(self, artwork_id: str) -> list[ArtworkFile]:
         try:
             rows = self.conn.execute(
@@ -227,6 +242,29 @@ class ArtworkFileRepository:
                 )
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to update remote artwork file {file.file_name}") from exc
+        return file_id
+
+    def _update_legacy_downloaded(self, file_id: int, file: ArtworkFile) -> int:
+        now = utc_now()
+        try:
+            with self.conn:
+                self.conn.execute(
+                    """
+                    UPDATE artwork_files
+                    SET original_url = ?,
+                        file_name = ?,
+                        status = 'downloaded',
+                        downloaded_at = COALESCE(downloaded_at, ?),
+                        error_message = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (file.original_url, file.file_name, now, now, file_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(
+                f"failed to mark legacy downloaded artwork file {file.file_name}"
+            ) from exc
         return file_id
 
     def close(self) -> None:
