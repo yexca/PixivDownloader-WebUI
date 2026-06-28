@@ -216,7 +216,7 @@ export function LibraryPage(): JSX.Element {
               </>
             )}
           </section>
-          <aside className="space-y-3 xl:sticky xl:top-6 xl:max-h-[calc(100vh-3rem)] xl:self-start">
+          <aside className="space-y-3 xl:sticky xl:top-20 xl:self-start">
             {selectedArtistId && selectedArtist.data ? (
               <ArtistDetailPanel
                 artist={selectedArtist.data}
@@ -481,7 +481,7 @@ function ArtistDetailPanel({
 
   return (
     <>
-      <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
+      <div className="surface flex flex-col p-4 xl:max-h-[calc(100vh-6.5rem)]">
       <div className="shrink-0">
         <div className="flex items-start gap-3">
           <ArtistAvatar artist={artist} size="lg" />

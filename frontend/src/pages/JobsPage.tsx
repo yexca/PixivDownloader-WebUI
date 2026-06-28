@@ -358,7 +358,7 @@ export function JobsPage(): JSX.Element {
             </>
           )}
         </section>
-        <aside className="space-y-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start">
+        <aside className="space-y-3 xl:sticky xl:top-20 xl:self-start">
           {selectedJobId && selectedJob.data ? (
             <JobDetailPanel
               job={selectedJob.data}
@@ -425,7 +425,7 @@ function JobDetailPanel({
   const activeRerun = activeRelatedJob(job, "rerun");
 
   return (
-    <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
+    <div className="surface flex flex-col p-4 xl:max-h-[calc(100vh-6.5rem)]">
       <div className="shrink-0">
         <div className="flex items-start justify-between gap-3">
           <div>
