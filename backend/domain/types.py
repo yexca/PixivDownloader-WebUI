@@ -16,7 +16,7 @@ JobType = Literal[
     "hydrate_legacy_import",
 ]
 ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
-ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked"]
+ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked", "archived"]
 ScheduledTaskTargetType = Literal[
     "single_artist", "single_artwork", "all_artists", "artists_with_tag", "artists_not_checked"
 ]

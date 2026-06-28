@@ -624,6 +624,28 @@ def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
         service.close()
 
 
+def test_scheduled_task_can_be_archived(tmp_path):
+    client = make_client(tmp_path)
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Archive me",
+            "action": "download_artist",
+            "target_artist_id": "123",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+    task_id = create_response.json()["id"]
+
+    archive_response = client.put(f"/api/scheduled-tasks/{task_id}", json={"status": "archived"})
+
+    assert archive_response.status_code == 200
+    assert archive_response.json()["status"] == "archived"
+
+
 def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")

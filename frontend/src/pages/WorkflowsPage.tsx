@@ -17,7 +17,7 @@ import {
 
 import { createArtist, listLocalTags, type LocalTag } from "@/api/artists";
 import { createDownloadJob } from "@/api/downloads";
-import { listJobs, type Job } from "@/api/jobs";
+import { getJob, listJobs, type Job, type JobDetail } from "@/api/jobs";
 import { getSettings, updateSettings, type SettingsResponse } from "@/api/settings";
 import {
   createScheduledTask,
@@ -223,6 +223,7 @@ export function WorkflowsPage(): JSX.Element {
   const [form, setForm] = React.useState<WorkflowForm>(initialForm);
   const [submitted, setSubmitted] = React.useState(false);
   const [statusTab, setStatusTab] = React.useState<WorkflowStatusTab>("active");
+  const [selectedRun, setSelectedRun] = React.useState<WorkflowBatchRun | null>(null);
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
 
@@ -252,6 +253,12 @@ export function WorkflowsPage(): JSX.Element {
     queryKey: ["workflow-runs", 50],
     queryFn: () => listWorkflowRuns(50),
     refetchInterval: 15000
+  });
+  const selectedRunJobs = useQuery({
+    queryKey: ["workflow-run-jobs", selectedRun?.id],
+    queryFn: () => Promise.all(runJobIds(selectedRun).map((jobId) => getJob(jobId))),
+    enabled: Boolean(selectedRun),
+    refetchInterval: selectedRun?.status === "running" ? 4000 : false
   });
   const localTags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
   const settings = useQuery({ queryKey: ["settings"], queryFn: getSettings });
@@ -375,7 +382,9 @@ export function WorkflowsPage(): JSX.Element {
   const waitingJobs = workflowWaitingJobs(jobs.data?.items ?? []);
   const activeCount = runGroups.active.length + waitingJobs.length + triggerGroups.active.length;
   const failedCount = runGroups.failed.length + triggerGroups.blocked.length;
-  const completedCount = runGroups.completed.length + triggerGroups.inactive.length;
+  const failedRunReasonGroups = groupRunsByFailureReason(runGroups.failed);
+  const failedTriggerReasonGroups = groupTriggersByFailureReason(triggerGroups.blocked);
+  const completedCount = runGroups.completed.length + triggerGroups.inactive.length + triggerGroups.archived.length;
   const submittedCount =
     statusTab === "active" ? activeCount : statusTab === "failed" ? failedCount : completedCount;
 
@@ -526,7 +535,7 @@ export function WorkflowsPage(): JSX.Element {
             <div className="space-y-4">
               <WorkflowGroupSection title="Running Runs" count={runGroups.active.length}>
                 {runGroups.active.map((run) => (
-                  <RunWorkflowCard key={run.id} run={run} />
+                  <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
                 ))}
               </WorkflowGroupSection>
               <WorkflowGroupSection title="Waiting Queue" count={waitingJobs.length}>
@@ -542,26 +551,35 @@ export function WorkflowsPage(): JSX.Element {
             </div>
           ) : statusTab === "failed" ? (
             <div className="space-y-4">
-              <WorkflowGroupSection title="Failed Runs" count={runGroups.failed.length}>
-                {runGroups.failed.map((run) => (
-                  <RunWorkflowCard key={run.id} run={run} />
-                ))}
-              </WorkflowGroupSection>
-              <WorkflowGroupSection title="Blocked Triggers" count={triggerGroups.blocked.length}>
-                {triggerGroups.blocked.map((task) => (
-                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
-                ))}
-              </WorkflowGroupSection>
+              {failedRunReasonGroups.map((group) => (
+                <WorkflowGroupSection key={`runs-${group.reason}`} title={`Failed Runs · ${group.reason}`} count={group.items.length}>
+                  {group.items.map((run) => (
+                    <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
+                  ))}
+                </WorkflowGroupSection>
+              ))}
+              {failedTriggerReasonGroups.map((group) => (
+                <WorkflowGroupSection key={`triggers-${group.reason}`} title={`Blocked Triggers · ${group.reason}`} count={group.items.length}>
+                  {group.items.map((task) => (
+                    <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+                  ))}
+                </WorkflowGroupSection>
+              ))}
             </div>
           ) : (
             <div className="space-y-4">
               <WorkflowGroupSection title="Completed Runs" count={runGroups.completed.length}>
                 {runGroups.completed.map((run) => (
-                  <RunWorkflowCard key={run.id} run={run} />
+                  <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
                 ))}
               </WorkflowGroupSection>
               <WorkflowGroupSection title="Inactive Triggers" count={triggerGroups.inactive.length}>
                 {triggerGroups.inactive.map((task) => (
+                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+                ))}
+              </WorkflowGroupSection>
+              <WorkflowGroupSection title="Archived Triggers" count={triggerGroups.archived.length}>
+                {triggerGroups.archived.map((task) => (
                   <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
                 ))}
               </WorkflowGroupSection>
@@ -636,6 +654,17 @@ export function WorkflowsPage(): JSX.Element {
           </div>
         </form>
       </Dialog>
+      <RunDetailDialog
+        run={selectedRun}
+        jobs={selectedRunJobs.data ?? []}
+        loading={selectedRunJobs.isLoading}
+        error={selectedRunJobs.error?.message}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedRun(null);
+          }
+        }}
+      />
     </>
   );
 }
@@ -1123,7 +1152,7 @@ function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Workf
   );
 }
 
-function RunWorkflowCard({ run }: { run: WorkflowBatchRun }): JSX.Element {
+function RunWorkflowCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect: () => void }): JSX.Element {
   return (
     <article className="surface p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -1143,6 +1172,9 @@ function RunWorkflowCard({ run }: { run: WorkflowBatchRun }): JSX.Element {
         <div className="text-left text-sm text-muted-foreground sm:text-right">
           <div>{formatDate(run.created_at)}</div>
           <div className="mt-1">Concurrency {run.concurrency}</div>
+          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={onInspect}>
+            Inspect
+          </Button>
         </div>
       </div>
       <div className="mt-3 space-y-2">
@@ -1216,6 +1248,122 @@ function WaitingJobCard({ job }: { job: Job }): JSX.Element {
           <div>{formatDate(job.created_at)}</div>
           <div className="mt-1">{job.completed_files}/{job.total_files || 0} files</div>
         </div>
+      </div>
+    </article>
+  );
+}
+
+function RunDetailDialog({
+  run,
+  jobs,
+  loading,
+  error,
+  onOpenChange
+}: {
+  run: WorkflowBatchRun | null;
+  jobs: JobDetail[];
+  loading: boolean;
+  error?: string;
+  onOpenChange: (open: boolean) => void;
+}): JSX.Element {
+  return (
+    <Dialog
+      open={Boolean(run)}
+      title={run ? runTitle(run) : "Run detail"}
+      description={run ? `${sourceLabel(run.source)} · ${run.status} · ${formatDate(run.created_at)}` : undefined}
+      className="flex h-[88vh] max-w-5xl flex-col overflow-hidden"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto pr-1"
+      onOpenChange={onOpenChange}
+    >
+      {!run ? null : (
+        <div className="space-y-4">
+          <dl className="grid gap-3 text-sm sm:grid-cols-4">
+            <Detail label="Source" value={sourceLabel(run.source)} />
+            <Detail label="Schedule" value={run.schedule_id ? String(run.schedule_id) : "-"} />
+            <Detail label="Created" value={formatDate(run.created_at)} />
+            <Detail label="Finished" value={formatDate(run.finished_at)} />
+          </dl>
+          <section className="rounded-md border bg-muted/20 p-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <WorkflowRunStatusPill status={run.status} />
+              <Badge tone="muted">{run.completed}/{run.total} completed</Badge>
+              <Badge tone={run.failed ? "danger" : "muted"}>{run.failed} failed</Badge>
+              <Badge tone={run.skipped ? "warning" : "muted"}>{run.skipped} skipped</Badge>
+            </div>
+          </section>
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">Items</h3>
+            {run.items.map((item) => (
+              <div key={item.id ?? item.draft_id} className="rounded-md border bg-card p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">{item.title}</span>
+                  <Badge tone={workflowItemTone(item.status)}>{item.status}</Badge>
+                </div>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+                  <Detail label="Draft" value={item.draft_id} />
+                  <Detail label="Jobs" value={item.job_ids.length ? item.job_ids.join(", ") : "-"} />
+                  <Detail label="Finished" value={formatDate(item.finished_at)} />
+                </dl>
+                {item.error_message ? (
+                  <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+                    {item.error_message}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </section>
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold">Jobs</h3>
+            {loading ? (
+              <DataState title="Loading jobs" variant="loading" />
+            ) : error ? (
+              <DataState title="Could not load jobs" description={error} variant="error" />
+            ) : jobs.length === 0 ? (
+              <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No jobs were created.</p>
+            ) : (
+              jobs.map((job) => <RunJobDetail key={job.id} job={job} />)
+            )}
+          </section>
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+function RunJobDetail({ job }: { job: JobDetail }): JSX.Element {
+  return (
+    <article className="rounded-md border bg-card p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="break-words text-sm font-semibold">{jobLabel(job)}</h4>
+            <Badge tone={jobStatusTone(job.status)}>{job.status}</Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
+        </div>
+        <p className="text-sm text-muted-foreground">{job.completed_files}/{job.total_files || 0} files</p>
+      </div>
+      {job.error_message ? (
+        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          {job.error_message}
+        </p>
+      ) : null}
+      <div className="mt-3 space-y-2">
+        {job.events.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No events recorded.</p>
+        ) : (
+          job.events.slice(-8).map((event) => (
+            <div key={event.id ?? `${event.created_at}-${event.message}`} className="rounded-md border bg-muted/20 p-2 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Badge tone={event.level === "error" ? "danger" : event.level === "warning" ? "warning" : "muted"}>
+                  {event.level}
+                </Badge>
+                <span className="text-muted-foreground">{formatDate(event.created_at)}</span>
+              </div>
+              <p className="mt-1 break-words">{event.message}</p>
+            </div>
+          ))
+        )}
       </div>
     </article>
   );
@@ -1327,8 +1475,16 @@ function ScheduleWorkflowCard({
   });
   const statusMutation = useMutation({
     mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
-    onSuccess: () => {
-      pushToast({ title: task.status === "active" ? "Trigger paused" : "Trigger activation requested", tone: "success" });
+    onSuccess: (_response, status) => {
+      pushToast({
+        title:
+          status === "archived"
+            ? "Trigger archived"
+            : status === "active"
+              ? "Trigger activation requested"
+              : "Trigger paused",
+        tone: "success"
+      });
       invalidate();
     },
     onError: (error) => pushToast({ title: "Trigger could not be updated", description: error.message, tone: "error" })
@@ -1370,6 +1526,11 @@ function ScheduleWorkflowCard({
             <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("active")}>
               <Play className="h-4 w-4" aria-hidden="true" />
               Activate
+            </Button>
+          )}
+          {task.status === "archived" ? null : (
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("archived")}>
+              Archive
             </Button>
           )}
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => deleteMutation.mutate()}>
@@ -1807,16 +1968,72 @@ function workflowTriggerGroups(tasks: ScheduledTask[]): {
   active: ScheduledTask[];
   blocked: ScheduledTask[];
   inactive: ScheduledTask[];
+  archived: ScheduledTask[];
 } {
   return {
     active: tasks.filter((task) => task.status === "active"),
     blocked: tasks.filter((task) => task.status === "blocked"),
-    inactive: tasks.filter((task) => task.status === "paused" || task.status === "inactive")
+    inactive: tasks.filter((task) => task.status === "paused" || task.status === "inactive"),
+    archived: tasks.filter((task) => task.status === "archived")
   };
 }
 
 function workflowWaitingJobs(jobs: Job[]): Job[] {
   return jobs.filter((job) => job.options.activation_scope === "one_time" && job.status === "inactive");
+}
+
+function runJobIds(run: WorkflowBatchRun | null): string[] {
+  if (!run) {
+    return [];
+  }
+  return Array.from(new Set(run.items.flatMap((item) => item.job_ids)));
+}
+
+function groupRunsByFailureReason(runs: WorkflowBatchRun[]): Array<{ reason: string; items: WorkflowBatchRun[] }> {
+  return groupedByReason(runs, (run) => classifyFailureReason(runFailureText(run)));
+}
+
+function groupTriggersByFailureReason(tasks: ScheduledTask[]): Array<{ reason: string; items: ScheduledTask[] }> {
+  return groupedByReason(tasks, (task) => classifyFailureReason(task.last_error_message || task.last_error_code || ""));
+}
+
+function groupedByReason<T>(items: T[], reasonFor: (item: T) => string): Array<{ reason: string; items: T[] }> {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    const reason = reasonFor(item);
+    groups.set(reason, [...(groups.get(reason) ?? []), item]);
+  }
+  return Array.from(groups.entries()).map(([reason, groupedItems]) => ({ reason, items: groupedItems }));
+}
+
+function runFailureText(run: WorkflowBatchRun): string {
+  return run.items
+    .map((item) => item.error_message || item.status)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function classifyFailureReason(text: string): string {
+  const value = text.toLowerCase();
+  if (value.includes("auth") || value.includes("token") || value.includes("login") || value.includes("permission")) {
+    return "auth";
+  }
+  if (value.includes("disk") || value.includes("space") || value.includes("storage")) {
+    return "disk";
+  }
+  if (value.includes("network") || value.includes("timeout") || value.includes("connection") || value.includes("http")) {
+    return "network";
+  }
+  if (value.includes("cancel")) {
+    return "cancelled";
+  }
+  if (value.includes("target") || value.includes("artist") || value.includes("artwork") || value.includes("unavailable")) {
+    return "target";
+  }
+  if (value.includes("skip") || value.includes("rule")) {
+    return "rule";
+  }
+  return "unknown";
 }
 
 function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>) {
@@ -2084,6 +2301,19 @@ function workflowItemTone(status: WorkflowBatchRunItem["status"]): "default" | "
     return "danger";
   }
   if (status === "running" || status === "pending") {
+    return "default";
+  }
+  return "muted";
+}
+
+function jobStatusTone(status: Job["status"]): "default" | "success" | "danger" | "warning" | "muted" {
+  if (status === "completed") {
+    return "success";
+  }
+  if (status === "failed" || status === "cancelled") {
+    return "danger";
+  }
+  if (status === "running" || status === "queued") {
     return "default";
   }
   return "muted";

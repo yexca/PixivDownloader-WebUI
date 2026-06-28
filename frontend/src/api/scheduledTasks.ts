@@ -1,7 +1,7 @@
 import { apiRequest } from "./client";
 
 export type ScheduledTaskAction = "sync_artist" | "download_artist" | "retry_failed_artist";
-export type ScheduledTaskStatus = "active" | "inactive" | "paused" | "blocked";
+export type ScheduledTaskStatus = "active" | "inactive" | "paused" | "blocked" | "archived";
 export type ScheduledTaskTargetType = "single_artist" | "single_artwork" | "all_artists" | "artists_with_tag" | "artists_not_checked";
 export type ScheduledTaskFilterType = "last_checked_before_days" | "has_failed_files";
 export type ScheduledTaskArtistSelection = "oldest_checked_first" | "newest_checked_first" | "random";
