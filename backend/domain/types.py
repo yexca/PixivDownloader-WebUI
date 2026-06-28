@@ -23,3 +23,4 @@ ScheduledTaskTargetType = Literal[
 ScheduledTaskFilterType = Literal["last_checked_before_days", "has_failed_files"]
 ScheduledTaskArtistSelection = Literal["oldest_checked_first", "newest_checked_first", "random"]
 ArtistAccountStatus = Literal["unknown", "available", "unavailable"]
+FailureReason = Literal["auth", "disk", "network", "cancelled", "target", "rule", "unknown"]

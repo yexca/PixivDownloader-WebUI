@@ -10,6 +10,7 @@ import {
   Play,
   Plus,
   RefreshCw,
+  Search,
   Trash2,
   Wand2,
   XCircle
@@ -50,6 +51,7 @@ import { useToast } from "@/components/ToastProvider";
 import { cn, formatDate } from "@/lib/utils";
 
 type WorkflowStatusTab = "active" | "failed" | "completed";
+type ArchiveFilter = "normal" | "include" | "archived";
 type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "rule";
 type WorkflowTarget =
   | "single_artist"
@@ -178,7 +180,7 @@ const workflowStatusItems: Array<{ value: WorkflowStatusTab; label: string }> = 
 ];
 
 const moduleLabels: Record<ModuleKey, string> = {
-  schedule: "Trigger",
+  schedule: "Schedule",
   target: "Target",
   filters: "Filters",
   actions: "Actions",
@@ -223,6 +225,8 @@ export function WorkflowsPage(): JSX.Element {
   const [form, setForm] = React.useState<WorkflowForm>(initialForm);
   const [submitted, setSubmitted] = React.useState(false);
   const [statusTab, setStatusTab] = React.useState<WorkflowStatusTab>("active");
+  const [submittedSearch, setSubmittedSearch] = React.useState("");
+  const [archiveFilter, setArchiveFilter] = React.useState<ArchiveFilter>("normal");
   const [selectedRun, setSelectedRun] = React.useState<WorkflowBatchRun | null>(null);
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
@@ -285,7 +289,7 @@ export function WorkflowsPage(): JSX.Element {
       setSelectedDraftId((current) => (current === draft.id ? null : current));
       pushToast({
         title: "Workflow submitted",
-        description: response.jobIds.length ? `${response.jobIds.length} job(s)` : "Trigger created",
+        description: response.jobIds.length ? `${response.jobIds.length} job(s)` : "Schedule created",
         tone: "success"
       });
       invalidateRuntimeQueries(queryClient);
@@ -375,16 +379,26 @@ export function WorkflowsPage(): JSX.Element {
     closeBuilder();
   }
 
-  const allRuns = workflowRuns.data?.items ?? [];
-  const allSchedules = schedules.data?.items ?? [];
-  const runGroups = workflowRunGroups(allRuns);
-  const triggerGroups = workflowTriggerGroups(allSchedules);
-  const waitingJobs = workflowWaitingJobs(jobs.data?.items ?? []);
-  const activeCount = runGroups.active.length + waitingJobs.length + triggerGroups.active.length;
-  const failedCount = runGroups.failed.length + triggerGroups.blocked.length;
+  const rawRuns = workflowRuns.data?.items ?? [];
+  const rawSchedules = schedules.data?.items ?? [];
+  const rawWaitingJobs = workflowWaitingJobs(jobs.data?.items ?? []);
+  const allRuns = filterWorkflowRuns(rawRuns, submittedSearch);
+  const allSchedules = filterSchedules(rawSchedules, submittedSearch);
+  const waitingJobs = archiveFilter === "archived" ? [] : filterWaitingJobs(rawWaitingJobs, submittedSearch);
+  const runGroups = archiveFilter === "archived" ? emptyRunGroups() : workflowRunGroups(allRuns);
+  const scheduleGroups = workflowScheduleGroups(allSchedules);
+  const visibleScheduleGroups = {
+    active: archiveFilter === "archived" ? [] : scheduleGroups.active,
+    blocked: archiveFilter === "archived" ? [] : scheduleGroups.blocked,
+    inactive: archiveFilter === "archived" ? [] : scheduleGroups.inactive,
+    archived: archiveFilter === "normal" ? [] : scheduleGroups.archived
+  };
+  const activeCount = runGroups.active.length + waitingJobs.length + visibleScheduleGroups.active.length;
+  const failedCount = runGroups.failed.length + visibleScheduleGroups.blocked.length;
   const failedRunReasonGroups = groupRunsByFailureReason(runGroups.failed);
-  const failedTriggerReasonGroups = groupTriggersByFailureReason(triggerGroups.blocked);
-  const completedCount = runGroups.completed.length + triggerGroups.inactive.length + triggerGroups.archived.length;
+  const failedScheduleReasonGroups = groupSchedulesByFailureReason(visibleScheduleGroups.blocked);
+  const completedCount =
+    runGroups.completed.length + visibleScheduleGroups.inactive.length + visibleScheduleGroups.archived.length;
   const submittedCount =
     statusTab === "active" ? activeCount : statusTab === "failed" ? failedCount : completedCount;
 
@@ -392,7 +406,7 @@ export function WorkflowsPage(): JSX.Element {
     <>
       <PageHeader
         title="Workflows"
-        description="Stage workflow drafts, then submit them into runs or triggers."
+        description="Stage workflow drafts, then submit them into runs or schedules."
         actions={
           <>
             <Button
@@ -504,7 +518,7 @@ export function WorkflowsPage(): JSX.Element {
               <div>
                 <h2 className="text-sm font-semibold">Submitted</h2>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Runs are execution records. Triggers create future runs automatically.
+                  Runs are execution records. Schedules create future runs automatically.
                 </p>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center xl:justify-end">
@@ -521,12 +535,18 @@ export function WorkflowsPage(): JSX.Element {
               </div>
             </div>
           </div>
+          <SubmittedToolbar
+            search={submittedSearch}
+            archiveFilter={archiveFilter}
+            onSearchChange={setSubmittedSearch}
+            onArchiveFilterChange={setArchiveFilter}
+          />
           {jobs.isError ? (
             <DataState title="Could not load jobs" description={jobs.error.message} variant="error" />
           ) : workflowRuns.isError ? (
             <DataState title="Could not load workflow runs" description={workflowRuns.error.message} variant="error" />
           ) : schedules.isError ? (
-            <DataState title="Could not load triggers" description={schedules.error.message} variant="error" />
+            <DataState title="Could not load schedules" description={schedules.error.message} variant="error" />
           ) : jobs.isLoading || workflowRuns.isLoading || schedules.isLoading ? (
             <DataState title="Loading submitted workflows" variant="loading" />
           ) : submittedCount === 0 ? (
@@ -543,9 +563,9 @@ export function WorkflowsPage(): JSX.Element {
                   <WaitingJobCard key={job.id} job={job} />
                 ))}
               </WorkflowGroupSection>
-              <WorkflowGroupSection title="Active Triggers" count={triggerGroups.active.length}>
-                {triggerGroups.active.map((task) => (
-                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+              <WorkflowGroupSection title="Active Schedules" count={visibleScheduleGroups.active.length}>
+                {visibleScheduleGroups.active.map((task) => (
+                  <ScheduleWorkflowCard key={`schedule-${task.id}`} task={task} lastRun={latestScheduleRun(task, rawRuns)} />
                 ))}
               </WorkflowGroupSection>
             </div>
@@ -558,31 +578,37 @@ export function WorkflowsPage(): JSX.Element {
                   ))}
                 </WorkflowGroupSection>
               ))}
-              {failedTriggerReasonGroups.map((group) => (
-                <WorkflowGroupSection key={`triggers-${group.reason}`} title={`Blocked Triggers · ${group.reason}`} count={group.items.length}>
+              {failedScheduleReasonGroups.map((group) => (
+                <WorkflowGroupSection key={`schedules-${group.reason}`} title={`Blocked Schedules · ${group.reason}`} count={group.items.length}>
                   {group.items.map((task) => (
-                    <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
+                    <ScheduleWorkflowCard key={`schedule-${task.id}`} task={task} lastRun={latestScheduleRun(task, rawRuns)} />
                   ))}
                 </WorkflowGroupSection>
               ))}
             </div>
           ) : (
             <div className="space-y-4">
-              <WorkflowGroupSection title="Completed Runs" count={runGroups.completed.length}>
-                {runGroups.completed.map((run) => (
-                  <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
-                ))}
-              </WorkflowGroupSection>
-              <WorkflowGroupSection title="Inactive Triggers" count={triggerGroups.inactive.length}>
-                {triggerGroups.inactive.map((task) => (
-                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
-                ))}
-              </WorkflowGroupSection>
-              <WorkflowGroupSection title="Archived Triggers" count={triggerGroups.archived.length}>
-                {triggerGroups.archived.map((task) => (
-                  <ScheduleWorkflowCard key={`trigger-${task.id}`} task={task} lastRun={latestScheduleRun(task, allRuns)} />
-                ))}
-              </WorkflowGroupSection>
+              {archiveFilter !== "archived" ? (
+                <>
+                  <WorkflowGroupSection title="Completed Runs" count={runGroups.completed.length}>
+                    {runGroups.completed.map((run) => (
+                      <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
+                    ))}
+                  </WorkflowGroupSection>
+                  <WorkflowGroupSection title="Inactive Schedules" count={visibleScheduleGroups.inactive.length}>
+                    {visibleScheduleGroups.inactive.map((task) => (
+                      <ScheduleWorkflowCard key={`schedule-${task.id}`} task={task} lastRun={latestScheduleRun(task, rawRuns)} />
+                    ))}
+                  </WorkflowGroupSection>
+                </>
+              ) : null}
+              {archiveFilter !== "normal" ? (
+                <WorkflowGroupSection title="Archived Schedules" count={visibleScheduleGroups.archived.length}>
+                  {visibleScheduleGroups.archived.map((task) => (
+                    <ScheduleWorkflowCard key={`schedule-${task.id}`} task={task} lastRun={latestScheduleRun(task, rawRuns)} />
+                  ))}
+                </WorkflowGroupSection>
+              ) : null}
             </div>
           )}
         </section>
@@ -647,7 +673,7 @@ export function WorkflowsPage(): JSX.Element {
               </div>
               {form.modules.schedule && form.download_scope === "full" ? (
                 <p className="rounded-md border border-amber-500/30 bg-amber-50 p-3 text-sm text-amber-800">
-                  Full download triggers re-check already tracked works every run.
+                  Full download schedules re-check already tracked works every run.
                 </p>
               ) : null}
             </aside>
@@ -1162,7 +1188,7 @@ function RunWorkflowCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect:
             <WorkflowRunStatusPill status={run.status} />
             <Badge tone="muted">run</Badge>
             {run.source === "schedule" || run.source === "manual_schedule" ? (
-              <Badge tone="default">{run.source === "manual_schedule" ? "manual trigger" : "trigger"}</Badge>
+              <Badge tone="default">{run.source === "manual_schedule" ? "manual schedule" : "schedule"}</Badge>
             ) : null}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -1199,6 +1225,47 @@ function RunWorkflowCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect:
         ))}
       </div>
     </article>
+  );
+}
+
+function SubmittedToolbar({
+  search,
+  archiveFilter,
+  onSearchChange,
+  onArchiveFilterChange
+}: {
+  search: string;
+  archiveFilter: ArchiveFilter;
+  onSearchChange: (value: string) => void;
+  onArchiveFilterChange: (value: ArchiveFilter) => void;
+}): JSX.Element {
+  return (
+    <form
+      className="surface flex flex-col gap-3 p-3 sm:flex-row"
+      onSubmit={(event) => {
+        event.preventDefault();
+      }}
+    >
+      <div className="relative flex-1">
+        <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+        <Input
+          className="pl-9"
+          value={search}
+          placeholder="Search submitted workflows"
+          aria-label="Search submitted workflows"
+          onChange={(event) => onSearchChange(event.target.value)}
+        />
+      </div>
+      <Select
+        value={archiveFilter}
+        aria-label="Archived filter"
+        onChange={(event) => onArchiveFilterChange(event.target.value as ArchiveFilter)}
+      >
+        <option value="normal">Archived hidden</option>
+        <option value="include">Include archived</option>
+        <option value="archived">Archived only</option>
+      </Select>
+    </form>
   );
 }
 
@@ -1331,6 +1398,7 @@ function RunDetailDialog({
 }
 
 function RunJobDetail({ job }: { job: JobDetail }): JSX.Element {
+  const latestEvent = job.events.at(-1);
   return (
     <article className="rounded-md border bg-card p-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
@@ -1348,21 +1416,19 @@ function RunJobDetail({ job }: { job: JobDetail }): JSX.Element {
           {job.error_message}
         </p>
       ) : null}
-      <div className="mt-3 space-y-2">
-        {job.events.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No events recorded.</p>
-        ) : (
-          job.events.slice(-8).map((event) => (
-            <div key={event.id ?? `${event.created_at}-${event.message}`} className="rounded-md border bg-muted/20 p-2 text-xs">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <Badge tone={event.level === "error" ? "danger" : event.level === "warning" ? "warning" : "muted"}>
-                  {event.level}
-                </Badge>
-                <span className="text-muted-foreground">{formatDate(event.created_at)}</span>
-              </div>
-              <p className="mt-1 break-words">{event.message}</p>
+      <div className="mt-3">
+        {latestEvent ? (
+          <div className="rounded-md border bg-muted/20 p-2 text-xs">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Badge tone={latestEvent.level === "error" ? "danger" : latestEvent.level === "warning" ? "warning" : "muted"}>
+                {latestEvent.level}
+              </Badge>
+              <span className="text-muted-foreground">{formatDate(latestEvent.created_at)}</span>
             </div>
-          ))
+            <p className="mt-1 break-words">{latestEvent.message}</p>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No events recorded.</p>
         )}
       </div>
     </article>
@@ -1394,7 +1460,7 @@ function DraftQueueItem({
         <div className="flex items-center justify-between gap-2">
           <h3 className="truncate text-sm font-semibold">{draftTitle(draft.form)}</h3>
           <Badge tone={draft.form.modules.schedule ? "default" : "muted"}>
-            {draft.form.modules.schedule ? "trigger" : "one-off"}
+            {draft.form.modules.schedule ? "schedule" : "one-off"}
           </Badge>
         </div>
         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{previewText(draft.form)}</p>
@@ -1462,16 +1528,16 @@ function ScheduleWorkflowCard({
     onSuccess: (response) => {
       pushToast({
         title: response.workflow_run_id
-          ? "Trigger run submitted"
+          ? "Schedule run submitted"
           : response.skipped
-            ? "Trigger skipped"
-            : "Trigger checked",
+            ? "Schedule skipped"
+            : "Schedule checked",
         description: response.workflow_run_id ?? (response.job_ids.length ? response.job_ids.join(", ") : undefined),
         tone: response.skipped ? "info" : "success"
       });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Trigger could not run", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Schedule could not run", description: error.message, tone: "error" })
   });
   const statusMutation = useMutation({
     mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
@@ -1479,23 +1545,23 @@ function ScheduleWorkflowCard({
       pushToast({
         title:
           status === "archived"
-            ? "Trigger archived"
+            ? "Schedule archived"
             : status === "active"
-              ? "Trigger activation requested"
-              : "Trigger paused",
+              ? "Schedule activation requested"
+              : "Schedule paused",
         tone: "success"
       });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Trigger could not be updated", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Schedule could not be updated", description: error.message, tone: "error" })
   });
   const deleteMutation = useMutation({
     mutationFn: () => deleteScheduledTask(task.id),
     onSuccess: () => {
-      pushToast({ title: "Trigger deleted", tone: "success" });
+      pushToast({ title: "Schedule deleted", tone: "success" });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Trigger could not be deleted", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Schedule could not be deleted", description: error.message, tone: "error" })
   });
   const busy = runMutation.isPending || statusMutation.isPending || deleteMutation.isPending;
 
@@ -1508,7 +1574,7 @@ function ScheduleWorkflowCard({
             <Badge tone={task.status === "active" ? "success" : task.status === "blocked" ? "danger" : "muted"}>
               {task.status}
             </Badge>
-            <Badge tone="default">trigger</Badge>
+            <Badge tone="default">schedule</Badge>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{scheduleSummary(task)}</p>
         </div>
@@ -1964,7 +2030,15 @@ function workflowRunGroups(runs: WorkflowBatchRun[]): {
   };
 }
 
-function workflowTriggerGroups(tasks: ScheduledTask[]): {
+function emptyRunGroups(): {
+  active: WorkflowBatchRun[];
+  failed: WorkflowBatchRun[];
+  completed: WorkflowBatchRun[];
+} {
+  return { active: [], failed: [], completed: [] };
+}
+
+function workflowScheduleGroups(tasks: ScheduledTask[]): {
   active: ScheduledTask[];
   blocked: ScheduledTask[];
   inactive: ScheduledTask[];
@@ -1982,6 +2056,75 @@ function workflowWaitingJobs(jobs: Job[]): Job[] {
   return jobs.filter((job) => job.options.activation_scope === "one_time" && job.status === "inactive");
 }
 
+function filterWorkflowRuns(runs: WorkflowBatchRun[], search: string): WorkflowBatchRun[] {
+  const query = normalizeSearch(search);
+  if (!query) {
+    return runs;
+  }
+  return runs.filter((run) =>
+    searchableText([
+      run.id,
+      run.status,
+      run.source,
+      run.failure_reason,
+      run.items.flatMap((item) => [
+        item.title,
+        item.draft_id,
+        item.status,
+        item.failure_reason,
+        item.error_message,
+        item.job_ids.join(" ")
+      ]).join(" ")
+    ]).includes(query)
+  );
+}
+
+function filterSchedules(tasks: ScheduledTask[], search: string): ScheduledTask[] {
+  const query = normalizeSearch(search);
+  if (!query) {
+    return tasks;
+  }
+  return tasks.filter((task) =>
+    searchableText([
+      task.name,
+      task.status,
+      task.action,
+      task.target_artist_id,
+      task.failure_reason,
+      task.last_error_code,
+      task.last_error_message,
+      scheduleSummary(task)
+    ]).includes(query)
+  );
+}
+
+function filterWaitingJobs(jobs: Job[], search: string): Job[] {
+  const query = normalizeSearch(search);
+  if (!query) {
+    return jobs;
+  }
+  return jobs.filter((job) =>
+    searchableText([
+      job.id,
+      job.status,
+      job.type,
+      job.workflow_source,
+      job.input_user_id,
+      job.input_artwork_id,
+      job.error_message,
+      jobTarget(job)
+    ]).includes(query)
+  );
+}
+
+function normalizeSearch(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function searchableText(values: unknown[]): string {
+  return values.filter(Boolean).join(" ").toLowerCase();
+}
+
 function runJobIds(run: WorkflowBatchRun | null): string[] {
   if (!run) {
     return [];
@@ -1990,11 +2133,11 @@ function runJobIds(run: WorkflowBatchRun | null): string[] {
 }
 
 function groupRunsByFailureReason(runs: WorkflowBatchRun[]): Array<{ reason: string; items: WorkflowBatchRun[] }> {
-  return groupedByReason(runs, (run) => classifyFailureReason(runFailureText(run)));
+  return groupedByReason(runs, (run) => run.failure_reason || "unknown");
 }
 
-function groupTriggersByFailureReason(tasks: ScheduledTask[]): Array<{ reason: string; items: ScheduledTask[] }> {
-  return groupedByReason(tasks, (task) => classifyFailureReason(task.last_error_message || task.last_error_code || ""));
+function groupSchedulesByFailureReason(tasks: ScheduledTask[]): Array<{ reason: string; items: ScheduledTask[] }> {
+  return groupedByReason(tasks, (task) => task.failure_reason || "unknown");
 }
 
 function groupedByReason<T>(items: T[], reasonFor: (item: T) => string): Array<{ reason: string; items: T[] }> {
@@ -2004,36 +2147,6 @@ function groupedByReason<T>(items: T[], reasonFor: (item: T) => string): Array<{
     groups.set(reason, [...(groups.get(reason) ?? []), item]);
   }
   return Array.from(groups.entries()).map(([reason, groupedItems]) => ({ reason, items: groupedItems }));
-}
-
-function runFailureText(run: WorkflowBatchRun): string {
-  return run.items
-    .map((item) => item.error_message || item.status)
-    .filter(Boolean)
-    .join(" ");
-}
-
-function classifyFailureReason(text: string): string {
-  const value = text.toLowerCase();
-  if (value.includes("auth") || value.includes("token") || value.includes("login") || value.includes("permission")) {
-    return "auth";
-  }
-  if (value.includes("disk") || value.includes("space") || value.includes("storage")) {
-    return "disk";
-  }
-  if (value.includes("network") || value.includes("timeout") || value.includes("connection") || value.includes("http")) {
-    return "network";
-  }
-  if (value.includes("cancel")) {
-    return "cancelled";
-  }
-  if (value.includes("target") || value.includes("artist") || value.includes("artwork") || value.includes("unavailable")) {
-    return "target";
-  }
-  if (value.includes("skip") || value.includes("rule")) {
-    return "rule";
-  }
-  return "unknown";
 }
 
 function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>) {
@@ -2188,7 +2301,7 @@ function lastRunItemStatus(draftId: string, runs: WorkflowBatchRun[]): WorkflowB
 }
 
 function draftTitle(form: WorkflowForm): string {
-  return form.name.trim() || `${form.modules.schedule ? "Trigger" : "Workflow"}: ${targetLabels[form.target_type]}`;
+  return form.name.trim() || `${form.modules.schedule ? "Schedule" : "Workflow"}: ${targetLabels[form.target_type]}`;
 }
 
 function scheduleSummary(task: ScheduledTask): string {
@@ -2258,7 +2371,7 @@ function jobTarget(job: Job): string {
 
 function sourceLabel(source: string): string {
   if (source === "manual_schedule" || source === "schedule") {
-    return "trigger";
+    return "schedule";
   }
   if (source === "workflow_batch") {
     return "manual";

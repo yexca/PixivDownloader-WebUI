@@ -1119,6 +1119,7 @@ def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     assert body["created"] is False
     assert body["task"]["status"] == "blocked"
     assert body["task"]["last_error_code"] == "insufficient_disk_space"
+    assert body["task"]["failure_reason"] == "disk"
 
 
 def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
@@ -1165,8 +1166,10 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert body["total"] == 2
     assert body["completed"] == 0
     assert body["concurrency"] == 2
+    assert body["failure_reason"] == "unknown"
     assert [item["draft_id"] for item in body["items"]] == ["draft-1", "draft-2"]
     assert all(item["status"] == "running" for item in body["items"])
+    assert all(item["failure_reason"] == "unknown" for item in body["items"])
     assert len(body["items"][0]["job_ids"]) == 1
     assert queue.wake_count == 1
     repository = JobRepository(tmp_path / "pixiv.sqlite3")

@@ -5,6 +5,7 @@ export type ScheduledTaskStatus = "active" | "inactive" | "paused" | "blocked" |
 export type ScheduledTaskTargetType = "single_artist" | "single_artwork" | "all_artists" | "artists_with_tag" | "artists_not_checked";
 export type ScheduledTaskFilterType = "last_checked_before_days" | "has_failed_files";
 export type ScheduledTaskArtistSelection = "oldest_checked_first" | "newest_checked_first" | "random";
+export type FailureReason = "auth" | "disk" | "network" | "cancelled" | "target" | "rule" | "unknown";
 
 export type ScheduledTaskConfig = {
   target: {
@@ -40,6 +41,7 @@ export type ScheduledTask = {
   last_job_id: string | null;
   last_error_code: string | null;
   last_error_message: string | null;
+  failure_reason: FailureReason;
   config: ScheduledTaskConfig;
   last_run_summary: Record<string, unknown> | null;
   created_at: string | null;
