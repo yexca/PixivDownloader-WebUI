@@ -75,6 +75,7 @@ export type ScheduledTaskRunResponse = {
   task: ScheduledTask;
   job_id: string | null;
   job_ids: string[];
+  workflow_run_id: string | null;
   created: boolean;
   skipped: boolean;
 };

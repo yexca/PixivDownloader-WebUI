@@ -54,6 +54,8 @@ class WorkflowBatchRunResponse(BaseModel):
     failed: int
     skipped: int
     concurrency: int
+    source: str
+    schedule_id: int | None
     created_at: str | None
     finished_at: str | None
     items: list[WorkflowRunItemResponse]
@@ -73,6 +75,8 @@ def workflow_run_response(run: WorkflowRun) -> WorkflowBatchRunResponse:
         failed=run.failed,
         skipped=run.skipped,
         concurrency=run.concurrency,
+        source=run.source,
+        schedule_id=run.schedule_id,
         created_at=run.created_at,
         finished_at=run.finished_at,
         items=[workflow_run_item_response(item) for item in run.items],

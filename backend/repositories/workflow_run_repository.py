@@ -35,6 +35,8 @@ class WorkflowRun:
     failed: int
     skipped: int
     concurrency: int
+    source: str = "manual"
+    schedule_id: int | None = None
     created_at: str | None = None
     finished_at: str | None = None
     items: list[WorkflowRunItem] = field(default_factory=list)
@@ -52,9 +54,9 @@ class WorkflowRunRepository:
                     """
                     INSERT INTO workflow_runs(
                         id, status, total, completed, failed, skipped,
-                        concurrency, created_at, finished_at
+                        concurrency, source, schedule_id, created_at, finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run.id,
@@ -64,6 +66,8 @@ class WorkflowRunRepository:
                         run.failed,
                         run.skipped,
                         run.concurrency,
+                        run.source,
+                        run.schedule_id,
                         created_at,
                         run.finished_at,
                     ),
@@ -83,6 +87,8 @@ class WorkflowRunRepository:
                         failed = ?,
                         skipped = ?,
                         concurrency = ?,
+                        source = ?,
+                        schedule_id = ?,
                         finished_at = ?
                     WHERE id = ?
                     """,
@@ -93,6 +99,8 @@ class WorkflowRunRepository:
                         run.failed,
                         run.skipped,
                         run.concurrency,
+                        run.source,
+                        run.schedule_id,
                         run.finished_at,
                         run.id,
                     ),
@@ -245,6 +253,11 @@ class WorkflowRunRepository:
 
 
 def workflow_run_from_row(row: sqlite3.Row, items: list[WorkflowRunItem]) -> WorkflowRun:
+    source = "manual"
+    schedule_id = None
+    with suppress(IndexError):
+        source = str(row["source"] or "manual")
+        schedule_id = int(row["schedule_id"]) if row["schedule_id"] is not None else None
     return WorkflowRun(
         id=str(row["id"]),
         status=str(row["status"]),
@@ -253,6 +266,8 @@ def workflow_run_from_row(row: sqlite3.Row, items: list[WorkflowRunItem]) -> Wor
         failed=int(row["failed"]),
         skipped=int(row["skipped"]),
         concurrency=int(row["concurrency"]),
+        source=source,
+        schedule_id=schedule_id,
         created_at=row["created_at"],
         finished_at=row["finished_at"],
         items=items,

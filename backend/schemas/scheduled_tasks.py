@@ -112,6 +112,7 @@ class ScheduledTaskRunResponse(BaseModel):
     task: ScheduledTaskResponse
     job_id: str | None
     job_ids: list[str]
+    workflow_run_id: str | None
     created: bool
     skipped: bool
 

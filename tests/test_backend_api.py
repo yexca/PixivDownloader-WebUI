@@ -532,11 +532,22 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     body = run_response.json()
     assert body["created"] is True
     assert body["job_id"]
+    assert body["workflow_run_id"]
     assert body["task"]["last_job_id"] == body["job_id"]
+    assert body["task"]["last_run_summary"]["workflow_run_id"] == body["workflow_run_id"]
+    assert body["task"]["last_run_summary"]["workflow_run_source"] == "manual_schedule"
     assert queue.wake_count == 2
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["job_id"])
+    finally:
+        repository.close()
+    assert job is not None
+    assert job.workflow_run_id == body["workflow_run_id"]
+    assert job.workflow_source == "manual_schedule"
 
 
-def test_scheduled_task_creation_limits_active_schedules(tmp_path):
+def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
     client = make_client(tmp_path)
 
     first_response = client.post(
@@ -565,10 +576,10 @@ def test_scheduled_task_creation_limits_active_schedules(tmp_path):
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert first_response.json()["status"] == "active"
-    assert second_response.json()["status"] == "inactive"
+    assert second_response.json()["status"] == "active"
 
 
-def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
+def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
     client = make_client(tmp_path)
 
     first_response = client.post(
@@ -598,7 +609,7 @@ def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
         settings_json_path=tmp_path / "config" / "settings.json",
     )
     try:
-        assert second_response.json()["status"] == "inactive"
+        assert second_response.json()["status"] == "active"
         paused_response = client.put(
             f"/api/scheduled-tasks/{first_response.json()['id']}",
             json={"status": "paused"},
@@ -607,7 +618,7 @@ def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
 
         activated = service.activate_inactive_tasks()
 
-        assert [task.id for task in activated] == [second_response.json()["id"]]
+        assert activated == []
         assert service.get_task(second_response.json()["id"]).status == "active"
     finally:
         service.close()
@@ -699,7 +710,9 @@ def test_scheduled_task_builder_targets_single_artwork(tmp_path):
         assert job is not None
         assert job.type == "download_from_artwork"
         assert job.input_artwork_id == "999"
-        assert job.options == {"full_download": True}
+        assert job.options["full_download"] is True
+        assert job.workflow_run_id == body["workflow_run_id"]
+        assert job.workflow_source == "manual_schedule"
     finally:
         repository.close()
 
@@ -1176,7 +1189,7 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert all(item["status"] == "completed" for item in completed_body["items"])
 
 
-def test_workflow_batch_schedules_respect_active_limit(tmp_path):
+def test_workflow_batch_schedules_create_enabled_triggers(tmp_path):
     client = make_client(tmp_path)
 
     response = client.post(
@@ -1225,7 +1238,7 @@ def test_workflow_batch_schedules_respect_active_limit(tmp_path):
     tasks = sorted(schedules_response.json()["items"], key=lambda task: task["name"])
     assert [(task["name"], task["status"]) for task in tasks] == [
         ("First schedule", "active"),
-        ("Second schedule", "inactive"),
+        ("Second schedule", "active"),
     ]
 
 

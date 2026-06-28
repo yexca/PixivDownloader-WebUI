@@ -490,7 +490,6 @@ export function WorkflowsPage(): JSX.Element {
             </div>
             <WorkflowLimitPanel
               jobs={jobs.data?.items ?? []}
-              schedules={schedules.data?.items ?? []}
               settings={settings.data}
               disabled={settings.isLoading || limitMutation.isPending}
               onSync={(key, value) => limitMutation.mutate({ [key]: value })}
@@ -545,7 +544,11 @@ export function WorkflowsPage(): JSX.Element {
           ) : (
             <div className="grid gap-3">
               {visibleSchedules.map((task) => (
-                <ScheduleWorkflowCard key={`schedule-${task.id}`} task={task} />
+                <ScheduleWorkflowCard
+                  key={`schedule-${task.id}`}
+                  task={task}
+                  lastRun={latestScheduleRun(task, workflowRuns.data?.items ?? [])}
+                />
               ))}
             </div>
           )}
@@ -1114,6 +1117,9 @@ function RunWorkflowCard({ run }: { run: WorkflowBatchRun }): JSX.Element {
             <h2 className="break-words text-sm font-semibold">{runTitle(run)}</h2>
             <WorkflowRunStatusPill status={run.status} />
             <Badge tone="muted">run</Badge>
+            {run.source === "schedule" || run.source === "manual_schedule" ? (
+              <Badge tone="default">{run.source === "manual_schedule" ? "manual schedule" : "schedule"}</Badge>
+            ) : null}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {run.completed}/{run.total} completed, {run.failed} failed, {run.skipped} skipped
@@ -1227,7 +1233,13 @@ function DraftDetail({ draft, onEdit }: { draft: DraftWorkflow; onEdit: () => vo
   );
 }
 
-function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
+function ScheduleWorkflowCard({
+  task,
+  lastRun
+}: {
+  task: ScheduledTask;
+  lastRun: WorkflowBatchRun | null;
+}): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const invalidate = () => invalidateRuntimeQueries(queryClient);
@@ -1235,8 +1247,12 @@ function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
     mutationFn: () => runScheduledTask(task.id),
     onSuccess: (response) => {
       pushToast({
-        title: response.created ? "Jobs queued" : response.skipped ? "Schedule skipped" : "Schedule checked",
-        description: response.job_ids.length ? response.job_ids.join(", ") : undefined,
+        title: response.workflow_run_id
+          ? "Schedule run submitted"
+          : response.skipped
+            ? "Schedule skipped"
+            : "Schedule checked",
+        description: response.workflow_run_id ?? (response.job_ids.length ? response.job_ids.join(", ") : undefined),
         tone: response.skipped ? "info" : "success"
       });
       invalidate();
@@ -1299,7 +1315,7 @@ function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
       <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
         <Detail label="Next run" value={formatDate(task.next_run_at)} />
         <Detail label="Last run" value={formatDate(task.last_run_at)} />
-        <Detail label="Last jobs" value={lastJobCount(task)} />
+        <Detail label="Latest run" value={lastRunLabel(task, lastRun)} />
       </dl>
       {task.last_error_message ? (
         <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
@@ -1312,37 +1328,26 @@ function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
 
 function WorkflowLimitPanel({
   jobs,
-  schedules,
   settings,
   disabled,
   onSync
 }: {
   jobs: Job[];
-  schedules: ScheduledTask[];
   settings?: SettingsResponse;
   disabled: boolean;
-  onSync: (key: "max_active_one_time_tasks" | "max_active_scheduled_tasks", value: number) => void;
+  onSync: (key: "max_active_one_time_tasks", value: number) => void;
 }): JSX.Element {
-  const oneTimeStats = workflowJobStats(jobs);
-  const scheduleStats = scheduleTaskStats(schedules);
+  const runStats = workflowJobStats(jobs);
 
   return (
     <div className="mt-3 space-y-2 rounded-md border bg-muted/20 p-3">
       <WorkflowLimitControl
-        label="One-time tasks"
+        label="Run limit"
         value={settings?.max_active_one_time_tasks ?? 1}
         disabled={disabled || !settings}
-        active={oneTimeStats.active}
-        waiting={oneTimeStats.waiting}
+        active={runStats.active}
+        waiting={runStats.waiting}
         onSync={(value) => onSync("max_active_one_time_tasks", value)}
-      />
-      <WorkflowLimitControl
-        label="Schedule tasks"
-        value={settings?.max_active_scheduled_tasks ?? 1}
-        disabled={disabled || !settings}
-        active={scheduleStats.active}
-        waiting={scheduleStats.waiting}
-        onSync={(value) => onSync("max_active_scheduled_tasks", value)}
       />
     </div>
   );
@@ -1919,7 +1924,23 @@ function targetDetail(form: WorkflowForm): string {
   return "All artists";
 }
 
-function lastJobCount(task: ScheduledTask): string {
+function latestScheduleRun(task: ScheduledTask, runs: WorkflowBatchRun[]): WorkflowBatchRun | null {
+  const summaryRunId = task.last_run_summary?.workflow_run_id;
+  const matchedBySummary = typeof summaryRunId === "string" ? runs.find((run) => run.id === summaryRunId) : null;
+  if (matchedBySummary) {
+    return matchedBySummary;
+  }
+  return runs.find((run) => run.schedule_id === task.id) ?? null;
+}
+
+function lastRunLabel(task: ScheduledTask, run: WorkflowBatchRun | null): string {
+  if (run) {
+    return `${run.status} · ${run.completed}/${run.total}`;
+  }
+  const summaryRunId = task.last_run_summary?.workflow_run_id;
+  if (typeof summaryRunId === "string") {
+    return summaryRunId;
+  }
   const count = task.last_run_summary?.created_jobs;
   return typeof count === "number" ? String(count) : task.last_job_id ?? "-";
 }
@@ -1929,13 +1950,6 @@ function workflowJobStats(jobs: Job[]): { active: number; waiting: number } {
   return {
     active: oneTimeJobs.filter((job) => job.status === "queued" || job.status === "running").length,
     waiting: oneTimeJobs.filter((job) => job.status === "inactive").length
-  };
-}
-
-function scheduleTaskStats(tasks: ScheduledTask[]): { active: number; waiting: number } {
-  return {
-    active: tasks.filter((task) => task.status === "active").length,
-    waiting: tasks.filter((task) => task.status === "inactive").length
   };
 }
 

@@ -120,6 +120,7 @@ def run_scheduled_task(
         task=scheduled_task_response(result.task),
         job_id=result.job.id if result.job is not None else None,
         job_ids=[job.id for job in result.jobs],
+        workflow_run_id=result.workflow_run_id,
         created=result.created,
         skipped=result.skipped,
     )

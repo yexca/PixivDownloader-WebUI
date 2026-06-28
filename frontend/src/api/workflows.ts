@@ -32,6 +32,8 @@ export type WorkflowBatchRun = {
   failed: number;
   skipped: number;
   concurrency: number;
+  source: string;
+  schedule_id: number | null;
   created_at: string | null;
   finished_at: string | null;
   items: WorkflowBatchRunItem[];
