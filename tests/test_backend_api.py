@@ -12,6 +12,7 @@ from backend.repositories.artist_name_history_repository import ArtistNameHistor
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
+from backend.repositories.workflow_run_repository import WorkflowRunRepository
 from backend.services import scheduled_task_service
 from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
@@ -355,8 +356,18 @@ def test_create_download_job(tmp_path):
         job = repository.get_by_id(body["job_id"])
         assert job is not None
         assert job.input_user_id == "123"
+        assert job.options["workflow_source"] == "download_api"
+        run_id = job.options["workflow_run_id"]
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.status == "completed"
+    assert run.items[0].job_ids == [body["job_id"]]
 
 
 def test_create_download_job_persists_workflow_options(tmp_path):
@@ -388,6 +399,9 @@ def test_create_download_job_persists_workflow_options(tmp_path):
             "max_artworks": 12,
             "min_artwork_id": "100",
             "max_artwork_id": "200",
+            "workflow_run_id": job.options["workflow_run_id"],
+            "workflow_item_id": job.options["workflow_item_id"],
+            "workflow_source": "download_api",
         }
     finally:
         repository.close()
@@ -1119,6 +1133,14 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert all(item["status"] == "completed" for item in body["items"])
     assert len(body["items"][0]["job_ids"]) == 1
     assert queue.wake_count == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        batch_job = repository.get_by_id(body["items"][0]["job_ids"][0])
+    finally:
+        repository.close()
+    assert batch_job is not None
+    assert batch_job.options["workflow_run_id"] == body["id"]
+    assert batch_job.options["workflow_source"] == "workflow_batch"
 
     list_response = client.get("/api/workflows/runs")
 
@@ -1241,6 +1263,7 @@ def test_create_artist_queues_sync_job(tmp_path):
         assert job is not None
         assert job.type == "sync_artist"
         assert job.input_user_id == "123"
+        assert job.options["workflow_source"] == "library_shortcut"
     finally:
         repository.close()
 

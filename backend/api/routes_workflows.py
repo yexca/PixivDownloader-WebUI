@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
-from backend.schemas.scheduled_tasks import scheduled_task_config_from_request
 from backend.schemas.workflows import (
+    WorkflowBatchItemRequest,
     WorkflowBatchRunListResponse,
     WorkflowBatchRunRequest,
     WorkflowBatchRunResponse,
@@ -12,7 +12,6 @@ from backend.schemas.workflows import (
     WorkflowRunResponse,
     workflow_run_response,
 )
-from backend.services.scheduled_task_service import ScheduledTaskService
 from backend.services.workflow_run_service import WorkflowRunService
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -25,14 +24,24 @@ def run_workflow(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> WorkflowRunResponse:
-    service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
     try:
-        jobs = service.run_config(scheduled_task_config_from_request(request.config))
+        run = service.run_batch(
+            items=[
+                WorkflowBatchItemRequest(
+                    draft_id="workflow-run",
+                    title="Workflow run",
+                    config=request.config,
+                )
+            ],
+            concurrency=1,
+        )
     finally:
         service.close()
-    if jobs:
+    job_ids = [job_id for item in run.items for job_id in item.job_ids]
+    if job_ids:
         queue.wake()
-    return WorkflowRunResponse(job_ids=[job.id for job in jobs], created=bool(jobs))
+    return WorkflowRunResponse(job_ids=job_ids, created=bool(job_ids))
 
 
 @router.post("/runs", response_model=WorkflowBatchRunResponse)

@@ -437,6 +437,10 @@ def clean_job_options(options: dict[str, object]) -> dict[str, object]:
         tag_variants = legacy_tag_variants(options)
     if tag_variants:
         cleaned["tag_variants"] = tag_variants
+    for key in ("workflow_run_id", "workflow_item_id", "workflow_source"):
+        value = options.get(key)
+        if isinstance(value, str | int) and str(value):
+            cleaned[key] = value
     return cleaned
 
 

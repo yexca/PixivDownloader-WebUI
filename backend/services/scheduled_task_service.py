@@ -228,7 +228,10 @@ class ScheduledTaskService:
         return "active" if self._activation_capacity() > 0 else "inactive"
 
     def _activation_capacity(self) -> int:
-        return max(0, self._max_active_scheduled_tasks() - self.repository.count_by_status("active"))
+        return max(
+            0,
+            self._max_active_scheduled_tasks() - self.repository.count_by_status("active"),
+        )
 
     def _max_active_scheduled_tasks(self) -> int:
         service = AppSettingsService(
@@ -296,6 +299,7 @@ class ScheduledTaskService:
                     user_id=artist_id,
                     artwork_id=None,
                     sync_only=True,
+                    options=options,
                     gate_one_time=gate_one_time,
                 )
             if action == "retry_failed_artist":
@@ -305,6 +309,7 @@ class ScheduledTaskService:
                     user_id=artist_id,
                     artwork_id=None,
                     retry_failed_artist=True,
+                    options=options,
                     gate_one_time=gate_one_time,
                 )
             return service.create_download_job(
