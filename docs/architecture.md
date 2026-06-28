@@ -11,6 +11,7 @@ Browser WebUI
     v
 FastAPI backend
     |
+    +-- workflow runs and scheduled triggers
     +-- job queue and workers
     +-- Pixiv API client
     +-- file downloader
@@ -47,7 +48,7 @@ backend/
   domain/           typed domain entities.
   repositories/     SQL access layer.
   schemas/          Pydantic request and response models.
-  services/         Pixiv, settings, jobs, files, and download workflows.
+  services/         Pixiv, settings, workflow runs, jobs, files, and downloads.
   workers/          in-process background job queue and download worker.
 
 frontend/
@@ -97,11 +98,12 @@ API route
   -> response schema
 ```
 
-Services own workflows:
+Services own workflows and execution:
 
 - settings read/write.
 - Pixiv API access.
-- download job creation.
+- workflow planning and dispatch.
+- download job creation and recovery.
 - file download and status updates.
 
 Repositories own SQL:
@@ -109,6 +111,7 @@ Repositories own SQL:
 - artists.
 - artworks.
 - artwork files.
+- workflow runs.
 - jobs.
 - settings.
 
@@ -131,7 +134,29 @@ frontend/dist
 
 The backend serves built files directly. During development, Vite runs separately and proxies `/api` and WebSocket traffic to the backend.
 
-## Background Jobs
+## Workflows, Jobs, And Events
+
+The maintained execution model is:
+
+```text
+WorkflowRun
+  -> WorkflowRunItem
+      -> Job
+          -> JobEvent
+```
+
+Workflow runs represent user intent and orchestration. A workflow target can be a
+single artist, a single artwork, all artists, artists with tags, or stale artists.
+Workflow actions such as sync, download, and retry failed files are expanded into
+one or more persisted jobs.
+
+Library and Download page shortcuts are workflow shortcuts. For example, syncing
+one artist from the Library creates a workflow run with a single artist target and
+a `sync_artist` action, then dispatches a `sync_artist` job.
+
+Scheduled tasks are triggers, not jobs. When a schedule is due, it creates jobs
+from its stored workflow config. One-time workflow runs and scheduled tasks both
+use the same job execution layer.
 
 Downloads run as persisted jobs.
 
@@ -144,6 +169,10 @@ queued -> running -> cancelled
 ```
 
 Job progress and events are stored in SQLite and exposed to the WebUI by API/WebSocket endpoints.
+
+Workflow run status is aggregated from linked job statuses. A run stays `running`
+while any linked job is inactive, queued, or running, and reaches `completed`,
+`failed`, `partial`, or `skipped` after its items reach terminal states.
 
 ## Legacy Data Import
 
