@@ -366,7 +366,7 @@ def test_create_download_job(tmp_path):
     finally:
         workflow_repository.close()
     assert run is not None
-    assert run.status == "completed"
+    assert run.status == "running"
     assert run.items[0].job_ids == [body["job_id"]]
 
 
@@ -1125,12 +1125,12 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
+    assert body["status"] == "running"
     assert body["total"] == 2
-    assert body["completed"] == 2
+    assert body["completed"] == 0
     assert body["concurrency"] == 2
     assert [item["draft_id"] for item in body["items"]] == ["draft-1", "draft-2"]
-    assert all(item["status"] == "completed" for item in body["items"])
+    assert all(item["status"] == "running" for item in body["items"])
     assert len(body["items"][0]["job_ids"]) == 1
     assert queue.wake_count == 1
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
@@ -1149,6 +1149,28 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert list_body["total"] == 1
     assert list_body["items"][0]["id"] == body["id"]
     assert list_body["items"][0]["items"][0]["title"] == "Sync artist"
+
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job_ids = [
+            job_id
+            for item in body["items"]
+            for job_id in item["job_ids"]
+        ]
+        jobs = [repository.get_by_id(job_id) for job_id in job_ids]
+        for job in jobs:
+            assert job is not None
+            repository.update(replace(job, status="completed"))
+    finally:
+        repository.close()
+
+    completed_response = client.get(f"/api/workflows/runs/{body['id']}")
+
+    assert completed_response.status_code == 200
+    completed_body = completed_response.json()
+    assert completed_body["status"] == "completed"
+    assert completed_body["completed"] == 2
+    assert all(item["status"] == "completed" for item in completed_body["items"])
 
 
 def test_workflow_batch_schedules_respect_active_limit(tmp_path):

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from backend.domain.entities import Job, ScheduledTaskConfig
 from backend.repositories._time import utc_now
+from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import (
     WorkflowRun,
     WorkflowRunItem,
@@ -20,6 +21,9 @@ from backend.schemas.scheduled_tasks import (
 from backend.schemas.workflows import WorkflowBatchItemRequest
 from backend.services.job_service import JobService
 from backend.services.scheduled_task_service import ScheduledTaskService
+
+ACTIVE_JOB_STATUSES = {"inactive", "queued", "running"}
+FAILED_JOB_STATUSES = {"failed", "cancelled"}
 
 
 class WorkflowRunService:
@@ -103,32 +107,20 @@ class WorkflowRunService:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
-        completed = 0
-        failed = 0
-        skipped = 0
         previous_failed: set[str] = set()
 
         for item in self.repository.list_items(run.id):
             if item.status in {"completed", "failed", "skipped"}:
-                completed += 1 if item.status == "completed" else 0
-                failed += 1 if item.status == "failed" else 0
-                skipped += 1 if item.status == "skipped" else 0
                 if item.status == "failed":
                     previous_failed.add(item.draft_id)
                 continue
             if item.status == "running" and item.job_ids:
-                completed += 1
-                self.repository.update_item(
-                    replace(
-                        item,
-                        status="completed",
-                        finished_at=item.finished_at or utc_now(),
-                    )
-                )
+                refreshed_item = self._refresh_item_status(item)
+                if refreshed_item.status == "failed":
+                    previous_failed.add(item.draft_id)
                 continue
             request = workflow_item_request_from_dict(item.request)
             if request is None:
-                failed += 1
                 previous_failed.add(item.draft_id)
                 self.repository.update_item(
                     replace(
@@ -152,7 +144,6 @@ class WorkflowRunService:
             if request.skip_if_last_run_failed and (
                 request.draft_id in previous_failed or previous_status == "failed"
             ):
-                skipped += 1
                 self.repository.update_item(
                     replace(
                         item,
@@ -193,7 +184,6 @@ class WorkflowRunService:
                     )
                     jobs = task_service.run_config(config)
             except Exception as exc:
-                failed += 1
                 previous_failed.add(request.draft_id)
                 self.repository.update_item(
                     replace(
@@ -204,30 +194,23 @@ class WorkflowRunService:
                     )
                 )
             else:
-                completed += 1
-                self.repository.update_item(
-                    replace(
-                        item,
-                        status="completed",
-                        job_ids=[job.id for job in jobs],
-                        finished_at=utc_now(),
-                    )
+                item_status = "running" if jobs else "completed"
+                updated_item = replace(
+                    item,
+                    status=item_status,
+                    job_ids=[job.id for job in jobs],
+                    finished_at=None if jobs else utc_now(),
                 )
+                self.repository.update_item(updated_item)
+                self._refresh_item_status(updated_item)
             finally:
                 task_service.close()
 
-        status = workflow_run_status(completed=completed, failed=failed, skipped=skipped)
         run = replace(
             run,
-            status=status,
-            completed=completed,
-            failed=failed,
-            skipped=skipped,
-            finished_at=utc_now(),
             items=self.repository.list_items(run.id),
         )
-        self.repository.update_run(run)
-        return run
+        return self.refresh_run_status(run)
 
     def recover_interrupted_runs(self) -> list[WorkflowRun]:
         recovered: list[WorkflowRun] = []
@@ -236,10 +219,40 @@ class WorkflowRunService:
         return recovered
 
     def list_runs(self, *, limit: int = 5, offset: int = 0) -> tuple[list[WorkflowRun], int]:
-        return self.repository.list_runs(limit=limit, offset=offset), self.repository.count_runs()
+        runs = [
+            self.refresh_run_status(run)
+            for run in self.repository.list_runs(limit=limit, offset=offset)
+        ]
+        return runs, self.repository.count_runs()
 
     def get_run(self, run_id: str) -> WorkflowRun | None:
-        return self.repository.get_run(run_id)
+        run = self.repository.get_run(run_id)
+        return self.refresh_run_status(run) if run is not None else None
+
+    def refresh_run_status(self, run: WorkflowRun) -> WorkflowRun:
+        refreshed_items = [self._refresh_item_status(item) for item in run.items]
+        completed = sum(1 for item in refreshed_items if item.status == "completed")
+        failed = sum(1 for item in refreshed_items if item.status == "failed")
+        skipped = sum(1 for item in refreshed_items if item.status == "skipped")
+        has_active = any(item.status in {"pending", "running"} for item in refreshed_items)
+        status = workflow_run_status(
+            completed=completed,
+            failed=failed,
+            skipped=skipped,
+            running=has_active,
+        )
+        finished_at = None if has_active else run.finished_at or utc_now()
+        refreshed_run = replace(
+            run,
+            status=status,
+            completed=completed,
+            failed=failed,
+            skipped=skipped,
+            finished_at=finished_at,
+            items=refreshed_items,
+        )
+        self.repository.update_run(refreshed_run)
+        return refreshed_run
 
     def close(self) -> None:
         self.repository.close()
@@ -308,23 +321,61 @@ class WorkflowRunService:
             self.repository.update_run(failed_run)
             raise
 
+        item_status = "running" if jobs else "completed"
         completed_item = replace(
             item,
             id=item_id,
-            status="completed",
+            status=item_status,
             job_ids=[job.id for job in jobs],
-            finished_at=utc_now(),
+            finished_at=None if jobs else utc_now(),
         )
         self.repository.update_item(completed_item)
-        completed_run = replace(
+        running_run = replace(
             run,
-            status="completed",
-            completed=1,
-            finished_at=utc_now(),
+            status="running" if jobs else "completed",
+            completed=0 if jobs else 1,
+            finished_at=None if jobs else utc_now(),
             items=[completed_item],
         )
-        self.repository.update_run(completed_run)
-        return completed_run
+        self.repository.update_run(running_run)
+        return self.refresh_run_status(running_run)
+
+    def _refresh_item_status(self, item: WorkflowRunItem) -> WorkflowRunItem:
+        if not item.job_ids:
+            return item
+        repository = JobRepository(self.db_path)
+        try:
+            jobs = repository.list_by_ids(item.job_ids)
+        finally:
+            repository.close()
+
+        if len(jobs) != len(item.job_ids):
+            refreshed = replace(
+                item,
+                status="failed",
+                error_message="Workflow item cannot be resolved: a linked job is missing.",
+                finished_at=item.finished_at or utc_now(),
+            )
+        elif any(job.status in ACTIVE_JOB_STATUSES for job in jobs):
+            refreshed = replace(item, status="running", finished_at=None)
+        elif any(job.status in FAILED_JOB_STATUSES for job in jobs):
+            messages = [job.error_message for job in jobs if job.error_message]
+            refreshed = replace(
+                item,
+                status="failed",
+                error_message=messages[0] if messages else item.error_message,
+                finished_at=item.finished_at or utc_now(),
+            )
+        else:
+            refreshed = replace(
+                item,
+                status="completed",
+                error_message=None,
+                finished_at=item.finished_at or utc_now(),
+            )
+        if refreshed != item:
+            self.repository.update_item(refreshed)
+        return refreshed
 
     def _create_download_jobs(
         self,
@@ -380,7 +431,15 @@ def workflow_item_request_from_dict(data: dict[str, object]) -> WorkflowBatchIte
         return None
 
 
-def workflow_run_status(*, completed: int, failed: int, skipped: int) -> str:
+def workflow_run_status(
+    *,
+    completed: int,
+    failed: int,
+    skipped: int,
+    running: bool = False,
+) -> str:
+    if running:
+        return "running"
     if failed and completed:
         return "partial"
     if failed and not completed:
