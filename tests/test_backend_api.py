@@ -2,10 +2,12 @@ import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.api import routes_settings
 from backend.app import create_app
+from backend.core.errors import PixivApiError
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Job, JobEvent
 from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
@@ -139,6 +141,51 @@ def test_settings_validate_auth_endpoint(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"ok": True, "message": "Pixiv authentication succeeded."}
     assert called is True
+
+
+def test_settings_test_connection_endpoint(tmp_path, monkeypatch):
+    client = make_client(tmp_path)
+    called = False
+
+    def fake_test_connection(_service):
+        nonlocal called
+        called = True
+        return {"user_id": "123", "user_name": "Artist"}
+
+    monkeypatch.setattr(AppSettingsService, "test_pixiv_connection", fake_test_connection)
+
+    response = client.post("/api/settings/test-connection")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": True,
+        "message": "Pixiv API connection succeeded for Artist (123).",
+        "user_id": "123",
+        "user_name": "Artist",
+    }
+    assert called is True
+
+
+def test_settings_service_test_connection_calls_user_detail(tmp_path):
+    service = make_settings_service(tmp_path)
+    api = FakeConnectionPixivApi()
+    try:
+        result = service.test_pixiv_connection(api=api)
+    finally:
+        service.close()
+
+    assert result == {"user_id": "123", "user_name": "Artist"}
+    assert api.calls == [("auth", "secret-token"), ("user_detail", "123")]
+
+
+def test_settings_service_test_connection_reports_pixiv_error(tmp_path):
+    service = make_settings_service(tmp_path)
+    api = FakeConnectionPixivApi(error_message="Your access is currently restricted")
+    try:
+        with pytest.raises(PixivApiError, match="Your access is currently restricted"):
+            service.test_pixiv_connection(api=api)
+    finally:
+        service.close()
 
 
 def test_pixiv_auth_start_endpoint(tmp_path):
@@ -1193,11 +1240,7 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
 
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        job_ids = [
-            job_id
-            for item in body["items"]
-            for job_id in item["job_ids"]
-        ]
+        job_ids = [job_id for item in body["items"] for job_id in item["job_ids"]]
         jobs = [repository.get_by_id(job_id) for job_id in job_ids]
         for job in jobs:
             assert job is not None
@@ -1638,6 +1681,22 @@ def test_recent_logs_endpoint_returns_paginated_items(tmp_path):
 
 
 def make_client(tmp_path, queue=None):
+    db_path, settings_path = make_config(tmp_path)
+    app = create_app(
+        db_path=db_path,
+        settings_json_path=settings_path,
+        start_queue=False,
+        job_queue=queue or NoopQueue(),
+    )
+    return TestClient(app)
+
+
+def make_settings_service(tmp_path):
+    db_path, settings_path = make_config(tmp_path)
+    return AppSettingsService(db_path=db_path, settings_json_path=settings_path)
+
+
+def make_config(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     settings_example_path = config_dir / "settings.example.json"
@@ -1668,14 +1727,32 @@ def make_client(tmp_path, queue=None):
         """,
         encoding="utf-8",
     )
-    migrate_database(tmp_path / "pixiv.sqlite3", settings_json_path=settings_path)
-    app = create_app(
-        db_path=tmp_path / "pixiv.sqlite3",
-        settings_json_path=settings_path,
-        start_queue=False,
-        job_queue=queue or NoopQueue(),
-    )
-    return TestClient(app)
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=settings_path)
+    return db_path, settings_path
+
+
+class FakeConnectionPixivApi:
+    user_id = "123"
+
+    def __init__(self, error_message=None):
+        self.error_message = error_message
+        self.calls = []
+
+    def auth(self, *, refresh_token):
+        self.calls.append(("auth", refresh_token))
+
+    def user_detail(self, user_id):
+        self.calls.append(("user_detail", user_id))
+        if self.error_message:
+            return SimpleNamespace(
+                error=SimpleNamespace(
+                    message=self.error_message,
+                    user_message="",
+                    reason="",
+                )
+            )
+        return SimpleNamespace(user=SimpleNamespace(id=user_id, name="Artist"))
 
 
 def create_legacy_database(db_path):

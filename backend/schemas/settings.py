@@ -43,6 +43,13 @@ class AuthValidationResponse(BaseModel):
     message: str
 
 
+class PixivConnectionTestResponse(BaseModel):
+    ok: bool
+    message: str
+    user_id: str
+    user_name: str
+
+
 class PixivAuthStartResponse(BaseModel):
     flow_id: str
     login_url: str

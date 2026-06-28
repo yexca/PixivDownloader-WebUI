@@ -11,6 +11,8 @@ from backend.domain.types import ArtistAccountStatus
 
 
 class PixivApi(Protocol):
+    user_id: str
+
     def auth(self, *, refresh_token: str) -> None: ...
 
     def illust_detail(self, illust_id: str) -> Any: ...

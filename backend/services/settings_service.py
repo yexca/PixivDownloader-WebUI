@@ -5,10 +5,10 @@ from pathlib import Path
 
 from backend.core.config import Settings
 from backend.core.config import SettingsService as JsonSettingsService
-from backend.core.errors import PixivAuthError
+from backend.core.errors import PixivApiError, PixivAuthError
 from backend.core.paths import downloads_dir
 from backend.repositories.settings_repository import SettingsRepository
-from backend.services.pixiv_client import PixivApi, PixivClient
+from backend.services.pixiv_client import PixivApi, PixivClient, _get_value
 
 
 class AppSettingsService:
@@ -65,6 +65,30 @@ class AppSettingsService:
             raise PixivAuthError("Pixiv refresh token is not configured")
         PixivClient(refresh_token=settings.refresh_token, api=api)
 
+    def test_pixiv_connection(self, *, api: PixivApi | None = None) -> dict[str, str]:
+        settings = self.load()
+        if not settings.refresh_token:
+            raise PixivAuthError("Pixiv refresh token is not configured")
+        client = PixivClient(refresh_token=settings.refresh_token, api=api)
+        try:
+            result = client.api.user_detail(client.api.user_id)
+        except PixivAuthError:
+            raise
+        except Exception as exc:
+            raise PixivApiError(f"Pixiv API connection failed: {exc}") from exc
+
+        error = _get_value(result, "error", None)
+        if error:
+            message = _pixiv_error_message(error)
+            raise PixivApiError(f"Pixiv API connection failed: {message}")
+
+        user = _get_value(result, "user", None)
+        user_id = str(_get_value(user, "id", client.api.user_id) or client.api.user_id)
+        user_name = str(_get_value(user, "name", "") or "")
+        if not user:
+            raise PixivApiError("Pixiv API connection failed: user_detail returned no user.")
+        return {"user_id": user_id, "user_name": user_name}
+
     def save(self, settings: Settings) -> None:
         self.json_settings.save(settings)
         self._sync_repository(settings)
@@ -120,3 +144,13 @@ def enforce_runtime_settings(settings: Settings) -> Settings:
             "download_path": str(downloads_dir()),
         }
     )
+
+
+def _pixiv_error_message(error: object) -> str:
+    parts = [
+        str(_get_value(error, "user_message", "") or ""),
+        str(_get_value(error, "message", "") or ""),
+        str(_get_value(error, "reason", "") or ""),
+    ]
+    message = " ".join(part for part in parts if part).strip()
+    return message or str(error)

@@ -29,9 +29,13 @@ Response:
 GET /api/settings
 PUT /api/settings
 POST /api/settings/validate-auth
+POST /api/settings/test-connection
 ```
 
 Normal settings responses should not expose the full Pixiv refresh token.
+Auth validation checks whether the refresh token can authenticate. Connection
+testing performs one authenticated Pixiv API request and reports account or rate
+limit failures when Pixiv returns them.
 
 ## Imports
 

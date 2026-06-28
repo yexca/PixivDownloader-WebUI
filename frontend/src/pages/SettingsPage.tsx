@@ -25,6 +25,7 @@ import {
   refreshPixivAuth,
   startPixivBrowserAuth,
   startPixivAuth,
+  testPixivConnection,
   updateSettings,
   validatePixivAuth,
   type PixivBrowserAuthStartResponse,
@@ -54,11 +55,12 @@ type BasicForm = Pick<
   | "library_stale_check_days"
   | "existing_file_behavior"
 >;
-type TokenStatusState = "unconfigured" | "checking" | "valid" | "invalid";
+type TestStatusState = "unconfigured" | "untested" | "checking" | "valid" | "invalid";
 
-type TokenStatus = {
-  state: TokenStatusState;
+type TestStatus = {
+  state: TestStatusState;
   message: string;
+  checkedAt?: Date;
 };
 
 class AuthBrowserUnavailableError extends Error {
@@ -89,20 +91,35 @@ export function SettingsPage(): JSX.Element {
   const [authBrowserDialog, setAuthBrowserDialog] = React.useState<AuthBrowserDialog | null>(null);
   const [legacyImportDialogOpen, setLegacyImportDialogOpen] = React.useState(false);
   const [authCode, setAuthCode] = React.useState("");
-  const [tokenStatus, setTokenStatus] = React.useState<TokenStatus>({
-    state: "checking",
-    message: "Checking Pixiv token status."
-  });
+  const [authTestStatus, setAuthTestStatus] = React.useState<TestStatus>(notConfiguredAuthStatus());
+  const [connectionTestStatus, setConnectionTestStatus] = React.useState<TestStatus>(notConfiguredConnectionStatus());
   const legacyDatabaseInputId = React.useId();
   const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
   const isPixivStartUrl = isPixivAuthStartUrl(authCode);
   const hasIntermediatePixivUrl = Boolean(pixivReturnToUrl || isPixivStartUrl);
+  const settingsLoaded = Boolean(settings.data);
+  const refreshTokenConfigured = settings.data?.refresh_token_configured ?? false;
 
   React.useEffect(() => {
     if (settings.data && !basicForm) {
       setBasicForm(toBasicForm(settings.data));
     }
   }, [basicForm, settings.data]);
+
+  React.useEffect(() => {
+    if (!settingsLoaded) {
+      return;
+    }
+    resetTestStatuses(refreshTokenConfigured, setAuthTestStatus, setConnectionTestStatus);
+  }, [settingsLoaded, refreshTokenConfigured]);
+
+  const resetCurrentTokenTests = React.useCallback(() => {
+    resetTestStatuses(true, setAuthTestStatus, setConnectionTestStatus);
+  }, []);
+
+  const resetMissingTokenTests = React.useCallback(() => {
+    resetTestStatuses(false, setAuthTestStatus, setConnectionTestStatus);
+  }, []);
 
   const remindToStopAuthBrowserIfRunning = React.useCallback(async () => {
     try {
@@ -115,36 +132,57 @@ export function SettingsPage(): JSX.Element {
     }
   }, []);
 
-  const runPixivTokenCheck = React.useCallback(
-    async ({ notify = false, force = false }: { notify?: boolean; force?: boolean } = {}) => {
-      if (!force && !settings.data?.refresh_token_configured) {
-        setTokenStatus({ state: "unconfigured", message: "No Pixiv refresh token is configured." });
+  const refreshSettings = React.useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["settings"] });
+  }, [queryClient]);
+
+  const runAuthTest = React.useCallback(
+    async ({ notify = false }: { notify?: boolean } = {}) => {
+      if (!refreshTokenConfigured) {
+        resetMissingTokenTests();
         return;
       }
-      setTokenStatus({ state: "checking", message: "Checking Pixiv authentication." });
+      setAuthTestStatus({ state: "checking", message: "Testing Pixiv authentication." });
       try {
         const response = await validatePixivAuth();
-        setTokenStatus({ state: "valid", message: response.message });
+        setAuthTestStatus({ state: "valid", message: response.message, checkedAt: new Date() });
         if (notify) {
           pushToast({ title: "Pixiv authentication verified", description: response.message, tone: "success" });
         }
-        void remindToStopAuthBrowserIfRunning();
       } catch (error) {
         const message = error instanceof Error ? error.message : "Pixiv authentication could not be verified.";
-        setTokenStatus({ state: "invalid", message });
+        setAuthTestStatus({ state: "invalid", message, checkedAt: new Date() });
         if (notify) {
           pushToast({ title: "Pixiv authentication failed", description: message, tone: "error" });
         }
       }
     },
-    [pushToast, remindToStopAuthBrowserIfRunning, settings.data?.refresh_token_configured]
+    [pushToast, refreshTokenConfigured, resetMissingTokenTests]
   );
 
-  React.useEffect(() => {
-    if (activeTab === "pixiv") {
-      void runPixivTokenCheck();
-    }
-  }, [activeTab, runPixivTokenCheck]);
+  const runConnectionTest = React.useCallback(
+    async ({ notify = false }: { notify?: boolean } = {}) => {
+      if (!refreshTokenConfigured) {
+        resetMissingTokenTests();
+        return;
+      }
+      setConnectionTestStatus({ state: "checking", message: "Testing Pixiv API connection." });
+      try {
+        const response = await testPixivConnection();
+        setConnectionTestStatus({ state: "valid", message: response.message, checkedAt: new Date() });
+        if (notify) {
+          pushToast({ title: "Pixiv connection verified", description: response.message, tone: "success" });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Pixiv API connection could not be verified.";
+        setConnectionTestStatus({ state: "invalid", message, checkedAt: new Date() });
+        if (notify) {
+          pushToast({ title: "Pixiv connection failed", description: message, tone: "error" });
+        }
+      }
+    },
+    [pushToast, refreshTokenConfigured, resetMissingTokenTests]
+  );
 
   React.useEffect(() => {
     if (!browserAuthFlow) {
@@ -161,8 +199,8 @@ export function SettingsPage(): JSX.Element {
         if (status.status === "completed") {
           pushToast({ title: "Pixiv token saved", description: "Browser sign-in completed.", tone: "success" });
           setBrowserAuthFlow(null);
-          void queryClient.invalidateQueries({ queryKey: ["settings"] });
-          void runPixivTokenCheck();
+          resetCurrentTokenTests();
+          void refreshSettings();
           void remindToStopAuthBrowserIfRunning();
         } else if (status.status === "failed") {
           pushToast({
@@ -188,7 +226,7 @@ export function SettingsPage(): JSX.Element {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [browserAuthFlow, pushToast, queryClient, remindToStopAuthBrowserIfRunning, runPixivTokenCheck]);
+  }, [browserAuthFlow, pushToast, refreshSettings, remindToStopAuthBrowserIfRunning, resetCurrentTokenTests]);
 
   const basicMutation = useMutation({
     mutationFn: (request: BasicForm) => updateSettings(request),
@@ -206,8 +244,8 @@ export function SettingsPage(): JSX.Element {
       pushToast({ title: "Pixiv token saved", tone: "success" });
       setRefreshToken("");
       setShowToken(false);
-      void queryClient.invalidateQueries({ queryKey: ["settings"] });
-      void runPixivTokenCheck({ force: true });
+      resetCurrentTokenTests();
+      void refreshSettings();
     },
     onError: (error) => pushToast({ title: "Pixiv token save failed", description: error.message, tone: "error" })
   });
@@ -257,8 +295,8 @@ export function SettingsPage(): JSX.Element {
       pushToast({ title: "Pixiv token saved", description: response.message, tone: "success" });
       setAuthFlow(null);
       setAuthCode("");
-      void queryClient.invalidateQueries({ queryKey: ["settings"] });
-      void runPixivTokenCheck({ force: true });
+      resetCurrentTokenTests();
+      void refreshSettings();
       void remindToStopAuthBrowserIfRunning();
     },
     onError: (error) => pushToast({ title: "Pixiv sign-in failed", description: error.message, tone: "error" })
@@ -268,8 +306,8 @@ export function SettingsPage(): JSX.Element {
     mutationFn: refreshPixivAuth,
     onSuccess: (response) => {
       pushToast({ title: "Pixiv token refreshed", description: response.message, tone: "success" });
-      void queryClient.invalidateQueries({ queryKey: ["settings"] });
-      void runPixivTokenCheck({ force: true });
+      resetCurrentTokenTests();
+      void refreshSettings();
     },
     onError: (error) => pushToast({ title: "Pixiv token refresh failed", description: error.message, tone: "error" })
   });
@@ -365,7 +403,8 @@ export function SettingsPage(): JSX.Element {
                 showToken={showToken}
                 startBrowserAuthPending={startBrowserAuthMutation.isPending}
                 startManualAuthPending={startManualAuthMutation.isPending}
-                tokenStatus={tokenStatus}
+                authTestStatus={authTestStatus}
+                connectionTestStatus={connectionTestStatus}
                 onAuthCodeChange={setAuthCode}
                 onCancelAuthFlow={() => setAuthFlow(null)}
                 onCompleteAuth={() =>
@@ -385,7 +424,8 @@ export function SettingsPage(): JSX.Element {
                 }
                 onRefreshAuth={() => refreshAuthMutation.mutate()}
                 onRefreshTokenChange={setRefreshToken}
-                onRunTokenCheck={() => void runPixivTokenCheck({ notify: true })}
+                onRunAuthTest={() => void runAuthTest({ notify: true })}
+                onRunConnectionTest={() => void runConnectionTest({ notify: true })}
                 onSaveManualToken={saveManualToken}
                 onStartBrowserAuth={() => startBrowserAuthMutation.mutate()}
                 onToggleToken={() => setShowToken((value) => !value)}
@@ -592,7 +632,9 @@ function BasicSettingsTab({
 function PixivSettingsTab({
   authCode,
   authFlow,
+  authTestStatus,
   browserAuthFlow,
+  connectionTestStatus,
   completeAuthPending,
   hasIntermediatePixivUrl,
   isPixivStartUrl,
@@ -604,7 +646,6 @@ function PixivSettingsTab({
   showToken,
   startBrowserAuthPending,
   startManualAuthPending,
-  tokenStatus,
   onAuthCodeChange,
   onCancelAuthFlow,
   onCompleteAuth,
@@ -613,14 +654,17 @@ function PixivSettingsTab({
   onOpenContinueUrl,
   onRefreshAuth,
   onRefreshTokenChange,
-  onRunTokenCheck,
+  onRunAuthTest,
+  onRunConnectionTest,
   onSaveManualToken,
   onStartBrowserAuth,
   onToggleToken
 }: {
   authCode: string;
   authFlow: PixivAuthStartResponse | null;
+  authTestStatus: TestStatus;
   browserAuthFlow: PixivBrowserAuthStartResponse | null;
+  connectionTestStatus: TestStatus;
   completeAuthPending: boolean;
   hasIntermediatePixivUrl: boolean;
   isPixivStartUrl: boolean;
@@ -632,7 +676,6 @@ function PixivSettingsTab({
   showToken: boolean;
   startBrowserAuthPending: boolean;
   startManualAuthPending: boolean;
-  tokenStatus: TokenStatus;
   onAuthCodeChange: (value: string) => void;
   onCancelAuthFlow: () => void;
   onCompleteAuth: () => void;
@@ -641,18 +684,15 @@ function PixivSettingsTab({
   onOpenContinueUrl: () => void;
   onRefreshAuth: () => void;
   onRefreshTokenChange: (value: string) => void;
-  onRunTokenCheck: () => void;
+  onRunAuthTest: () => void;
+  onRunConnectionTest: () => void;
   onSaveManualToken: () => void;
   onStartBrowserAuth: () => void;
   onToggleToken: () => void;
 }): JSX.Element {
   return (
     <div className="mt-5 divide-y">
-      <SettingsSection title="Token status" description="Validate the Pixiv account token used for API requests.">
-        <PixivTokenStatus status={tokenStatus} preview={settings.refresh_token_preview} />
-      </SettingsSection>
-
-      <SettingsSection title="Pixiv authentication" description="Sign in, refresh, test, or replace the saved token.">
+      <SettingsSection title="Pixiv authentication" description="Sign in, renew, or replace the saved Pixiv refresh token.">
         <div className="space-y-4">
           <Field
             label="New refresh token"
@@ -715,17 +755,10 @@ function PixivSettingsTab({
                 <RefreshCw className="h-4 w-4" aria-hidden="true" />
                 Refresh Token
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                title="Verify that the configured Pixiv refresh token can authenticate."
-                disabled={tokenStatus.state === "checking"}
-                onClick={onRunTokenCheck}
-              >
-                <ShieldCheck className="h-4 w-4" aria-hidden="true" />
-                Test Auth
-              </Button>
             </div>
+            <span className="mt-2 block text-xs leading-5 text-muted-foreground">
+              Refresh Token asks Pixiv for a fresh token pair and saves the returned refresh token. Use it when the saved token works but you want to renew it without signing in again.
+            </span>
 
             {browserAuthFlow ? (
               <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
@@ -792,6 +825,30 @@ function PixivSettingsTab({
             ) : null}
           </div>
         </div>
+      </SettingsSection>
+
+      <SettingsSection title="Test Auth" description="Manually verify that the saved refresh token can authenticate.">
+        <PixivTestStatus
+          status={authTestStatus}
+          preview={settings.refresh_token_preview}
+          actionLabel="Test Auth"
+          actionTitle="Verify that the configured Pixiv refresh token can authenticate."
+          disabled={!settings.refresh_token_configured || authTestStatus.state === "checking"}
+          icon="shield"
+          onAction={onRunAuthTest}
+        />
+      </SettingsSection>
+
+      <SettingsSection title="Test Connection" description="Manually call Pixiv user_detail with the authenticated account.">
+        <PixivTestStatus
+          status={connectionTestStatus}
+          preview=""
+          actionLabel="Test Connection"
+          actionTitle="Run one real Pixiv API request to check restrictions, rate limits, or API availability."
+          disabled={!settings.refresh_token_configured || connectionTestStatus.state === "checking"}
+          icon="refresh"
+          onAction={onRunConnectionTest}
+        />
       </SettingsSection>
     </div>
   );
@@ -953,16 +1010,35 @@ function CommandBlock({ command, onCopy }: { command: string; onCopy: () => void
   );
 }
 
-function PixivTokenStatus({ status, preview }: { status: TokenStatus; preview: string }): JSX.Element {
+function PixivTestStatus({
+  status,
+  preview,
+  actionLabel,
+  actionTitle,
+  disabled,
+  icon,
+  onAction
+}: {
+  status: TestStatus;
+  preview: string;
+  actionLabel: string;
+  actionTitle: string;
+  disabled: boolean;
+  icon: "shield" | "refresh";
+  onAction: () => void;
+}): JSX.Element {
   const Icon = status.state === "checking" ? Loader2 : status.state === "valid" ? CheckCircle2 : AlertTriangle;
+  const ActionIcon = icon === "shield" ? ShieldCheck : RefreshCw;
   const label =
     status.state === "valid"
-      ? "Token verified"
+      ? "Verified"
       : status.state === "checking"
-        ? "Checking token"
+        ? "Checking"
         : status.state === "invalid"
-          ? "Token needs attention"
-          : "Token not configured";
+          ? "Needs attention"
+          : status.state === "untested"
+            ? "Not tested"
+            : "Token not configured";
   const className =
     status.state === "valid"
       ? "border-green-200 bg-green-50 text-green-900"
@@ -972,16 +1048,65 @@ function PixivTokenStatus({ status, preview }: { status: TokenStatus; preview: s
 
   return (
     <div className={`rounded-md border p-3 ${className}`}>
-      <div className="flex items-start gap-3">
-        <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${status.state === "checking" ? "animate-spin" : ""}`} aria-hidden="true" />
-        <div className="min-w-0">
-          <span className="block text-sm font-semibold">{label}</span>
-          <span className="mt-1 block text-sm leading-5">{status.message}</span>
-          {preview ? <span className="mt-1 block text-xs opacity-75">Saved token: {preview}</span> : null}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <Icon
+            className={`mt-0.5 h-5 w-5 shrink-0 ${status.state === "checking" ? "animate-spin" : ""}`}
+            aria-hidden="true"
+          />
+          <div className="min-w-0">
+            <span className="block text-sm font-semibold">{label}</span>
+            <span className="mt-1 block text-sm leading-5">{status.message}</span>
+            {preview ? <span className="mt-1 block text-xs opacity-75">Saved token: {preview}</span> : null}
+            {status.checkedAt ? (
+              <span className="mt-1 block text-xs opacity-75">Last checked: {formatCheckedAt(status.checkedAt)}</span>
+            ) : null}
+          </div>
         </div>
+        <Button type="button" variant="outline" title={actionTitle} disabled={disabled} onClick={onAction}>
+          <ActionIcon className="h-4 w-4" aria-hidden="true" />
+          {actionLabel}
+        </Button>
       </div>
     </div>
   );
+}
+
+function notConfiguredAuthStatus(): TestStatus {
+  return { state: "unconfigured", message: "No Pixiv refresh token is configured." };
+}
+
+function untestedAuthStatus(): TestStatus {
+  return { state: "untested", message: "A Pixiv refresh token is saved. Run Test Auth when you want to verify it." };
+}
+
+function notConfiguredConnectionStatus(): TestStatus {
+  return { state: "unconfigured", message: "No Pixiv refresh token is configured." };
+}
+
+function untestedConnectionStatus(): TestStatus {
+  return {
+    state: "untested",
+    message: "A real Pixiv API request has not been tested in this session."
+  };
+}
+
+function resetTestStatuses(
+  configured: boolean,
+  setAuthTestStatus: (status: TestStatus) => void,
+  setConnectionTestStatus: (status: TestStatus) => void
+): void {
+  if (configured) {
+    setAuthTestStatus(untestedAuthStatus());
+    setConnectionTestStatus(untestedConnectionStatus());
+  } else {
+    setAuthTestStatus(notConfiguredAuthStatus());
+    setConnectionTestStatus(notConfiguredConnectionStatus());
+  }
+}
+
+function formatCheckedAt(value: Date): string {
+  return value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
 function toBasicForm(settings: SettingsResponse): BasicForm {

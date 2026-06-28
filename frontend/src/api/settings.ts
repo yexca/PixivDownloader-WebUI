@@ -40,6 +40,13 @@ export type AuthValidationResponse = {
   message: string;
 };
 
+export type PixivConnectionTestResponse = {
+  ok: boolean;
+  message: string;
+  user_id: string;
+  user_name: string;
+};
+
 export type PixivAuthStartResponse = {
   flow_id: string;
   login_url: string;
@@ -100,6 +107,12 @@ export function updateSettings(settings: SettingsUpdateRequest): Promise<Setting
 
 export function validatePixivAuth(): Promise<AuthValidationResponse> {
   return apiRequest<AuthValidationResponse>("/settings/validate-auth", {
+    method: "POST"
+  });
+}
+
+export function testPixivConnection(): Promise<PixivConnectionTestResponse> {
+  return apiRequest<PixivConnectionTestResponse>("/settings/test-connection", {
     method: "POST"
   });
 }

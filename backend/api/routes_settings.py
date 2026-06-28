@@ -23,6 +23,7 @@ from backend.schemas.settings import (
     PixivBrowserAuthServiceStatusResponse,
     PixivBrowserAuthStartResponse,
     PixivBrowserAuthStatusResponse,
+    PixivConnectionTestResponse,
     SettingsResponse,
     SettingsUpdateRequest,
 )
@@ -66,6 +67,31 @@ def validate_pixiv_auth(
     finally:
         service.close()
     return AuthValidationResponse(ok=True, message="Pixiv authentication succeeded.")
+
+
+@router.post("/test-connection", response_model=PixivConnectionTestResponse)
+def test_pixiv_connection(
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> PixivConnectionTestResponse:
+    service = AppSettingsService(db_path=db_path, settings_json_path=settings_json_path)
+    try:
+        user = service.test_pixiv_connection()
+    finally:
+        service.close()
+    user_name = user["user_name"]
+    user_id = user["user_id"]
+    message = (
+        f"Pixiv API connection succeeded for {user_name} ({user_id})."
+        if user_name
+        else f"Pixiv API connection succeeded for user {user_id}."
+    )
+    return PixivConnectionTestResponse(
+        ok=True,
+        message=message,
+        user_id=user_id,
+        user_name=user_name,
+    )
 
 
 @router.post("/pixiv-auth/start", response_model=PixivAuthStartResponse)
@@ -264,9 +290,7 @@ def _start_auth_browser(*, flow_id: str, login_url: str) -> None:
             timeout=10,
         )
     except requests.RequestException as exc:
-        raise PixivAuthError(
-            "Pixiv browser authentication sidecar could not be reached."
-        ) from exc
+        raise PixivAuthError("Pixiv browser authentication sidecar could not be reached.") from exc
     if response.status_code >= 400:
         raise PixivAuthError("Pixiv browser authentication sidecar rejected the login request.")
 
