@@ -27,5 +27,5 @@ export function percent(completed: number, total: number): number {
 }
 
 export function isCancellable(status: string): boolean {
-  return status === "queued" || status === "running";
+  return status === "inactive" || status === "queued" || status === "running";
 }

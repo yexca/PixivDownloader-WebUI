@@ -1415,6 +1415,87 @@ def test_bulk_cancel_jobs_cancels_active_and_reports_terminal_errors(tmp_path):
     assert queue.wake_count == 1
 
 
+def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="hydrate_legacy_import",
+                status="failed",
+                options={
+                    "source": "legacy_database",
+                    "artist_ids": ["111", "222"],
+                    "legacy_latest_download_id_by_artist": {"111": "1000", "222": "2000"},
+                    "activation_scope": "one_time",
+                },
+            )
+        )
+        repository.add_event(
+            JobEvent(
+                job_id="job-1",
+                level="error",
+                message="Legacy import hydration artist 222: failed_retryable",
+                payload={"artist_id": "222", "status": "failed_retryable", "reason": "Rate Limit"},
+            )
+        )
+    finally:
+        repository.close()
+
+    response = client.post("/api/jobs/job-1/retry")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source_job_id"] == "job-1"
+    assert body["action"] == "retry_failed_artists"
+    assert queue.wake_count == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        retry = repository.get_by_id(body["job_id"])
+    finally:
+        repository.close()
+    assert retry is not None
+    assert retry.type == "hydrate_legacy_import"
+    assert retry.options["artist_ids"] == ["222"]
+    assert retry.options["legacy_latest_download_id_by_artist"] == {"222": "2000"}
+
+
+def test_rerun_job_queues_copy_with_original_options(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="download_artist",
+                status="failed",
+                input_user_id="123",
+                options={"activation_scope": "one_time", "max_artworks": 5},
+            )
+        )
+    finally:
+        repository.close()
+
+    response = client.post("/api/jobs/job-1/rerun")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action"] == "rerun"
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        rerun = repository.get_by_id(body["job_id"])
+    finally:
+        repository.close()
+    assert rerun is not None
+    assert rerun.type == "download_artist"
+    assert rerun.input_user_id == "123"
+    assert rerun.options["max_artworks"] == 5
+    assert rerun.options["source_job_id"] == "job-1"
+
+
 def test_recent_logs_endpoint_returns_paginated_items(tmp_path):
     client = make_client(tmp_path)
     repository = JobRepository(tmp_path / "pixiv.sqlite3")

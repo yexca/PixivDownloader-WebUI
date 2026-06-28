@@ -9,6 +9,7 @@ from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.core.errors import JobNotFoundError
 from backend.domain.types import JobStatus
 from backend.schemas.jobs import (
+    JobActionResponse,
     JobBulkActionError,
     JobBulkCancelRequest,
     JobBulkCancelResponse,
@@ -97,6 +98,48 @@ def cancel_job(job_id: str, db_path: DbPath, queue: Queue) -> JobCancelResponse:
         job_id=job.id,
         status=job.status,
         cancel_requested=job.cancel_requested,
+    )
+
+
+@router.post("/{job_id}/retry", response_model=JobActionResponse)
+def retry_job(
+    job_id: str,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+    queue: Queue,
+) -> JobActionResponse:
+    service = JobService(db_path, settings_json_path=settings_json_path)
+    try:
+        job = service.retry_job(job_id)
+    finally:
+        service.close()
+    queue.wake()
+    return JobActionResponse(
+        job_id=job.id,
+        status=job.status,
+        source_job_id=job_id,
+        action=str(job.options.get("job_action", "retry")),
+    )
+
+
+@router.post("/{job_id}/rerun", response_model=JobActionResponse)
+def rerun_job(
+    job_id: str,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+    queue: Queue,
+) -> JobActionResponse:
+    service = JobService(db_path, settings_json_path=settings_json_path)
+    try:
+        job = service.rerun_job(job_id)
+    finally:
+        service.close()
+    queue.wake()
+    return JobActionResponse(
+        job_id=job.id,
+        status=job.status,
+        source_job_id=job_id,
+        action="rerun",
     )
 
 

@@ -53,6 +53,13 @@ class JobCancelResponse(BaseModel):
     cancel_requested: bool
 
 
+class JobActionResponse(BaseModel):
+    job_id: str
+    status: str
+    source_job_id: str
+    action: str
+
+
 class JobBulkCancelRequest(BaseModel):
     job_ids: list[str]
 

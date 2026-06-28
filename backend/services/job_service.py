@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import uuid4
 
-from backend.core.errors import JobNotCancellableError
+from backend.core.errors import JobNotCancellableError, JobNotFoundError
 from backend.domain.entities import Job, JobEvent
 from backend.domain.types import JobStatus, JobType
 from backend.repositories._time import utc_now
@@ -117,6 +117,25 @@ class JobService:
             )
         )
         return self.repository.get_by_id(job.id) or job
+
+    def rerun_job(self, job_id: str) -> Job:
+        source = self.repository.get_by_id(job_id)
+        if source is None:
+            raise JobNotFoundError(f"job {job_id} was not found")
+        return self._create_from_source(source, action="rerun", options=source.options)
+
+    def retry_job(self, job_id: str) -> Job:
+        source = self.repository.get_by_id(job_id)
+        if source is None:
+            raise JobNotFoundError(f"job {job_id} was not found")
+        if source.type == "hydrate_legacy_import":
+            retry_options = self._legacy_hydration_retry_options(source)
+            return self._create_from_source(
+                source,
+                action="retry_failed_artists",
+                options=retry_options,
+            )
+        return self._create_from_source(source, action="retry", options=source.options)
 
     def list_jobs(
         self,
@@ -260,6 +279,85 @@ class JobService:
         finally:
             settings_service.close()
         check_free_space(settings.download_path, settings.min_free_space_gb)
+
+    def _create_from_source(
+        self,
+        source: Job,
+        *,
+        action: str,
+        options: dict[str, object],
+    ) -> Job:
+        if source.type in DOWNLOAD_JOB_TYPES:
+            self._ensure_download_space()
+        cleaned_options = dict(options)
+        cleaned_options["activation_scope"] = "one_time"
+        cleaned_options["source_job_id"] = source.id
+        cleaned_options["job_action"] = action
+        status: JobStatus = self._next_one_time_status()
+        job = Job(
+            id=str(uuid4()),
+            type=source.type,
+            status=status,
+            input_user_id=source.input_user_id,
+            input_artwork_id=source.input_artwork_id,
+            artist_id=source.artist_id,
+            options=cleaned_options,
+        )
+        self.repository.create(job)
+        self.repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Job queued from previous job"
+                if status == "queued"
+                else "Job waiting for one-time task capacity",
+                payload={
+                    "action": action,
+                    "source_job_id": source.id,
+                    "options": cleaned_options,
+                },
+            )
+        )
+        return self.repository.get_by_id(job.id) or job
+
+    def _legacy_hydration_retry_options(self, source: Job) -> dict[str, object]:
+        legacy_latest_by_artist = source.options.get("legacy_latest_download_id_by_artist")
+        if not isinstance(legacy_latest_by_artist, dict):
+            legacy_latest_by_artist = {}
+        source_artist_ids = [
+            artist_id
+            for artist_id in source.options.get("artist_ids", [])
+            if isinstance(artist_id, str)
+        ]
+        event_limit = max(1000, len(source_artist_ids) + 100)
+        failed_artist_ids = self._failed_legacy_hydration_artist_ids(
+            source.id,
+            limit=event_limit,
+        )
+        if not failed_artist_ids:
+            failed_artist_ids = source_artist_ids
+        return {
+            "source": source.options.get("source", "legacy_database"),
+            "artist_ids": failed_artist_ids,
+            "legacy_latest_download_id_by_artist": {
+                artist_id: legacy_latest_by_artist.get(artist_id)
+                for artist_id in failed_artist_ids
+            },
+        }
+
+    def _failed_legacy_hydration_artist_ids(self, job_id: str, *, limit: int) -> list[str]:
+        failed_artist_ids: list[str] = []
+        seen: set[str] = set()
+        for event in self.repository.list_events(job_id, limit=limit):
+            payload = event.payload or {}
+            if payload.get("status") != "failed_retryable":
+                continue
+            artist_id = payload.get("artist_id")
+            if not isinstance(artist_id, str) or not artist_id or artist_id in seen:
+                continue
+            seen.add(artist_id)
+            failed_artist_ids.append(artist_id)
+        return failed_artist_ids
 
 
 def resolve_job_type(

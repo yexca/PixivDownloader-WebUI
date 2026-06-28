@@ -63,8 +63,9 @@ export function JobTable({
               <tr
                 key={job.id}
                 id={`job-${job.id}`}
-                className="hover:bg-muted/40"
+                className={onSelect ? "cursor-pointer hover:bg-muted/40" : "hover:bg-muted/40"}
                 data-selected={selected ? "true" : "false"}
+                onClick={() => onSelect?.(job)}
               >
                 {onToggleSelected ? (
                   <td className="table-cell sticky-col-left w-10">
@@ -72,6 +73,7 @@ export function JobTable({
                       type="checkbox"
                       aria-label={`Select job ${job.id}`}
                       checked={selectedIds?.has(job.id) ?? false}
+                      onClick={(event) => event.stopPropagation()}
                       onChange={() => onToggleSelected(job.id)}
                     />
                   </td>
@@ -82,7 +84,11 @@ export function JobTable({
                 </td>
                 <td className="table-cell">
                   {job.input_user_id ? (
-                    <Link className="text-primary hover:underline" to={`/artists/${job.input_user_id}`}>
+                    <Link
+                      className="text-primary hover:underline"
+                      to={`/artists/${job.input_user_id}`}
+                      onClick={(event) => event.stopPropagation()}
+                    >
                       User {job.input_user_id}
                     </Link>
                   ) : (
@@ -105,7 +111,10 @@ export function JobTable({
                       type="button"
                       variant={selected ? "secondary" : "outline"}
                       size="sm"
-                      onClick={() => onSelect?.(job)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onSelect?.(job);
+                      }}
                     >
                       Details
                     </Button>
@@ -115,7 +124,10 @@ export function JobTable({
                         variant="ghost"
                         size="sm"
                         disabled={job.cancel_requested}
-                        onClick={() => onCancel(job)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onCancel(job);
+                        }}
                       >
                         Cancel
                       </Button>

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -57,7 +57,7 @@ class PixivClient:
 
     def get_artist_by_user_id(self, user_id: str) -> Artist:
         try:
-            result = self.api.user_detail(user_id)
+            result = self._request(lambda: self.api.user_detail(user_id))
         except Exception as exc:
             raise PixivApiError(f"failed to fetch Pixiv user {user_id}") from exc
         status, reason = account_status_from_user_detail(result)
@@ -81,7 +81,7 @@ class PixivClient:
 
     def get_artist_by_artwork_id(self, artwork_id: str) -> Artist:
         try:
-            illust = self.api.illust_detail(artwork_id).illust
+            illust = self._request(lambda: self.api.illust_detail(artwork_id)).illust
         except Exception as exc:
             raise PixivApiError(f"failed to fetch Pixiv artwork {artwork_id}") from exc
         return artist_from_pixiv_user(illust.user)
@@ -93,9 +93,12 @@ class PixivClient:
         while next_qs is not None:
             try:
                 if next_qs == {}:
-                    json_result = self.api.user_illusts(user_id)
+                    json_result = self._request(lambda: self.api.user_illusts(user_id))
                 else:
-                    json_result = self.api.user_illusts(**next_qs)
+                    page_qs = next_qs
+                    json_result = self._request(
+                        lambda page_qs=page_qs: self.api.user_illusts(**page_qs)
+                    )
             except Exception as exc:
                 raise PixivApiError(f"failed to fetch artworks for Pixiv user {user_id}") from exc
 
@@ -106,10 +109,13 @@ class PixivClient:
             illusts.extend(_get_value(json_result, "illusts", []))
             next_url = _get_value(json_result, "next_url", None)
             next_qs = self.api.parse_qs(next_url)
-            if self.sleeper is not None:
-                self.sleeper()
 
         return [artwork_from_pixiv_illust(illust) for illust in illusts]
+
+    def _request(self, request: Callable[[], Any]) -> Any:
+        if self.sleeper is not None:
+            self.sleeper()
+        return request()
 
 
 def artist_from_pixiv_user(

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CalendarClock, Pause, Play, RefreshCw, XCircle } from "lucide-react";
+import { AlertTriangle, CalendarClock, Pause, Play, RefreshCw, RotateCcw, XCircle } from "lucide-react";
 
 import {
   bulkCancelJobs,
@@ -10,8 +10,11 @@ import {
   getJobQueueState,
   listJobs,
   pauseJobQueue,
+  rerunJob,
+  retryJob,
   resumeJobQueue,
   type Job,
+  type JobActionResponse,
   type JobStatus
 } from "@/api/jobs";
 import { Button } from "@/components/ui/button";
@@ -51,7 +54,8 @@ export function JobsPage(): JSX.Element {
   });
   const queueState = useQuery({
     queryKey: ["job-queue-state"],
-    queryFn: getJobQueueState
+    queryFn: getJobQueueState,
+    refetchInterval: 4000
   });
   const selectedJob = useQuery({
     queryKey: ["job", selectedJobId],
@@ -189,12 +193,12 @@ export function JobsPage(): JSX.Element {
             {queueState.data?.paused ? (
               <Button type="button" variant="outline" onClick={() => resumeQueue.mutate()} disabled={resumeQueue.isPending}>
                 <Play className="h-4 w-4" aria-hidden="true" />
-                Start Queue
+                Resume Queue
               </Button>
             ) : (
               <Button type="button" variant="outline" onClick={() => pauseQueue.mutate()} disabled={pauseQueue.isPending}>
                 <Pause className="h-4 w-4" aria-hidden="true" />
-                Stop Queue
+                Pause Queue
               </Button>
             )}
             <Button type="button" variant="outline" asChild>
@@ -208,6 +212,11 @@ export function JobsPage(): JSX.Element {
       />
       <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <section className="space-y-3">
+          {queueState.data?.paused ? (
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Queue paused. Running jobs will finish; no new queued jobs will start until the queue resumes.
+            </div>
+          ) : null}
           {selectedCount > 0 || queuedJobIds.length > 0 ? (
             <div className="flex flex-col gap-2 rounded-md border bg-card p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
               <div className="text-muted-foreground">
@@ -273,7 +282,15 @@ export function JobsPage(): JSX.Element {
         </section>
         <aside className="space-y-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start">
           {selectedJobId && selectedJob.data ? (
-            <JobDetailPanel job={selectedJob.data} />
+            <JobDetailPanel
+              job={selectedJob.data}
+              onSelectJob={(jobId) => {
+                setSelectedJobId(jobId);
+                const nextParams = new URLSearchParams(searchParams);
+                nextParams.set("job", jobId);
+                setSearchParams(nextParams, { replace: true });
+              }}
+            />
           ) : selectedJob.isLoading ? (
             <DataState title="Loading job detail" variant="loading" />
           ) : selectedJob.isError ? (
@@ -287,10 +304,16 @@ export function JobsPage(): JSX.Element {
   );
 }
 
-function JobDetailPanel({ job }: { job: Awaited<ReturnType<typeof getJob>> }): JSX.Element {
+function JobDetailPanel({
+  job,
+  onSelectJob
+}: {
+  job: Awaited<ReturnType<typeof getJob>>;
+  onSelectJob: (jobId: string) => void;
+}): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const mutation = useMutation({
+  const cancelMutation = useMutation({
     mutationFn: () => cancelJob(job.id),
     onSuccess: () => {
       pushToast({ title: "Cancellation requested", tone: "success" });
@@ -299,6 +322,25 @@ function JobDetailPanel({ job }: { job: Awaited<ReturnType<typeof getJob>> }): J
     },
     onError: (error) => pushToast({ title: "Cancel failed", description: error.message, tone: "error" })
   });
+  const onActionSuccess = (response: JobActionResponse) => {
+    const title = response.action === "rerun" ? "Job queued again" : "Retry queued";
+    pushToast({ title, description: response.job_id, tone: "success" });
+    void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+    void queryClient.invalidateQueries({ queryKey: ["job"] });
+    onSelectJob(response.job_id);
+  };
+  const retryMutation = useMutation({
+    mutationFn: () => retryJob(job.id),
+    onSuccess: onActionSuccess,
+    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" })
+  });
+  const rerunMutation = useMutation({
+    mutationFn: () => rerunJob(job.id),
+    onSuccess: onActionSuccess,
+    onError: (error) => pushToast({ title: "Rerun failed", description: error.message, tone: "error" })
+  });
+  const canRetry = job.status === "failed";
+  const canRerun = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
 
   return (
     <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
@@ -313,14 +355,43 @@ function JobDetailPanel({ job }: { job: Awaited<ReturnType<typeof getJob>> }): J
               type="button"
               variant="outline"
               size="sm"
-              disabled={mutation.isPending || job.cancel_requested}
-              onClick={() => mutation.mutate()}
+              disabled={cancelMutation.isPending || job.cancel_requested}
+              onClick={() => cancelMutation.mutate()}
             >
               <XCircle className="h-4 w-4" aria-hidden="true" />
               Cancel
             </Button>
           ) : null}
         </div>
+        {job.status === "failed" ? <JobFailureSummary job={job} /> : null}
+        {canRetry || canRerun ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {canRetry ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={retryMutation.isPending}
+                onClick={() => retryMutation.mutate()}
+              >
+                <RotateCcw className={retryMutation.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                {job.type === "hydrate_legacy_import" ? "Retry Failed Artists" : "Retry"}
+              </Button>
+            ) : null}
+            {canRerun ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={rerunMutation.isPending}
+                onClick={() => rerunMutation.mutate()}
+              >
+                <RefreshCw className={rerunMutation.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                Rerun
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="mt-4">
           <JobProgress job={job} />
         </div>
@@ -348,6 +419,75 @@ function JobDetailPanel({ job }: { job: Awaited<ReturnType<typeof getJob>> }): J
       )}
     </div>
   );
+}
+
+function JobFailureSummary({ job }: { job: Awaited<ReturnType<typeof getJob>> }): JSX.Element {
+  const failedRetryableArtists = latestNumericPayload(job, "failed_retryable_artists");
+  const reasonCounts = countFailureReasons(job);
+  const primaryReason = reasonCounts[0]?.reason;
+  const summary = failureSummaryText(job, primaryReason, failedRetryableArtists);
+
+  return (
+    <div className="mt-4 rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
+        <div className="min-w-0">
+          <p className="font-medium text-destructive">{summary}</p>
+          {job.error_message ? <p className="mt-1 break-words text-muted-foreground">{job.error_message}</p> : null}
+          {reasonCounts.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
+              {reasonCounts.slice(0, 3).map((item) => (
+                <span key={item.reason} className="rounded-md border bg-background px-2 py-1">
+                  {item.reason}: {item.count}
+                </span>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function failureSummaryText(job: Job, primaryReason: string | undefined, failedRetryableArtists: number | null): string {
+  const failedArtists = failedRetryableArtists ?? job.failed_files;
+  if (job.type === "hydrate_legacy_import") {
+    if (primaryReason && /rate limit|restricted/i.test(primaryReason)) {
+      return `Pixiv limited this metadata job. ${failedArtists || "Some"} artist(s) can be retried later.`;
+    }
+    return `${failedArtists || "Some"} legacy artist(s) failed and can be retried.`;
+  }
+  if (primaryReason) {
+    return `Job failed: ${primaryReason}`;
+  }
+  return "Job failed. Review the events below for details.";
+}
+
+function latestNumericPayload(job: Awaited<ReturnType<typeof getJob>>, key: string): number | null {
+  for (const event of [...job.events].reverse()) {
+    const value = event.payload?.[key];
+    if (typeof value === "number") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function countFailureReasons(job: Awaited<ReturnType<typeof getJob>>): Array<{ reason: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const event of job.events) {
+    if (event.level !== "error") {
+      continue;
+    }
+    const reason = event.payload?.reason;
+    if (typeof reason !== "string" || !reason.trim()) {
+      continue;
+    }
+    counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([reason, count]) => ({ reason, count }))
+    .sort((left, right) => right.count - left.count);
 }
 
 function Detail({ label, value }: { label: string; value: string }): JSX.Element {

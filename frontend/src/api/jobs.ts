@@ -45,6 +45,13 @@ export type JobCancelResponse = {
   cancel_requested: boolean;
 };
 
+export type JobActionResponse = {
+  job_id: string;
+  status: JobStatus;
+  source_job_id: string;
+  action: string;
+};
+
 export type JobBulkCancelResponse = {
   cancelled: JobCancelResponse[];
   errors: Array<{ job_id: string; message: string }>;
@@ -93,6 +100,18 @@ export function getJob(jobId: string): Promise<JobDetail> {
 
 export function cancelJob(jobId: string): Promise<JobCancelResponse> {
   return apiRequest<JobCancelResponse>(`/jobs/${jobId}/cancel`, {
+    method: "POST"
+  });
+}
+
+export function retryJob(jobId: string): Promise<JobActionResponse> {
+  return apiRequest<JobActionResponse>(`/jobs/${jobId}/retry`, {
+    method: "POST"
+  });
+}
+
+export function rerunJob(jobId: string): Promise<JobActionResponse> {
+  return apiRequest<JobActionResponse>(`/jobs/${jobId}/rerun`, {
     method: "POST"
   });
 }
