@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarClock,
@@ -50,7 +49,9 @@ import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { cn, formatDate } from "@/lib/utils";
 
-type WorkflowTab = "active" | "inactive" | "failed" | "completed";
+type SubmittedView = "runs" | "schedules";
+type RunTab = "active" | "failed" | "completed";
+type ScheduleTab = "enabled" | "paused" | "blocked";
 type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "rule";
 type WorkflowTarget =
   | "single_artist"
@@ -172,11 +173,21 @@ const initialForm: WorkflowForm = {
   }
 };
 
-const tabItems: Array<{ value: WorkflowTab; label: string }> = [
+const submittedViewItems: Array<{ value: SubmittedView; label: string }> = [
+  { value: "runs", label: "Runs" },
+  { value: "schedules", label: "Schedules" }
+];
+
+const runTabItems: Array<{ value: RunTab; label: string }> = [
   { value: "active", label: "Active" },
-  { value: "inactive", label: "Inactive" },
   { value: "failed", label: "Failed" },
-  { value: "completed", label: "Completed" }
+  { value: "completed", label: "Complete" }
+];
+
+const scheduleTabItems: Array<{ value: ScheduleTab; label: string }> = [
+  { value: "enabled", label: "Enabled" },
+  { value: "paused", label: "Paused" },
+  { value: "blocked", label: "Blocked" }
 ];
 
 const moduleLabels: Record<ModuleKey, string> = {
@@ -224,7 +235,9 @@ export function WorkflowsPage(): JSX.Element {
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<WorkflowForm>(initialForm);
   const [submitted, setSubmitted] = React.useState(false);
-  const [tab, setTab] = React.useState<WorkflowTab>("active");
+  const [submittedView, setSubmittedView] = React.useState<SubmittedView>("runs");
+  const [runTab, setRunTab] = React.useState<RunTab>("active");
+  const [scheduleTab, setScheduleTab] = React.useState<ScheduleTab>("enabled");
   const [tagSearch, setTagSearch] = React.useState("");
   const [tagPickerOpen, setTagPickerOpen] = React.useState(false);
 
@@ -251,8 +264,8 @@ export function WorkflowsPage(): JSX.Element {
     refetchInterval: 15000
   });
   const workflowRuns = useQuery({
-    queryKey: ["workflow-runs", 5],
-    queryFn: () => listWorkflowRuns(5),
+    queryKey: ["workflow-runs", 50],
+    queryFn: () => listWorkflowRuns(50),
     refetchInterval: 15000
   });
   const localTags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
@@ -370,7 +383,9 @@ export function WorkflowsPage(): JSX.Element {
     closeBuilder();
   }
 
-  const visible = splitWorkflows(jobs.data?.items ?? [], schedules.data?.items ?? [], tab);
+  const visibleRuns = filterWorkflowRuns(workflowRuns.data?.items ?? [], runTab);
+  const visibleSchedules = filterScheduledWorkflows(schedules.data?.items ?? [], scheduleTab);
+  const submittedCount = submittedView === "runs" ? visibleRuns.length : visibleSchedules.length;
 
   return (
     <>
@@ -482,22 +497,6 @@ export function WorkflowsPage(): JSX.Element {
             />
           </section>
 
-          {workflowRuns.data?.items.length ? (
-            <section className="surface p-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-sm font-semibold">Run Batches</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">Recent Run All submissions</p>
-                </div>
-              </div>
-              <div className="mt-4 space-y-3">
-                {workflowRuns.data.items.map((batch) => (
-                  <BatchSummary key={batch.id} batch={batch} />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
           {selectedDraft ? (
             <DraftDetail draft={selectedDraft} onEdit={() => openEditBuilder(selectedDraft)} />
           ) : (
@@ -506,27 +505,48 @@ export function WorkflowsPage(): JSX.Element {
         </aside>
 
         <section className="space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Tabs value={tab} onValueChange={setTab} items={tabItems} />
-            <p className="text-sm text-muted-foreground">{visible.length} submitted item(s)</p>
+          <div className="surface p-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-sm font-semibold">Submitted</h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Runs are execution history. Schedules are saved triggers that create future runs.
+                </p>
+              </div>
+              <Tabs value={submittedView} onValueChange={setSubmittedView} items={submittedViewItems} />
+            </div>
+            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {submittedView === "runs" ? (
+                <Tabs value={runTab} onValueChange={setRunTab} items={runTabItems} />
+              ) : (
+                <Tabs value={scheduleTab} onValueChange={setScheduleTab} items={scheduleTabItems} />
+              )}
+              <p className="text-sm text-muted-foreground">{submittedCount} item(s)</p>
+            </div>
           </div>
           {jobs.isError ? (
             <DataState title="Could not load jobs" description={jobs.error.message} variant="error" />
+          ) : workflowRuns.isError ? (
+            <DataState title="Could not load workflow runs" description={workflowRuns.error.message} variant="error" />
           ) : schedules.isError ? (
-            <DataState title="Could not load workflows" description={schedules.error.message} variant="error" />
-          ) : jobs.isLoading || schedules.isLoading ? (
+            <DataState title="Could not load schedules" description={schedules.error.message} variant="error" />
+          ) : jobs.isLoading || workflowRuns.isLoading || schedules.isLoading ? (
             <DataState title="Loading submitted workflows" variant="loading" />
-          ) : visible.length === 0 ? (
-            <DataState title="No submitted workflows here" description="Submit a draft or choose another tab." />
+          ) : submittedView === "runs" && visibleRuns.length === 0 ? (
+            <DataState title="No workflow runs here" description="Submit a draft or choose another run state." />
+          ) : submittedView === "schedules" && visibleSchedules.length === 0 ? (
+            <DataState title="No schedules here" description="Create a scheduled draft or choose another schedule state." />
+          ) : submittedView === "runs" ? (
+            <div className="grid gap-3">
+              {visibleRuns.map((run) => (
+                <RunWorkflowCard key={run.id} run={run} />
+              ))}
+            </div>
           ) : (
             <div className="grid gap-3">
-              {visible.map((item) =>
-                item.kind === "schedule" ? (
-                  <ScheduleWorkflowCard key={`schedule-${item.task.id}`} task={item.task} />
-                ) : (
-                  <JobWorkflowCard key={`job-${item.job.id}`} job={item.job} />
-                )
-              )}
+              {visibleSchedules.map((task) => (
+                <ScheduleWorkflowCard key={`schedule-${task.id}`} task={task} />
+              ))}
             </div>
           )}
         </section>
@@ -1085,33 +1105,42 @@ function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Workf
   );
 }
 
-function BatchSummary({ batch }: { batch: WorkflowBatchRun }): JSX.Element {
+function RunWorkflowCard({ run }: { run: WorkflowBatchRun }): JSX.Element {
   return (
-    <article className="rounded-md border bg-card p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold">{formatDate(batch.created_at)}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">Concurrency {batch.concurrency}</p>
+    <article className="surface p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="break-words text-sm font-semibold">{runTitle(run)}</h2>
+            <WorkflowRunStatusPill status={run.status} />
+            <Badge tone="muted">run</Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {run.completed}/{run.total} completed, {run.failed} failed, {run.skipped} skipped
+          </p>
         </div>
-        <Badge tone={batch.failed ? "danger" : batch.skipped ? "muted" : "success"}>
-          {batch.completed}/{batch.total}
-        </Badge>
+        <div className="text-left text-sm text-muted-foreground sm:text-right">
+          <div>{formatDate(run.created_at)}</div>
+          <div className="mt-1">Concurrency {run.concurrency}</div>
+        </div>
       </div>
       <div className="mt-3 space-y-2">
-        {batch.items.map((item) => (
-          <div key={item.id ?? item.draft_id} className="rounded-md border bg-muted/20 p-2 text-xs">
+        {run.items.map((item) => (
+          <div key={item.id ?? item.draft_id} className="rounded-md border bg-muted/20 p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="truncate font-medium">{item.title}</span>
-              <Badge tone={item.status === "completed" ? "success" : item.status === "skipped" ? "muted" : "danger"}>
+              <Badge tone={workflowItemTone(item.status)}>
                 {item.status}
               </Badge>
             </div>
             {item.job_ids.length ? (
-              <p className="mt-1 break-all text-muted-foreground">{item.job_ids.length} job(s): {item.job_ids.join(", ")}</p>
+              <p className="mt-1 break-all text-xs text-muted-foreground">
+                {item.job_ids.length} job(s): {item.job_ids.join(", ")}
+              </p>
             ) : item.error_message ? (
-              <p className="mt-1 break-words text-destructive">{item.error_message}</p>
+              <p className="mt-1 break-words text-xs text-destructive">{item.error_message}</p>
             ) : (
-              <p className="mt-1 text-muted-foreground">No job was created.</p>
+              <p className="mt-1 text-xs text-muted-foreground">No job was created.</p>
             )}
           </div>
         ))}
@@ -1275,37 +1304,6 @@ function ScheduleWorkflowCard({ task }: { task: ScheduledTask }): JSX.Element {
       {task.last_error_message ? (
         <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
           {task.last_error_message}
-        </p>
-      ) : null}
-    </article>
-  );
-}
-
-function JobWorkflowCard({ job }: { job: Job }): JSX.Element {
-  return (
-    <article className="surface p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-sm font-semibold">{jobLabel(job)}</h2>
-            <StatusPill status={job.status} />
-            <Badge tone="muted">one-off</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
-        </div>
-        <Button type="button" size="sm" variant="outline" asChild>
-          <Link to={`/jobs?job=${job.id}`}>Inspect</Link>
-        </Button>
-      </div>
-      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-4">
-        <Detail label="Created" value={formatDate(job.created_at)} />
-        <Detail label="Started" value={formatDate(job.started_at)} />
-        <Detail label="Finished" value={formatDate(job.finished_at)} />
-        <Detail label="Files" value={`${job.completed_files}/${job.total_files || 0}`} />
-      </dl>
-      {job.error_message ? (
-        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-          {job.error_message}
         </p>
       ) : null}
     </article>
@@ -1724,37 +1722,30 @@ function validateForm(form: WorkflowForm): string[] {
   return errors;
 }
 
-function splitWorkflows(
-  jobs: Job[],
-  tasks: ScheduledTask[],
-  tab: WorkflowTab
-): Array<{ kind: "job"; job: Job } | { kind: "schedule"; task: ScheduledTask }> {
+function filterWorkflowRuns(runs: WorkflowBatchRun[], tab: RunTab): WorkflowBatchRun[] {
   if (tab === "active") {
-    return [
-      ...tasks.filter((task) => task.status === "active").map((task) => ({ kind: "schedule" as const, task })),
-      ...jobs.filter((job) => job.status === "queued" || job.status === "running").map((job) => ({ kind: "job" as const, job }))
-    ];
-  }
-  if (tab === "inactive") {
-    return [
-      ...tasks
-        .filter((task) => task.status === "paused" || task.status === "inactive")
-        .map((task) => ({ kind: "schedule" as const, task })),
-      ...jobs.filter((job) => job.status === "inactive").map((job) => ({ kind: "job" as const, job }))
-    ];
+    return runs.filter((run) => run.status === "running");
   }
   if (tab === "failed") {
-    return [
-      ...tasks.filter((task) => task.status === "blocked").map((task) => ({ kind: "schedule" as const, task })),
-      ...jobs.filter((job) => job.status === "failed" || job.status === "cancelled").map((job) => ({ kind: "job" as const, job }))
-    ];
+    return runs.filter((run) => run.status === "failed" || run.status === "partial");
   }
-  return jobs.filter((job) => job.status === "completed").map((job) => ({ kind: "job" as const, job }));
+  return runs.filter((run) => run.status === "completed" || run.status === "skipped");
+}
+
+function filterScheduledWorkflows(tasks: ScheduledTask[], tab: ScheduleTab): ScheduledTask[] {
+  if (tab === "enabled") {
+    return tasks.filter((task) => task.status === "active");
+  }
+  if (tab === "blocked") {
+    return tasks.filter((task) => task.status === "blocked");
+  }
+  return tasks.filter((task) => task.status === "paused" || task.status === "inactive");
 }
 
 function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   void queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
+  void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
 }
 
 function loadStoredDrafts(): DraftWorkflow[] {
@@ -1933,20 +1924,6 @@ function lastJobCount(task: ScheduledTask): string {
   return typeof count === "number" ? String(count) : task.last_job_id ?? "-";
 }
 
-function jobLabel(job: Job): string {
-  return job.type.replaceAll("_", " ");
-}
-
-function jobTarget(job: Job): string {
-  if (job.input_user_id) {
-    return `Artist ${job.input_user_id}`;
-  }
-  if (job.input_artwork_id) {
-    return `Artwork ${job.input_artwork_id}`;
-  }
-  return "No target";
-}
-
 function workflowJobStats(jobs: Job[]): { active: number; waiting: number } {
   const oneTimeJobs = jobs.filter((job) => job.options.activation_scope === "one_time");
   return {
@@ -1962,16 +1939,41 @@ function scheduleTaskStats(tasks: ScheduledTask[]): { active: number; waiting: n
   };
 }
 
-function StatusPill({ status }: { status: Job["status"] }): JSX.Element {
-  const tone =
-    status === "completed"
-      ? "success"
-      : status === "failed" || status === "cancelled"
-        ? "danger"
-        : status === "running"
-          ? "default"
-          : "muted";
-  return <Badge tone={tone}>{status}</Badge>;
+function runTitle(run: WorkflowBatchRun): string {
+  if (run.items.length === 1) {
+    return run.items[0].title;
+  }
+  return `${run.items.length} workflow item run`;
+}
+
+function WorkflowRunStatusPill({ status }: { status: WorkflowBatchRun["status"] }): JSX.Element {
+  return <Badge tone={workflowRunTone(status)}>{status}</Badge>;
+}
+
+function workflowRunTone(status: WorkflowBatchRun["status"]): "default" | "success" | "danger" | "warning" | "muted" {
+  if (status === "completed") {
+    return "success";
+  }
+  if (status === "failed" || status === "partial") {
+    return "danger";
+  }
+  if (status === "running") {
+    return "default";
+  }
+  return "muted";
+}
+
+function workflowItemTone(status: WorkflowBatchRunItem["status"]): "default" | "success" | "danger" | "warning" | "muted" {
+  if (status === "completed") {
+    return "success";
+  }
+  if (status === "failed") {
+    return "danger";
+  }
+  if (status === "running" || status === "pending") {
+    return "default";
+  }
+  return "muted";
 }
 
 function Detail({ label, value }: { label: string; value: string }): JSX.Element {
