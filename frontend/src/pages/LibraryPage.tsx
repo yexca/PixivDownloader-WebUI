@@ -14,6 +14,7 @@ import {
   type ArtistDetail,
   type ArtistSummary
 } from "@/api/artists";
+import { listJobs, type Job } from "@/api/jobs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -68,6 +69,11 @@ export function LibraryPage(): JSX.Element {
       })
   });
   const tags = useQuery({ queryKey: ["local-tags"], queryFn: listLocalTags });
+  const activeJobs = useQuery({
+    queryKey: ["jobs", "library-active", 100],
+    queryFn: () => listJobs({ limit: 100 }),
+    refetchInterval: 4000
+  });
   const selectedArtist = useQuery({
     queryKey: ["artist", selectedArtistId],
     queryFn: () => getArtist(selectedArtistId!),
@@ -193,7 +199,12 @@ export function LibraryPage(): JSX.Element {
               <DataState title="No artists found" description="Downloaded or scanned artists will appear here." />
             ) : (
               <>
-                <ArtistTable artists={artists.data.items} selectedArtistId={selectedArtistId} onSelect={selectArtist} />
+                <ArtistTable
+                  artists={artists.data.items}
+                  selectedArtistId={selectedArtistId}
+                  artistJobs={artistJobMap(activeJobs.data?.items ?? [])}
+                  onSelect={selectArtist}
+                />
                 <Pagination
                   total={artists.data.total}
                   page={page}
@@ -206,7 +217,10 @@ export function LibraryPage(): JSX.Element {
           </section>
           <aside className="space-y-3 xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start">
             {selectedArtistId && selectedArtist.data ? (
-              <ArtistDetailPanel artist={selectedArtist.data} />
+              <ArtistDetailPanel
+                artist={selectedArtist.data}
+                jobState={artistJobMap(activeJobs.data?.items ?? []).get(selectedArtist.data.id)}
+              />
             ) : selectedArtist.isLoading ? (
               <DataState title="Loading artist detail" variant="loading" />
             ) : selectedArtist.isError ? (
@@ -224,14 +238,18 @@ export function LibraryPage(): JSX.Element {
 function ArtistTable({
   artists,
   selectedArtistId,
+  artistJobs,
   onSelect
 }: {
   artists: ArtistSummary[];
   selectedArtistId: string | null;
+  artistJobs: Map<string, ArtistJobState>;
   onSelect: (artist: ArtistSummary) => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
+  const [pendingSyncArtistId, setPendingSyncArtistId] = React.useState<string | null>(null);
+  const [pendingRetryArtistId, setPendingRetryArtistId] = React.useState<string | null>(null);
   const sync = useMutation({
     mutationFn: (artistId: string) => syncArtist(artistId),
     onSuccess: (response) => {
@@ -240,7 +258,8 @@ function ArtistTable({
     },
     onError: (error) => {
       pushToast({ title: "Sync failed", description: error.message, tone: "error" });
-    }
+    },
+    onSettled: () => setPendingSyncArtistId(null)
   });
   const retryFailed = useMutation({
     mutationFn: (artistId: string) => retryFailedArtist(artistId),
@@ -248,7 +267,8 @@ function ArtistTable({
       pushToast({ title: "Retry queued", description: response.job_id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
-    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
+    onSettled: () => setPendingRetryArtistId(null)
   });
   const remove = useMutation({
     mutationFn: (artistId: string) => deleteArtist(artistId),
@@ -276,6 +296,9 @@ function ArtistTable({
         <tbody>
           {artists.map((artist) => {
             const selected = selectedArtistId === artist.id;
+            const jobState = artistJobs.get(artist.id);
+            const isSyncing = pendingSyncArtistId === artist.id || Boolean(jobState?.sync);
+            const isRetrying = pendingRetryArtistId === artist.id || Boolean(jobState?.retry);
             return (
             <tr
               key={artist.id}
@@ -289,6 +312,7 @@ function ArtistTable({
                   <div className="min-w-0">
                     <div className="truncate font-medium">{artist.name}</div>
                     <div className="text-xs text-muted-foreground">Pixiv {artist.id}</div>
+                    {jobState ? <ArtistJobBadges state={jobState} compact /> : null}
                   </div>
                 </div>
               </td>
@@ -310,13 +334,14 @@ function ArtistTable({
                     size="icon"
                     title="Sync artist"
                     aria-label="Sync artist"
-                    disabled={sync.isPending}
+                    disabled={isSyncing}
                     onClick={(event) => {
                       event.stopPropagation();
+                      setPendingSyncArtistId(artist.id);
                       sync.mutate(artist.id);
                     }}
                   >
-                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    <RefreshCw className={isSyncing ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
                   </Button>
                   <Button
                     type="button"
@@ -324,13 +349,14 @@ function ArtistTable({
                     size="icon"
                     title="Retry failed files"
                     aria-label="Retry failed files"
-                    disabled={retryFailed.isPending || artist.failed_file_count === 0}
+                    disabled={isRetrying || artist.failed_file_count === 0}
                     onClick={(event) => {
                       event.stopPropagation();
+                      setPendingRetryArtistId(artist.id);
                       retryFailed.mutate(artist.id);
                     }}
                   >
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                    <RotateCcw className={isRetrying ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
                   </Button>
                   <Button
                     type="button"
@@ -362,18 +388,68 @@ function ArtistTable({
 }
 
 type ArtistDetailTab = "overview" | "details" | "tags";
+type ArtistRunningJob = {
+  type: "sync" | "download" | "retry";
+  status: Job["status"];
+};
+type ArtistJobState = Partial<Record<ArtistRunningJob["type"], ArtistRunningJob>>;
 
-function ArtistDetailPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
+function artistJobMap(jobs: Job[]): Map<string, ArtistJobState> {
+  const result = new Map<string, ArtistJobState>();
+  for (const job of jobs) {
+    if (!job.input_user_id || !isActiveJobStatus(job.status)) {
+      continue;
+    }
+    const type = artistRunningJobType(job);
+    if (!type) {
+      continue;
+    }
+    const current = result.get(job.input_user_id) ?? {};
+    current[type] = { type, status: job.status };
+    result.set(job.input_user_id, current);
+  }
+  return result;
+}
+
+function isActiveJobStatus(status: Job["status"]): boolean {
+  return status === "inactive" || status === "queued" || status === "running";
+}
+
+function artistRunningJobType(job: Job): ArtistRunningJob["type"] | null {
+  if (job.type === "sync_artist") {
+    return "sync";
+  }
+  if (job.type === "retry_failed_artist" || job.type === "retry_failed") {
+    return "retry";
+  }
+  if (job.type === "download_artist" || job.type === "rescan_artist") {
+    return "download";
+  }
+  return null;
+}
+
+function ArtistDetailPanel({
+  artist,
+  jobState
+}: {
+  artist: ArtistDetail;
+  jobState?: ArtistJobState;
+}): JSX.Element {
   const [activeTab, setActiveTab] = React.useState<ArtistDetailTab>("overview");
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
+  const [syncPending, setSyncPending] = React.useState(false);
+  const [retryPending, setRetryPending] = React.useState(false);
+  const isSyncing = syncPending || Boolean(jobState?.sync);
+  const isRetrying = retryPending || Boolean(jobState?.retry);
   const sync = useMutation({
     mutationFn: () => syncArtist(artist.id),
     onSuccess: (response) => {
       pushToast({ title: "Sync queued", description: response.job_id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
-    onError: (error) => pushToast({ title: "Sync failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Sync failed", description: error.message, tone: "error" }),
+    onSettled: () => setSyncPending(false)
   });
   const retryFailed = useMutation({
     mutationFn: () => retryFailedArtist(artist.id),
@@ -381,7 +457,8 @@ function ArtistDetailPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
       pushToast({ title: "Retry queued", description: response.job_id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
-    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
+    onSettled: () => setRetryPending(false)
   });
   const remove = useMutation({
     mutationFn: () => deleteArtist(artist.id),
@@ -408,21 +485,38 @@ function ArtistDetailPanel({ artist }: { artist: ArtistDetail }): JSX.Element {
             <div className="mt-2">
               <ArtistStatusBadges artist={artist} />
             </div>
+            {jobState ? (
+              <div className="mt-2">
+                <ArtistJobBadges state={jobState} />
+              </div>
+            ) : null}
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => sync.mutate()} disabled={sync.isPending}>
-            <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setSyncPending(true);
+              sync.mutate();
+            }}
+            disabled={isSyncing}
+          >
+            <RefreshCw className={isSyncing ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
             Sync
           </Button>
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => retryFailed.mutate()}
-            disabled={retryFailed.isPending || artist.failed_file_count === 0}
+            onClick={() => {
+              setRetryPending(true);
+              retryFailed.mutate();
+            }}
+            disabled={isRetrying || artist.failed_file_count === 0}
           >
-            <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            <RotateCcw className={isRetrying ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
             Retry
           </Button>
           <Button type="button" variant="ghost" size="sm" asChild>
@@ -664,6 +758,59 @@ function ArtistStatusBadges({ artist, compact = false }: { artist: ArtistSummary
     return <span className="text-sm text-muted-foreground">Healthy</span>;
   }
   return <div className={compact ? "flex min-w-44 flex-wrap gap-1.5" : "flex flex-wrap gap-1.5"}>{badges}</div>;
+}
+
+function ArtistJobBadges({
+  state,
+  compact = false
+}: {
+  state: ArtistJobState;
+  compact?: boolean;
+}): JSX.Element {
+  const jobs = [state.sync, state.download, state.retry].filter(Boolean) as ArtistRunningJob[];
+  if (jobs.length === 0) {
+    return <></>;
+  }
+  return (
+    <div className={compact ? "mt-1 flex flex-wrap gap-1" : "flex flex-wrap gap-1.5"}>
+      {jobs.map((job) => (
+        <Badge key={job.type} tone={job.status === "running" ? "default" : "warning"} title={artistJobTitle(job)}>
+          {job.status === "running" ? (
+            <RefreshCw className="h-3 w-3 animate-spin" aria-hidden="true" />
+          ) : null}
+          {artistJobLabel(job, compact)}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function artistJobLabel(job: ArtistRunningJob, compact: boolean): string {
+  const labels = {
+    sync: "Sync",
+    download: "Download",
+    retry: "Retry"
+  };
+  if (compact) {
+    return labels[job.type];
+  }
+  if (job.status === "inactive") {
+    return `${labels[job.type]} waiting`;
+  }
+  if (job.status === "queued") {
+    return `${labels[job.type]} queued`;
+  }
+  return `${labels[job.type]} running`;
+}
+
+function artistJobTitle(job: ArtistRunningJob): string {
+  if (job.status === "inactive") {
+    return "Waiting for workflow capacity.";
+  }
+  if (job.status === "queued") {
+    return "Queued for the download worker.";
+  }
+  return "Currently running.";
 }
 
 function TagEditor({ artist }: { artist: ArtistSummary }): JSX.Element {
