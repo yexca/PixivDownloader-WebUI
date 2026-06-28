@@ -34,6 +34,43 @@ class FakePixivClient:
         ]
 
 
+class FakeLegacyPixivClient:
+    def get_artist_by_user_id(self, user_id: str) -> Artist:
+        if user_id == "closed":
+            return Artist(
+                id=user_id,
+                name="Closed",
+                account_status="unavailable",
+                account_status_reason="page not found",
+            )
+        return Artist(id=user_id, name="Legacy Artist")
+
+    def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
+        if user_id == "closed":
+            return []
+        return [
+            Artwork(
+                id="200",
+                artist_id=user_id,
+                title="Title",
+                files=(
+                    ArtworkFile(
+                        artwork_id="200",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/200_p0.jpg",
+                        file_name="200_p0.jpg",
+                    ),
+                    ArtworkFile(
+                        artwork_id="200",
+                        page_index=1,
+                        original_url="https://i.pximg.net/img-original/img/200_p1.jpg",
+                        file_name="200_p1.jpg",
+                    ),
+                ),
+            )
+        ]
+
+
 class FakeFileDownloader:
     def __init__(self, tmp_path):
         self.tmp_path = tmp_path
@@ -180,3 +217,37 @@ def test_worker_file_downloader_uses_runtime_enforced_download_path(tmp_path, mo
     file_downloader = worker._create_file_downloader()
 
     assert file_downloader.download_path == downloads_dir()
+
+
+def test_legacy_hydration_progress_uses_artist_counts(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = JobRepository(db_path)
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="hydrate_legacy_import",
+                status="queued",
+                total_files=2,
+                options={
+                    "artist_ids": ["123", "closed"],
+                    "legacy_latest_download_id_by_artist": {"123": "200", "closed": "100"},
+                },
+            )
+        )
+    finally:
+        repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=FakeLegacyPixivClient,
+        file_downloader_factory=lambda: FakeFileDownloader(tmp_path),
+    )
+
+    job = worker.run_job("job-1")
+
+    assert job.status == "completed"
+    assert job.total_files == 2
+    assert job.completed_files == 2
+    assert job.skipped_files == 0
+    assert job.failed_files == 0

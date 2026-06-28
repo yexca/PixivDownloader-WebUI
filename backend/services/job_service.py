@@ -103,6 +103,7 @@ class JobService:
             id=str(uuid4()),
             type="hydrate_legacy_import",
             status=status,
+            total_files=len(artist_ids),
             options=options,
         )
         self.repository.create(job)

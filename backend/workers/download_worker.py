@@ -172,9 +172,9 @@ class DownloadWorker:
             failed = replace(
                 latest,
                 status="failed",
-                total_files=summary.file_count,
-                completed_files=summary.downloaded_file_count,
-                skipped_files=summary.remote_file_count,
+                total_files=summary.total_artists,
+                completed_files=legacy_hydrated_artist_count(summary),
+                skipped_files=summary.skipped_no_legacy_cursor_artists,
                 failed_files=summary.failed_retryable_artists,
                 error_message=str(exc),
                 finished_at=utc_now(),
@@ -196,9 +196,9 @@ class DownloadWorker:
         finished = replace(
             latest,
             status="completed",
-            total_files=summary.file_count if summary else 0,
-            completed_files=summary.downloaded_file_count if summary else 0,
-            skipped_files=summary.remote_file_count if summary else 0,
+            total_files=summary.total_artists if summary else 0,
+            completed_files=legacy_hydrated_artist_count(summary) if summary else 0,
+            skipped_files=summary.skipped_no_legacy_cursor_artists if summary else 0,
             failed_files=0,
             finished_at=utc_now(),
         )
@@ -223,12 +223,16 @@ class DownloadWorker:
         if job is None:
             return
         completed_artist_count = job.completed_files + (
-            1 if result.status != "failed_retryable" else 0
+            1 if result.status in {"completed", "completed_unavailable"} else 0
+        )
+        skipped_artist_count = job.skipped_files + (
+            1 if result.status == "skipped_no_legacy_cursor" else 0
         )
         failed_artist_count = job.failed_files + (1 if result.status == "failed_retryable" else 0)
         updated = replace(
             job,
             completed_files=completed_artist_count,
+            skipped_files=skipped_artist_count,
             failed_files=failed_artist_count,
         )
         repository.update(updated)
@@ -404,6 +408,10 @@ def legacy_hydration_summary_payload(
         "downloaded_file_count": summary.downloaded_file_count,
         "remote_file_count": summary.remote_file_count,
     }
+
+
+def legacy_hydrated_artist_count(summary: LegacyImportHydrationSummary) -> int:
+    return summary.completed_artists + summary.completed_unavailable_artists
 
 
 def positive_int_option(value: object) -> int | None:

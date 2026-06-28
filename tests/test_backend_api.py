@@ -325,6 +325,7 @@ def test_import_legacy_database_endpoint(tmp_path):
         repository.close()
     assert job is not None
     assert job.type == "hydrate_legacy_import"
+    assert job.total_files == 2
     assert job.options["source"] == "legacy_database"
     assert job.options["artist_ids"] == ["100058387", "101013492"]
     assert job.options["legacy_latest_download_id_by_artist"]["100058387"] == "113381074"

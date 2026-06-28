@@ -20,6 +20,14 @@ export function JobProgress({ job, message, cancelPending, onCancel }: JobProgre
   const { pushToast } = useToast();
   const done = job.completed_files + job.skipped_files + job.failed_files;
   const value = percent(done, job.total_files);
+  const progressText =
+    job.type === "hydrate_legacy_import"
+      ? `${job.completed_files} hydrated, ${job.skipped_files} skipped, ${job.failed_files} failed${
+          job.total_files ? ` of ${job.total_files} artists` : ""
+        }`
+      : `${job.completed_files} downloaded, ${job.skipped_files} skipped, ${job.failed_files} failed${
+          job.total_files ? ` of ${job.total_files}` : ""
+        }`;
   const mutation = useMutation({
     mutationFn: () => cancelJob(job.id),
     onSuccess: () => {
@@ -62,10 +70,7 @@ export function JobProgress({ job, message, cancelPending, onCancel }: JobProgre
         <Progress value={value} />
         <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
           <span>{value}% complete</span>
-          <span>
-            {job.completed_files} downloaded, {job.skipped_files} skipped, {job.failed_files} failed
-            {job.total_files ? ` of ${job.total_files}` : ""}
-          </span>
+          <span>{progressText}</span>
         </div>
       </div>
       {message ? <p className="mt-3 text-sm text-muted-foreground">{message}</p> : null}
