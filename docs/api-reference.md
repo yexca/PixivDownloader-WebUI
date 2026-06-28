@@ -47,12 +47,36 @@ Uploads an old PyQt `pixiv.db` and imports its `pic` table into the current WebU
 POST /api/downloads
 ```
 
-Creates a background job from either:
+Creates a workflow run and dispatches a background job from either:
 
 - Pixiv user ID.
 - Pixiv artwork ID.
 
-The job is persisted and processed by the worker queue.
+The response keeps the shortcut shape used by the UI:
+
+```json
+{
+  "job_id": "uuid",
+  "status": "queued"
+}
+```
+
+The job is linked to the workflow run through `workflow_run_id` and
+`workflow_item_id`.
+
+## Workflows
+
+```text
+POST /api/workflows/run
+POST /api/workflows/runs
+GET  /api/workflows/runs
+GET  /api/workflows/runs/{run_id}
+```
+
+Workflow runs represent orchestration. A run expands targets and actions into
+workflow items, then dispatches jobs. Run status is aggregated from linked jobs:
+active jobs keep the run `running`; terminal jobs move the run to `completed`,
+`failed`, `partial`, or `skipped`.
 
 ## Jobs
 
@@ -65,6 +89,17 @@ WS   /api/jobs/{job_id}/stream
 ```
 
 The WebSocket stream is used by the WebUI for live progress updates.
+
+Job responses include workflow linkage fields when a job was created by a
+workflow shortcut or workflow batch:
+
+```json
+{
+  "workflow_run_id": "uuid",
+  "workflow_item_id": 1,
+  "workflow_source": "download_api"
+}
+```
 
 ## Artists And Artworks
 
@@ -83,7 +118,7 @@ These endpoints back the Library and Artist Detail pages.
 POST /api/artwork-files/{file_id}/retry
 ```
 
-Creates a retry job for a failed file or its artwork context.
+Creates a workflow run and retry job for a failed file or its artwork context.
 
 ## Logs
 

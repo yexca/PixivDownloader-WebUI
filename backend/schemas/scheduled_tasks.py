@@ -9,12 +9,14 @@ from backend.domain.entities import (
     ScheduledTaskTarget,
 )
 from backend.domain.types import (
+    FailureReason,
     ScheduledTaskAction,
     ScheduledTaskArtistSelection,
     ScheduledTaskFilterType,
     ScheduledTaskStatus,
     ScheduledTaskTargetType,
 )
+from backend.schemas.failure_reasons import classify_failure_reason
 
 
 class ScheduledTaskTargetRequest(BaseModel):
@@ -97,6 +99,7 @@ class ScheduledTaskResponse(BaseModel):
     last_job_id: str | None
     last_error_code: str | None
     last_error_message: str | None
+    failure_reason: FailureReason
     config: dict[str, object]
     last_run_summary: dict[str, object] | None
     created_at: str | None
@@ -112,6 +115,7 @@ class ScheduledTaskRunResponse(BaseModel):
     task: ScheduledTaskResponse
     job_id: str | None
     job_ids: list[str]
+    workflow_run_id: str | None
     created: bool
     skipped: bool
 
@@ -133,6 +137,7 @@ def scheduled_task_response(task: ScheduledTask) -> ScheduledTaskResponse:
         last_job_id=task.last_job_id,
         last_error_code=task.last_error_code,
         last_error_message=task.last_error_message,
+        failure_reason=classify_failure_reason(task.last_error_code, task.last_error_message),
         config=scheduled_task_config_to_dict(task.config),
         last_run_summary=task.last_run_summary,
         created_at=task.created_at,

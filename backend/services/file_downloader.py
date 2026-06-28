@@ -7,8 +7,7 @@ from typing import Protocol
 
 import requests
 
-from backend.core.config import ExistingFileBehavior
-from backend.core.config import SettingsService
+from backend.core.config import ExistingFileBehavior, SettingsService
 from backend.core.errors import DownloadError
 
 

@@ -20,8 +20,8 @@ from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.scheduled_task_repository import ScheduledTaskRepository
+from backend.repositories.workflow_run_repository import WorkflowRun
 from backend.services.job_service import JobService
-from backend.services.settings_service import AppSettingsService
 
 
 class ScheduledTaskService:
@@ -49,9 +49,7 @@ class ScheduledTaskService:
         if interval_days < 1:
             raise ValueError("interval_days must be at least 1")
         now = utc_now()
-        status: ScheduledTaskStatus = "paused"
-        if enabled:
-            status = self._next_enabled_status()
+        status: ScheduledTaskStatus = "active" if enabled else "paused"
         task = ScheduledTask(
             id=None,
             name=name.strip() or default_task_name(action, target_artist_id, config),
@@ -91,8 +89,6 @@ class ScheduledTaskService:
         next_run_at = task.next_run_at
         requested_status = status or task.status
         resolved_status = requested_status
-        if requested_status == "active" and task.status != "active":
-            resolved_status = self._next_enabled_status()
         if resolved_status == "active" and task.status != "active" and next_run_at is None:
             next_run_at = utc_now()
         updated = replace(
@@ -119,23 +115,7 @@ class ScheduledTaskService:
         return self.repository.delete(task_id)
 
     def activate_inactive_tasks(self) -> list[ScheduledTask]:
-        capacity = self._activation_capacity()
-        if capacity <= 0:
-            return []
-        activated: list[ScheduledTask] = []
-        for task in self.repository.list_inactive(limit=capacity):
-            next_run_at = task.next_run_at or utc_now()
-            updated = replace(
-                task,
-                status="active",
-                next_run_at=next_run_at,
-                last_error_code=None,
-                last_error_message=None,
-            )
-            self.repository.update(updated)
-            refreshed = self.repository.get_by_id(task.id or 0)
-            activated.append(refreshed or updated)
-        return activated
+        return []
 
     def run_config(self, config: ScheduledTaskConfig) -> list[Job]:
         action = config.actions[0] if config.actions else "download_artist"
@@ -180,7 +160,8 @@ class ScheduledTaskService:
 
         now = utc_now()
         try:
-            jobs = self._create_jobs(task, gate_one_time=False)
+            run = self._create_workflow_run(task, manual=manual)
+            jobs = [job for item in run.items for job in self._jobs_for_ids(item.job_ids)]
         except InsufficientDiskSpaceError as exc:
             updated = replace(
                 task,
@@ -214,9 +195,19 @@ class ScheduledTaskService:
             )
 
         updated = self._mark_success(task, now=now, jobs=jobs)
+        summary = {
+            **(updated.last_run_summary or {}),
+            "workflow_run_id": run.id,
+            "workflow_run_status": run.status,
+            "workflow_run_source": run.source,
+        }
+        updated = replace(updated, last_run_summary=summary)
+        self.repository.update(updated)
+        updated = self.repository.get_by_id(task.id or 0) or updated
         return ScheduledTaskRunResult(
             task=updated,
             jobs=jobs,
+            workflow_run_id=run.id,
             created=bool(jobs),
             skipped=not jobs,
         )
@@ -224,21 +215,23 @@ class ScheduledTaskService:
     def close(self) -> None:
         self.repository.close()
 
-    def _next_enabled_status(self) -> ScheduledTaskStatus:
-        return "active" if self._activation_capacity() > 0 else "inactive"
+    def _create_workflow_run(self, task: ScheduledTask, *, manual: bool) -> WorkflowRun:
+        from backend.services.workflow_run_service import WorkflowRunService
 
-    def _activation_capacity(self) -> int:
-        return max(0, self._max_active_scheduled_tasks() - self.repository.count_by_status("active"))
-
-    def _max_active_scheduled_tasks(self) -> int:
-        service = AppSettingsService(
-            db_path=self.db_path,
-            settings_json_path=self.settings_json_path,
-        )
+        service = WorkflowRunService(self.db_path, settings_json_path=self.settings_json_path)
         try:
-            return service.load().max_active_scheduled_tasks
+            return service.run_schedule(task, manual=manual)
         finally:
             service.close()
+
+    def _jobs_for_ids(self, job_ids: list[str]) -> list[Job]:
+        if not job_ids:
+            return []
+        repository = JobRepository(self.db_path)
+        try:
+            return repository.list_by_ids(job_ids)
+        finally:
+            repository.close()
 
     def _create_jobs(self, task: ScheduledTask, *, gate_one_time: bool) -> list[Job]:
         config = task.config or legacy_config(task)
@@ -296,6 +289,7 @@ class ScheduledTaskService:
                     user_id=artist_id,
                     artwork_id=None,
                     sync_only=True,
+                    options=options,
                     gate_one_time=gate_one_time,
                 )
             if action == "retry_failed_artist":
@@ -305,6 +299,7 @@ class ScheduledTaskService:
                     user_id=artist_id,
                     artwork_id=None,
                     retry_failed_artist=True,
+                    options=options,
                     gate_one_time=gate_one_time,
                 )
             return service.create_download_job(
@@ -428,10 +423,12 @@ class ScheduledTaskRunResult:
         skipped: bool,
         job: Job | None = None,
         jobs: list[Job] | None = None,
+        workflow_run_id: str | None = None,
     ) -> None:
         self.task = task
         self.jobs = jobs or ([] if job is None else [job])
         self.job = self.jobs[-1] if self.jobs else None
+        self.workflow_run_id = workflow_run_id
         self.created = created
         self.skipped = skipped
 

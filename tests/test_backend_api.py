@@ -12,6 +12,7 @@ from backend.repositories.artist_name_history_repository import ArtistNameHistor
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
+from backend.repositories.workflow_run_repository import WorkflowRunRepository
 from backend.services import scheduled_task_service
 from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
@@ -355,8 +356,19 @@ def test_create_download_job(tmp_path):
         job = repository.get_by_id(body["job_id"])
         assert job is not None
         assert job.input_user_id == "123"
+        assert job.workflow_source == "download_api"
+        assert job.options["workflow_source"] == "download_api"
+        run_id = job.workflow_run_id
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.status == "running"
+    assert run.items[0].job_ids == [body["job_id"]]
 
 
 def test_create_download_job_persists_workflow_options(tmp_path):
@@ -388,6 +400,9 @@ def test_create_download_job_persists_workflow_options(tmp_path):
             "max_artworks": 12,
             "min_artwork_id": "100",
             "max_artwork_id": "200",
+            "workflow_run_id": job.options["workflow_run_id"],
+            "workflow_item_id": job.options["workflow_item_id"],
+            "workflow_source": "download_api",
         }
     finally:
         repository.close()
@@ -517,11 +532,22 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     body = run_response.json()
     assert body["created"] is True
     assert body["job_id"]
+    assert body["workflow_run_id"]
     assert body["task"]["last_job_id"] == body["job_id"]
+    assert body["task"]["last_run_summary"]["workflow_run_id"] == body["workflow_run_id"]
+    assert body["task"]["last_run_summary"]["workflow_run_source"] == "manual_schedule"
     assert queue.wake_count == 2
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["job_id"])
+    finally:
+        repository.close()
+    assert job is not None
+    assert job.workflow_run_id == body["workflow_run_id"]
+    assert job.workflow_source == "manual_schedule"
 
 
-def test_scheduled_task_creation_limits_active_schedules(tmp_path):
+def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
     client = make_client(tmp_path)
 
     first_response = client.post(
@@ -550,10 +576,10 @@ def test_scheduled_task_creation_limits_active_schedules(tmp_path):
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert first_response.json()["status"] == "active"
-    assert second_response.json()["status"] == "inactive"
+    assert second_response.json()["status"] == "active"
 
 
-def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
+def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
     client = make_client(tmp_path)
 
     first_response = client.post(
@@ -583,7 +609,7 @@ def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
         settings_json_path=tmp_path / "config" / "settings.json",
     )
     try:
-        assert second_response.json()["status"] == "inactive"
+        assert second_response.json()["status"] == "active"
         paused_response = client.put(
             f"/api/scheduled-tasks/{first_response.json()['id']}",
             json={"status": "paused"},
@@ -592,10 +618,32 @@ def test_inactive_scheduled_task_activates_when_capacity_opens(tmp_path):
 
         activated = service.activate_inactive_tasks()
 
-        assert [task.id for task in activated] == [second_response.json()["id"]]
+        assert activated == []
         assert service.get_task(second_response.json()["id"]).status == "active"
     finally:
         service.close()
+
+
+def test_scheduled_task_can_be_archived(tmp_path):
+    client = make_client(tmp_path)
+
+    create_response = client.post(
+        "/api/scheduled-tasks",
+        json={
+            "name": "Archive me",
+            "action": "download_artist",
+            "target_artist_id": "123",
+            "interval_days": 30,
+            "enabled": True,
+            "run_after_startup": True,
+        },
+    )
+    task_id = create_response.json()["id"]
+
+    archive_response = client.put(f"/api/scheduled-tasks/{task_id}", json={"status": "archived"})
+
+    assert archive_response.status_code == 200
+    assert archive_response.json()["status"] == "archived"
 
 
 def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
@@ -684,7 +732,9 @@ def test_scheduled_task_builder_targets_single_artwork(tmp_path):
         assert job is not None
         assert job.type == "download_from_artwork"
         assert job.input_artwork_id == "999"
-        assert job.options == {"full_download": True}
+        assert job.options["full_download"] is True
+        assert job.workflow_run_id == body["workflow_run_id"]
+        assert job.workflow_source == "manual_schedule"
     finally:
         repository.close()
 
@@ -1069,6 +1119,7 @@ def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     assert body["created"] is False
     assert body["task"]["status"] == "blocked"
     assert body["task"]["last_error_code"] == "insufficient_disk_space"
+    assert body["task"]["failure_reason"] == "disk"
 
 
 def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
@@ -1111,14 +1162,26 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "completed"
+    assert body["status"] == "running"
     assert body["total"] == 2
-    assert body["completed"] == 2
+    assert body["completed"] == 0
     assert body["concurrency"] == 2
+    assert body["failure_reason"] == "unknown"
     assert [item["draft_id"] for item in body["items"]] == ["draft-1", "draft-2"]
-    assert all(item["status"] == "completed" for item in body["items"])
+    assert all(item["status"] == "running" for item in body["items"])
+    assert all(item["failure_reason"] == "unknown" for item in body["items"])
     assert len(body["items"][0]["job_ids"]) == 1
     assert queue.wake_count == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        batch_job = repository.get_by_id(body["items"][0]["job_ids"][0])
+    finally:
+        repository.close()
+    assert batch_job is not None
+    assert batch_job.workflow_run_id == body["id"]
+    assert batch_job.workflow_source == "workflow_batch"
+    assert batch_job.options["workflow_run_id"] == body["id"]
+    assert batch_job.options["workflow_source"] == "workflow_batch"
 
     list_response = client.get("/api/workflows/runs")
 
@@ -1128,8 +1191,30 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert list_body["items"][0]["id"] == body["id"]
     assert list_body["items"][0]["items"][0]["title"] == "Sync artist"
 
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job_ids = [
+            job_id
+            for item in body["items"]
+            for job_id in item["job_ids"]
+        ]
+        jobs = [repository.get_by_id(job_id) for job_id in job_ids]
+        for job in jobs:
+            assert job is not None
+            repository.update(replace(job, status="completed"))
+    finally:
+        repository.close()
 
-def test_workflow_batch_schedules_respect_active_limit(tmp_path):
+    completed_response = client.get(f"/api/workflows/runs/{body['id']}")
+
+    assert completed_response.status_code == 200
+    completed_body = completed_response.json()
+    assert completed_body["status"] == "completed"
+    assert completed_body["completed"] == 2
+    assert all(item["status"] == "completed" for item in completed_body["items"])
+
+
+def test_workflow_batch_schedules_create_enabled_triggers(tmp_path):
     client = make_client(tmp_path)
 
     response = client.post(
@@ -1178,7 +1263,7 @@ def test_workflow_batch_schedules_respect_active_limit(tmp_path):
     tasks = sorted(schedules_response.json()["items"], key=lambda task: task["name"])
     assert [(task["name"], task["status"]) for task in tasks] == [
         ("First schedule", "active"),
-        ("Second schedule", "inactive"),
+        ("Second schedule", "active"),
     ]
 
 
@@ -1241,6 +1326,8 @@ def test_create_artist_queues_sync_job(tmp_path):
         assert job is not None
         assert job.type == "sync_artist"
         assert job.input_user_id == "123"
+        assert job.workflow_source == "library_shortcut"
+        assert job.options["workflow_source"] == "library_shortcut"
     finally:
         repository.close()
 

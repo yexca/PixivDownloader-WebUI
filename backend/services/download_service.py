@@ -303,7 +303,9 @@ class DownloadService:
                 existing = self._existing_file(file)
                 if retry_failed and (existing is None or existing.status != "failed"):
                     continue
-                if pending_only and (existing is None or existing.status not in {"pending", "remote_only"}):
+                if pending_only and (
+                    existing is None or existing.status not in {"pending", "remote_only"}
+                ):
                     continue
                 file_id = self.file_repository.upsert(
                     ArtworkFile(

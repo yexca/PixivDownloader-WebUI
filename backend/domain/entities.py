@@ -98,6 +98,9 @@ class Job:
     input_user_id: str | None = None
     input_artwork_id: str | None = None
     options: dict[str, object] = field(default_factory=dict)
+    workflow_run_id: str | None = None
+    workflow_item_id: int | None = None
+    workflow_source: str | None = None
     artist_id: str | None = None
     total_files: int = 0
     completed_files: int = 0

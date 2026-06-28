@@ -54,9 +54,9 @@ def test_recover_interrupted_workflow_run_processes_pending_item(tmp_path):
         service.close()
 
     assert len(recovered) == 1
-    assert recovered[0].status == "completed"
-    assert recovered[0].completed == 1
-    assert recovered[0].items[0].status == "completed"
+    assert recovered[0].status == "running"
+    assert recovered[0].completed == 0
+    assert recovered[0].items[0].status == "running"
     assert len(recovered[0].items[0].job_ids) == 1
     job_repository = JobRepository(db_path)
     try:
@@ -117,7 +117,7 @@ def test_recover_interrupted_workflow_run_does_not_duplicate_existing_item_jobs(
     finally:
         service.close()
 
-    assert recovered[0].status == "completed"
+    assert recovered[0].status == "running"
     assert recovered[0].items[0].job_ids == ["job-1"]
     job_repository = JobRepository(db_path)
     try:

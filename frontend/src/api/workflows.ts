@@ -1,5 +1,5 @@
 import { apiRequest } from "./client";
-import type { ScheduledTaskConfig } from "./scheduledTasks";
+import type { FailureReason, ScheduledTaskConfig } from "./scheduledTasks";
 
 export type WorkflowRunRequest = {
   config: ScheduledTaskConfig;
@@ -18,6 +18,7 @@ export type WorkflowBatchRunItem = {
   status: "pending" | "completed" | "failed" | "skipped" | "running";
   job_ids: string[];
   error_message: string | null;
+  failure_reason: FailureReason;
   config: Record<string, unknown>;
   request: Record<string, unknown>;
   created_at: string | null;
@@ -32,6 +33,9 @@ export type WorkflowBatchRun = {
   failed: number;
   skipped: number;
   concurrency: number;
+  source: string;
+  schedule_id: number | null;
+  failure_reason: FailureReason;
   created_at: string | null;
   finished_at: string | null;
   items: WorkflowBatchRunItem[];

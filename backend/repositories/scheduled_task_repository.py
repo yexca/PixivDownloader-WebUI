@@ -382,7 +382,7 @@ def legacy_tag_variants(
     naming_variants: list[object],
     action: object,
 ) -> list[dict[str, str]]:
-    behavior = "retry_failed" if action == "retry_failed_artist" else "skip" if action == "sync_artist" else "download"
+    behavior = legacy_action_to_behavior(action)
     result: list[dict[str, str]] = []
     for item in naming_variants:
         if not isinstance(item, dict):
@@ -396,10 +396,14 @@ def legacy_tag_variants(
             variant["naming_rule"] = naming_rule.strip()
         result.append(variant)
     return result
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+
+
+def legacy_action_to_behavior(action: object) -> str:
+    if action == "retry_failed_artist":
+        return "retry_failed"
+    if action == "sync_artist":
+        return "skip"
+    return "download"
 
 
 def normalize_tags(value: object, *, fallback: str | None = None) -> list[str]:

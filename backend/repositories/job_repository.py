@@ -27,6 +27,9 @@ class JobRepository:
                         input_user_id,
                         input_artwork_id,
                         options_json,
+                        workflow_run_id,
+                        workflow_item_id,
+                        workflow_source,
                         artist_id,
                         total_files,
                         completed_files,
@@ -38,7 +41,7 @@ class JobRepository:
                         started_at,
                         finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job.id,
@@ -47,6 +50,9 @@ class JobRepository:
                         job.input_user_id,
                         job.input_artwork_id,
                         json.dumps(job.options) if job.options else None,
+                        job.workflow_run_id,
+                        job.workflow_item_id,
+                        job.workflow_source,
                         job.artist_id,
                         job.total_files,
                         job.completed_files,
@@ -83,6 +89,9 @@ class JobRepository:
                         failed_files = ?,
                         cancel_requested = ?,
                         error_message = ?,
+                        workflow_run_id = ?,
+                        workflow_item_id = ?,
+                        workflow_source = ?,
                         started_at = ?,
                         finished_at = ?
                     WHERE id = ?
@@ -96,6 +105,9 @@ class JobRepository:
                         job.failed_files,
                         int(job.cancel_requested),
                         job.error_message,
+                        job.workflow_run_id,
+                        job.workflow_item_id,
+                        job.workflow_source,
                         job.started_at,
                         job.finished_at,
                         job.id,
@@ -350,13 +362,26 @@ def job_from_row(row: sqlite3.Row) -> Job:
         options_json = row["options_json"]
     except IndexError:
         options_json = None
+    options = json.loads(options_json) if options_json else {}
+    workflow_run_id = optional_row_str(row, "workflow_run_id") or string_option(
+        options.get("workflow_run_id")
+    )
+    workflow_item_id = optional_row_int(row, "workflow_item_id") or int_option(
+        options.get("workflow_item_id")
+    )
+    workflow_source = optional_row_str(row, "workflow_source") or string_option(
+        options.get("workflow_source")
+    )
     return Job(
         id=str(row["id"]),
         type=row["type"],
         status=row["status"],
         input_user_id=str(row["input_user_id"]) if row["input_user_id"] else None,
         input_artwork_id=str(row["input_artwork_id"]) if row["input_artwork_id"] else None,
-        options=json.loads(options_json) if options_json else {},
+        options=options,
+        workflow_run_id=workflow_run_id,
+        workflow_item_id=workflow_item_id,
+        workflow_source=workflow_source,
         artist_id=str(row["artist_id"]) if row["artist_id"] else None,
         total_files=int(row["total_files"]),
         completed_files=int(row["completed_files"]),
@@ -368,6 +393,35 @@ def job_from_row(row: sqlite3.Row) -> Job:
         started_at=str(row["started_at"]) if row["started_at"] else None,
         finished_at=str(row["finished_at"]) if row["finished_at"] else None,
     )
+
+
+def optional_row_str(row: sqlite3.Row, key: str) -> str | None:
+    try:
+        value = row[key]
+    except IndexError:
+        return None
+    return str(value) if value else None
+
+
+def optional_row_int(row: sqlite3.Row, key: str) -> int | None:
+    try:
+        value = row[key]
+    except IndexError:
+        return None
+    return int(value) if value is not None else None
+
+
+def string_option(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def int_option(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 def job_event_from_row(row: sqlite3.Row) -> JobEvent:

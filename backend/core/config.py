@@ -10,7 +10,6 @@ from backend.core.errors import ConfigError
 from backend.core.paths import settings_example_path as default_settings_example_path
 from backend.core.paths import settings_path as default_settings_path
 
-
 ExistingFileBehavior = Literal["skip", "overwrite", "save_duplicate"]
 
 

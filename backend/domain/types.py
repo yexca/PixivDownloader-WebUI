@@ -16,10 +16,11 @@ JobType = Literal[
     "hydrate_legacy_import",
 ]
 ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
-ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked"]
+ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked", "archived"]
 ScheduledTaskTargetType = Literal[
     "single_artist", "single_artwork", "all_artists", "artists_with_tag", "artists_not_checked"
 ]
 ScheduledTaskFilterType = Literal["last_checked_before_days", "has_failed_files"]
 ScheduledTaskArtistSelection = Literal["oldest_checked_first", "newest_checked_first", "random"]
 ArtistAccountStatus = Literal["unknown", "available", "unavailable"]
+FailureReason = Literal["auth", "disk", "network", "cancelled", "target", "rule", "unknown"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from uuid import uuid4
 
@@ -53,6 +54,7 @@ class JobService:
         if job_type in DOWNLOAD_JOB_TYPES:
             self._ensure_download_space()
         cleaned_options = clean_job_options(options or {})
+        workflow_link = workflow_link_from_options(cleaned_options)
         status: JobStatus = "queued"
         if gate_one_time:
             cleaned_options["activation_scope"] = "one_time"
@@ -64,6 +66,9 @@ class JobService:
             input_user_id=user_id,
             input_artwork_id=artwork_id,
             options=cleaned_options,
+            workflow_run_id=workflow_link.run_id,
+            workflow_item_id=workflow_link.item_id,
+            workflow_source=workflow_link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -170,6 +175,9 @@ class JobService:
                 input_user_id=job.input_user_id,
                 input_artwork_id=job.input_artwork_id,
                 options=job.options,
+                workflow_run_id=job.workflow_run_id,
+                workflow_item_id=job.workflow_item_id,
+                workflow_source=job.workflow_source,
                 artist_id=job.artist_id,
                 total_files=job.total_files,
                 completed_files=job.completed_files,
@@ -227,6 +235,9 @@ class JobService:
                 input_user_id=job.input_user_id,
                 input_artwork_id=job.input_artwork_id,
                 options=job.options,
+                workflow_run_id=job.workflow_run_id,
+                workflow_item_id=job.workflow_item_id,
+                workflow_source=job.workflow_source,
                 artist_id=job.artist_id,
                 total_files=job.total_files,
                 completed_files=job.completed_files,
@@ -297,6 +308,7 @@ class JobService:
         cleaned_options["activation_scope"] = "one_time"
         cleaned_options["source_job_id"] = source.id
         cleaned_options["job_action"] = action
+        workflow_link = workflow_link_from_options(cleaned_options)
         status: JobStatus = self._next_one_time_status()
         job = Job(
             id=str(uuid4()),
@@ -306,6 +318,9 @@ class JobService:
             input_artwork_id=source.input_artwork_id,
             artist_id=source.artist_id,
             options=cleaned_options,
+            workflow_run_id=workflow_link.run_id,
+            workflow_item_id=workflow_link.item_id,
+            workflow_source=workflow_link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -396,6 +411,34 @@ DOWNLOAD_JOB_TYPES = {
 }
 
 
+@dataclass(frozen=True)
+class WorkflowJobLink:
+    run_id: str | None = None
+    item_id: int | None = None
+    source: str | None = None
+
+
+def workflow_link_from_options(options: dict[str, object]) -> WorkflowJobLink:
+    return WorkflowJobLink(
+        run_id=string_metadata_option(options.get("workflow_run_id")),
+        item_id=int_metadata_option(options.get("workflow_item_id")),
+        source=string_metadata_option(options.get("workflow_source")),
+    )
+
+
+def string_metadata_option(value: object) -> str | None:
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def int_metadata_option(value: object) -> int | None:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def clean_job_options(options: dict[str, object]) -> dict[str, object]:
     cleaned: dict[str, object] = {}
     for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
@@ -437,6 +480,10 @@ def clean_job_options(options: dict[str, object]) -> dict[str, object]:
         tag_variants = legacy_tag_variants(options)
     if tag_variants:
         cleaned["tag_variants"] = tag_variants
+    for key in ("workflow_run_id", "workflow_item_id", "workflow_source"):
+        value = options.get(key)
+        if isinstance(value, str | int) and str(value):
+            cleaned[key] = value
     return cleaned
 
 

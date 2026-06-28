@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
+from backend.domain.entities import ScheduledTaskConfig, ScheduledTaskTarget
+
 
 class DownloadCreateRequest(BaseModel):
     user_id: str | None = None
@@ -44,3 +46,32 @@ class DownloadCreateRequest(BaseModel):
 class DownloadCreateResponse(BaseModel):
     job_id: str
     status: str
+
+
+def download_request_options(request: DownloadCreateRequest) -> dict[str, object]:
+    return {
+        "full_download": request.full_download,
+        "pending_only": request.pending_only,
+        "max_artworks": request.max_artworks,
+        "min_artwork_id": request.min_artwork_id.strip() if request.min_artwork_id else None,
+        "max_artwork_id": request.max_artwork_id.strip() if request.max_artwork_id else None,
+        "naming_rule": request.naming_rule.strip() if request.naming_rule else None,
+        "only_new_artworks": request.only_new_artworks,
+        "stop_if_artwork_count_above": request.stop_if_artwork_count_above,
+        "naming_tag_variants": request.naming_tag_variants or [],
+        "tag_variants": request.tag_variants or [],
+    }
+
+
+def download_request_workflow_config(request: DownloadCreateRequest) -> ScheduledTaskConfig:
+    target = ScheduledTaskTarget(
+        type="single_artwork" if request.artwork_id else "single_artist",
+        artist_id=request.user_id,
+        artwork_id=request.artwork_id,
+    )
+    return ScheduledTaskConfig(
+        target=target,
+        actions=("download_artist",),
+        download_options=download_request_options(request),
+        max_artists_per_run=1,
+    )

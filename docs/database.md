@@ -68,6 +68,8 @@ Main WebUI tables:
 - `artwork_files`
 - `jobs`
 - `job_events`
+- `workflow_runs`
+- `workflow_run_items`
 - `settings`
 
 `artists.latest_downloaded_artwork_id` stores the latest artwork ID reached by incremental artist downloads.
@@ -90,17 +92,44 @@ The old database is read-only during import. The WebUI continues to use `resourc
 
 ## Job And File State
 
-Jobs are persisted so the UI can show history and progress.
+Workflow runs are persisted so the UI can show orchestration history. Workflow
+items store the expanded target/action entries and the job IDs they dispatched.
+
+Jobs are persisted so the UI can show execution history and progress. Jobs
+created by workflows store explicit links:
+
+```text
+jobs.workflow_run_id   -> workflow_runs.id
+jobs.workflow_item_id  -> workflow_run_items.id
+jobs.workflow_source   -> source shortcut or batch name
+```
+
+The same values are also kept in `jobs.options_json` for compatibility with
+older code paths.
 
 Common job statuses:
 
 ```text
+inactive
 queued
 running
 completed
 failed
 cancelled
 ```
+
+Common workflow run statuses:
+
+```text
+running
+completed
+failed
+partial
+skipped
+```
+
+Workflow run status is derived from linked jobs. A run remains `running` while
+any linked job is inactive, queued, or running.
 
 Artwork file statuses:
 

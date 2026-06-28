@@ -536,21 +536,21 @@ function BasicSettingsTab({
               onChange={(value) => onChange({ ...form, max_concurrent_downloads: Math.max(1, value) })}
             />
             <NumberField
-              label="Max active schedules"
+              label="Schedule trigger limit"
               value={form.max_active_scheduled_tasks}
               error={errors.max_active_scheduled_tasks}
               min={1}
               step={1}
-              tooltip="Maximum number of schedules allowed to stay active. Extra enabled schedules wait as inactive."
+              tooltip="Legacy compatibility setting. Schedules now act as triggers; run execution capacity is controlled by the run limit."
               onChange={(value) => onChange({ ...form, max_active_scheduled_tasks: Math.max(1, Math.trunc(value)) })}
             />
             <NumberField
-              label="Max active one-time tasks"
+              label="Run limit"
               value={form.max_active_one_time_tasks}
               error={errors.max_active_one_time_tasks}
               min={1}
               step={1}
-              tooltip="Maximum number of one-time workflow jobs allowed to wait or run. Extra one-time jobs stay inactive."
+              tooltip="Maximum number of workflow run jobs allowed to wait or run. Extra run jobs stay inactive."
               onChange={(value) => onChange({ ...form, max_active_one_time_tasks: Math.max(1, Math.trunc(value)) })}
             />
             <NumberField

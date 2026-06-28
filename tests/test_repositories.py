@@ -158,13 +158,26 @@ def test_job_repository_crud(tmp_path):
     db_path = migrated_db(tmp_path)
     repository = JobRepository(db_path)
 
-    repository.create(Job(id="job-1", type="download_artist", status="queued", input_user_id="123"))
+    repository.create(
+        Job(
+            id="job-1",
+            type="download_artist",
+            status="queued",
+            input_user_id="123",
+            workflow_run_id="run-1",
+            workflow_item_id=7,
+            workflow_source="test",
+        )
+    )
     repository.update(
         Job(
             id="job-1",
             type="download_artist",
             status="running",
             input_user_id="123",
+            workflow_run_id="run-1",
+            workflow_item_id=7,
+            workflow_source="test",
             artist_id="123",
             total_files=2,
             completed_files=1,
@@ -179,6 +192,9 @@ def test_job_repository_crud(tmp_path):
 
     assert job is not None
     assert job.status == "running"
+    assert job.workflow_run_id == "run-1"
+    assert job.workflow_item_id == 7
+    assert job.workflow_source == "test"
     assert job.completed_files == 1
     assert repository.list(status="running")[0].id == "job-1"
     assert events[0].id == event_id
