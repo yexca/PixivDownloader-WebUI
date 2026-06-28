@@ -248,11 +248,24 @@ def account_status_from_user_detail(result: Any) -> tuple[ArtistAccountStatus, s
     message = str(_get_value(error, "message", "") or "")
     reason = str(_get_value(error, "reason", "") or "")
     combined = " ".join(part for part in (user_message, message, reason) if part).strip()
-    if combined and "page not found" in combined.lower():
+    if _is_unavailable_user_error(combined):
         return "unavailable", combined
     if error:
         raise PixivApiError(combined or "failed to fetch Pixiv user")
     return "available", None
+
+
+def _is_unavailable_user_error(message: str) -> bool:
+    normalized = message.casefold()
+    return any(
+        token in normalized
+        for token in (
+            "page not found",
+            "user not found",
+            "your access is currently restricted",
+            "ユーザーが見つかりませんでした",
+        )
+    )
 
 
 class PixivClientProtocol(Protocol):
