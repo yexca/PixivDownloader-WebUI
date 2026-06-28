@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.domain.entities import Job, JobEvent
+
+
+class RelatedJobResponse(BaseModel):
+    id: str
+    status: str
+    action: str
+    created_at: str | None
 
 
 class JobResponse(BaseModel):
@@ -22,6 +29,7 @@ class JobResponse(BaseModel):
     started_at: str | None
     finished_at: str | None
     error_message: str | None
+    related_jobs: list[RelatedJobResponse] = Field(default_factory=list)
 
 
 class JobListResponse(BaseModel):
@@ -90,7 +98,7 @@ class JobStreamMessage(BaseModel):
     created_at: str | None
 
 
-def job_response(job: Job) -> JobResponse:
+def job_response(job: Job, *, related_jobs: list[Job] | None = None) -> JobResponse:
     return JobResponse(
         id=job.id,
         type=job.type,
@@ -108,6 +116,17 @@ def job_response(job: Job) -> JobResponse:
         started_at=job.started_at,
         finished_at=job.finished_at,
         error_message=job.error_message,
+        related_jobs=[related_job_response(child) for child in related_jobs or []],
+    )
+
+
+def related_job_response(job: Job) -> RelatedJobResponse:
+    action = job.options.get("job_action", "retry")
+    return RelatedJobResponse(
+        id=job.id,
+        status=job.status,
+        action=str(action),
+        created_at=job.created_at,
     )
 
 

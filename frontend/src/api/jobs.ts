@@ -2,6 +2,13 @@ import { apiRequest } from "./client";
 
 export type JobStatus = "inactive" | "queued" | "running" | "completed" | "failed" | "cancelled";
 
+export type RelatedJob = {
+  id: string;
+  status: JobStatus;
+  action: string;
+  created_at: string | null;
+};
+
 export type Job = {
   id: string;
   type: string;
@@ -19,6 +26,7 @@ export type Job = {
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
+  related_jobs: RelatedJob[];
 };
 
 export type JobEvent = {

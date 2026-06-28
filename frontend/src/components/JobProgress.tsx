@@ -11,9 +11,11 @@ import { isCancellable, percent } from "@/lib/utils";
 type JobProgressProps = {
   job: Job;
   message?: string | null;
+  cancelPending?: boolean;
+  onCancel?: (job: Job) => void;
 };
 
-export function JobProgress({ job, message }: JobProgressProps): JSX.Element {
+export function JobProgress({ job, message, cancelPending, onCancel }: JobProgressProps): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const done = job.completed_files + job.skipped_files + job.failed_files;
@@ -45,10 +47,11 @@ export function JobProgress({ job, message }: JobProgressProps): JSX.Element {
         {isCancellable(job.status) ? (
           <Button
             type="button"
-            variant="outline"
+            variant={job.status === "running" ? "outline" : "ghost"}
             size="sm"
-            disabled={mutation.isPending || job.cancel_requested}
-            onClick={() => mutation.mutate()}
+            className="text-destructive hover:bg-destructive/10"
+            disabled={cancelPending || mutation.isPending || job.cancel_requested}
+            onClick={() => (onCancel ? onCancel(job) : mutation.mutate())}
           >
             <XCircle className="h-4 w-4" aria-hidden="true" />
             Cancel

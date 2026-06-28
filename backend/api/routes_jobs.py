@@ -39,7 +39,13 @@ def list_jobs(
     service = JobService(db_path, settings_json_path=settings_json_path)
     try:
         jobs, total = service.list_jobs(status=status, limit=limit, offset=offset)
-        return JobListResponse(items=[job_response(job) for job in jobs], total=total)
+        return JobListResponse(
+            items=[
+                job_response(job, related_jobs=service.list_child_jobs(job.id))
+                for job in jobs
+            ],
+            total=total,
+        )
     finally:
         service.close()
 
@@ -77,7 +83,7 @@ def get_job(
         if job is None:
             raise JobNotFoundError(f"job {job_id} was not found")
         return JobDetailResponse(
-            **job_response(job).model_dump(),
+            **job_response(job, related_jobs=service.list_child_jobs(job_id)).model_dump(),
             events=[job_event_response(event) for event in service.list_events(job_id)],
         )
     finally:

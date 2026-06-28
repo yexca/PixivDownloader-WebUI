@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, CalendarClock, Pause, Play, RefreshCw, RotateCcw, XCircle } from "lucide-react";
+import { AlertCircle, AlertTriangle, CalendarClock, Pause, Play, RefreshCw, RotateCcw } from "lucide-react";
 
 import {
   bulkCancelJobs,
@@ -18,6 +18,7 @@ import {
   type JobStatus
 } from "@/api/jobs";
 import { Button } from "@/components/ui/button";
+import { Dialog } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
 import { DataState } from "@/components/DataState";
 import { JobProgress } from "@/components/JobProgress";
@@ -25,7 +26,7 @@ import { JobTable } from "@/components/JobTable";
 import { PageHeader } from "@/components/PageHeader";
 import { Pagination } from "@/components/Pagination";
 import { useToast } from "@/components/ToastProvider";
-import { formatDate, isCancellable } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 const statusOptions: Array<{ label: string; value: JobStatus | "" }> = [
   { label: "All statuses", value: "" },
@@ -36,6 +37,11 @@ const statusOptions: Array<{ label: string; value: JobStatus | "" }> = [
   { label: "Cancelled", value: "cancelled" }
 ];
 
+type CancelDialogState =
+  | { kind: "single"; job: Job }
+  | { kind: "bulk"; jobIds: string[]; label: string }
+  | null;
+
 export function JobsPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const status = (searchParams.get("status") as JobStatus | null) ?? "";
@@ -45,6 +51,9 @@ export function JobsPage(): JSX.Element {
     searchParams.get("job")
   );
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
+  const [pendingRetryJobId, setPendingRetryJobId] = React.useState<string | null>(null);
+  const [pendingRerunJobId, setPendingRerunJobId] = React.useState<string | null>(null);
+  const [cancelDialog, setCancelDialog] = React.useState<CancelDialogState>(null);
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const jobs = useQuery({
@@ -126,6 +135,7 @@ export function JobsPage(): JSX.Element {
   const cancelOne = useMutation({
     mutationFn: (job: Job) => cancelJob(job.id),
     onSuccess: () => {
+      setCancelDialog(null);
       pushToast({ title: "Cancellation requested", tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       void queryClient.invalidateQueries({ queryKey: ["job"] });
@@ -135,6 +145,7 @@ export function JobsPage(): JSX.Element {
   const bulkCancel = useMutation({
     mutationFn: (jobIds: string[]) => bulkCancelJobs(jobIds),
     onSuccess: (response) => {
+      setCancelDialog(null);
       setSelectedIds(new Set());
       pushToast({
         title: "Bulk cancel finished",
@@ -171,7 +182,7 @@ export function JobsPage(): JSX.Element {
     setSearchParams(nextParams, { replace: true });
   };
   const onActionSuccess = (response: JobActionResponse) => {
-    const title = response.action === "rerun" ? "Job queued again" : "Retry queued";
+    const title = response.action === "rerun" ? "Job queued again" : "Retry failed queued";
     pushToast({ title, description: response.job_id, tone: "success" });
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["job"] });
@@ -180,13 +191,32 @@ export function JobsPage(): JSX.Element {
   const retryOne = useMutation({
     mutationFn: (job: Job) => retryJob(job.id),
     onSuccess: onActionSuccess,
-    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Retry failed", description: error.message, tone: "error" }),
+    onSettled: () => setPendingRetryJobId(null)
   });
   const rerunOne = useMutation({
     mutationFn: (job: Job) => rerunJob(job.id),
     onSuccess: onActionSuccess,
-    onError: (error) => pushToast({ title: "Rerun failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Rerun failed", description: error.message, tone: "error" }),
+    onSettled: () => setPendingRerunJobId(null)
   });
+  const requestCancel = (job: Job) => {
+    if (job.status === "running") {
+      setCancelDialog({ kind: "single", job });
+      return;
+    }
+    cancelOne.mutate(job);
+  };
+  const confirmCancel = () => {
+    if (!cancelDialog) {
+      return;
+    }
+    if (cancelDialog.kind === "single") {
+      cancelOne.mutate(cancelDialog.job);
+      return;
+    }
+    bulkCancel.mutate(cancelDialog.jobIds);
+  };
 
   return (
     <>
@@ -267,7 +297,7 @@ export function JobsPage(): JSX.Element {
                       variant="outline"
                       size="sm"
                       disabled={bulkCancel.isPending}
-                      onClick={() => bulkCancel.mutate([...selectedIds])}
+                      onClick={() => setCancelDialog({ kind: "bulk", jobIds: [...selectedIds], label: "selected jobs" })}
                     >
                       Cancel Selected
                     </Button>
@@ -282,7 +312,7 @@ export function JobsPage(): JSX.Element {
                     variant="outline"
                     size="sm"
                     disabled={bulkCancel.isPending}
-                    onClick={() => bulkCancel.mutate(queuedJobIds)}
+                    onClick={() => setCancelDialog({ kind: "bulk", jobIds: queuedJobIds, label: "queued jobs on this page" })}
                   >
                     Cancel Queued
                   </Button>
@@ -301,13 +331,20 @@ export function JobsPage(): JSX.Element {
               <JobTable
                 jobs={jobs.data.items}
                 onSelect={selectJob}
-                onCancel={(job) => cancelOne.mutate(job)}
-                onRetry={(job) => retryOne.mutate(job)}
-                onRerun={(job) => rerunOne.mutate(job)}
+                onSelectJobId={selectJobId}
+                onCancel={requestCancel}
+                onRetry={(job) => {
+                  setPendingRetryJobId(job.id);
+                  retryOne.mutate(job);
+                }}
+                onRerun={(job) => {
+                  setPendingRerunJobId(job.id);
+                  rerunOne.mutate(job);
+                }}
                 selectedJobId={selectedJobId}
                 selectedIds={selectedIds}
-                busyRetryJobId={retryOne.variables?.id ?? null}
-                busyRerunJobId={rerunOne.variables?.id ?? null}
+                busyRetryJobId={pendingRetryJobId}
+                busyRerunJobId={pendingRerunJobId}
                 onToggleSelected={toggleSelected}
                 onToggleAllVisible={toggleAllVisible}
               />
@@ -326,6 +363,8 @@ export function JobsPage(): JSX.Element {
             <JobDetailPanel
               job={selectedJob.data}
               onSelectJob={selectJobId}
+              onCancel={requestCancel}
+              cancelPending={cancelOne.isPending}
             />
           ) : selectedJob.isLoading ? (
             <DataState title="Loading job detail" variant="loading" />
@@ -336,30 +375,35 @@ export function JobsPage(): JSX.Element {
           )}
         </aside>
       </div>
+      <CancelConfirmDialog
+        state={cancelDialog}
+        isPending={cancelOne.isPending || bulkCancel.isPending}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCancelDialog(null);
+          }
+        }}
+        onConfirm={confirmCancel}
+      />
     </>
   );
 }
 
 function JobDetailPanel({
   job,
-  onSelectJob
+  onSelectJob,
+  onCancel,
+  cancelPending
 }: {
   job: Awaited<ReturnType<typeof getJob>>;
   onSelectJob: (jobId: string) => void;
+  onCancel: (job: Job) => void;
+  cancelPending: boolean;
 }): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const cancelMutation = useMutation({
-    mutationFn: () => cancelJob(job.id),
-    onSuccess: () => {
-      pushToast({ title: "Cancellation requested", tone: "success" });
-      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      void queryClient.invalidateQueries({ queryKey: ["job", job.id] });
-    },
-    onError: (error) => pushToast({ title: "Cancel failed", description: error.message, tone: "error" })
-  });
   const onActionSuccess = (response: JobActionResponse) => {
-    const title = response.action === "rerun" ? "Job queued again" : "Retry queued";
+    const title = response.action === "rerun" ? "Job queued again" : "Retry failed queued";
     pushToast({ title, description: response.job_id, tone: "success" });
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     void queryClient.invalidateQueries({ queryKey: ["job"] });
@@ -377,6 +421,8 @@ function JobDetailPanel({
   });
   const canRetry = job.status === "failed";
   const canRerun = job.status === "completed" || job.status === "failed" || job.status === "cancelled";
+  const activeRetry = activeRelatedJob(job, "retry");
+  const activeRerun = activeRelatedJob(job, "rerun");
 
   return (
     <div className="surface flex max-h-[calc(100vh-2rem)] flex-col p-4">
@@ -385,21 +431,11 @@ function JobDetailPanel({
           <div>
             <h2 className="text-sm font-semibold">Job Detail</h2>
             <p className="mt-1 break-all text-xs text-muted-foreground">{job.id}</p>
+            <JobLineageNote job={job} onSelectJob={onSelectJob} />
           </div>
-          {isCancellable(job.status) ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={cancelMutation.isPending || job.cancel_requested}
-              onClick={() => cancelMutation.mutate()}
-            >
-              <XCircle className="h-4 w-4" aria-hidden="true" />
-              Cancel
-            </Button>
-          ) : null}
         </div>
         {job.status === "failed" ? <JobFailureSummary job={job} /> : null}
+        <RelatedJobsNote job={job} onSelectJob={onSelectJob} />
         {canRetry || canRerun ? (
           <div className="mt-3 flex flex-wrap gap-2">
             {canRetry ? (
@@ -407,11 +443,13 @@ function JobDetailPanel({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={retryMutation.isPending}
+                className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                title={activeRetry ? `Retry already queued as ${shortJobId(activeRetry.id)}` : "Retry only failed files or artists"}
+                disabled={retryMutation.isPending || Boolean(activeRetry)}
                 onClick={() => retryMutation.mutate()}
               >
-                <RotateCcw className={retryMutation.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
-                {job.type === "hydrate_legacy_import" ? "Retry Failed Artists" : "Retry"}
+                <RetryFailedIcon spinning={retryMutation.isPending} />
+                {job.type === "hydrate_legacy_import" ? "Retry Failed Artists" : "Retry Failed"}
               </Button>
             ) : null}
             {canRerun ? (
@@ -419,7 +457,8 @@ function JobDetailPanel({
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={rerunMutation.isPending}
+                title={activeRerun ? `Rerun already queued as ${shortJobId(activeRerun.id)}` : "Create a new job with the same options"}
+                disabled={rerunMutation.isPending || Boolean(activeRerun)}
                 onClick={() => rerunMutation.mutate()}
               >
                 <RefreshCw className={rerunMutation.isPending ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
@@ -429,7 +468,7 @@ function JobDetailPanel({
           </div>
         ) : null}
         <div className="mt-4">
-          <JobProgress job={job} />
+          <JobProgress job={job} cancelPending={cancelPending} onCancel={onCancel} />
         </div>
         <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
           <Detail label="Created" value={formatDate(job.created_at)} />
@@ -485,6 +524,105 @@ function JobFailureSummary({ job }: { job: Awaited<ReturnType<typeof getJob>> })
   );
 }
 
+function CancelConfirmDialog({
+  state,
+  isPending,
+  onOpenChange,
+  onConfirm
+}: {
+  state: CancelDialogState;
+  isPending: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  const isSingle = state?.kind === "single";
+  const count = state?.kind === "bulk" ? state.jobIds.length : 1;
+  const title = isSingle ? "Cancel running job?" : `Cancel ${count} ${state?.kind === "bulk" ? state.label : "job"}?`;
+  const description = isSingle
+    ? "This requests cancellation for the running job. The file in progress may be marked failed."
+    : "This bulk action cannot be undone from the jobs page.";
+
+  return (
+    <Dialog
+      open={Boolean(state)}
+      title={title}
+      description={description}
+      onOpenChange={onOpenChange}
+      footer={
+        <>
+          <Button type="button" variant="outline" disabled={isPending} onClick={() => onOpenChange(false)}>
+            Keep Job
+          </Button>
+          <Button type="button" variant="destructive" disabled={isPending} onClick={onConfirm}>
+            Confirm Cancel
+          </Button>
+        </>
+      }
+    />
+  );
+}
+
+function JobLineageNote({
+  job,
+  onSelectJob
+}: {
+  job: Awaited<ReturnType<typeof getJob>>;
+  onSelectJob: (jobId: string) => void;
+}): JSX.Element | null {
+  const sourceJobId = job.options.source_job_id;
+  if (typeof sourceJobId !== "string" || !sourceJobId) {
+    return null;
+  }
+  return (
+    <p className="mt-1 text-xs text-muted-foreground">
+      {jobLineageActionLabel(job.options.job_action)} of{" "}
+      <button type="button" className="font-medium text-primary hover:underline" onClick={() => onSelectJob(sourceJobId)}>
+        {sourceJobId}
+      </button>
+    </p>
+  );
+}
+
+function RelatedJobsNote({
+  job,
+  onSelectJob
+}: {
+  job: Awaited<ReturnType<typeof getJob>>;
+  onSelectJob: (jobId: string) => void;
+}): JSX.Element | null {
+  const active = job.related_jobs.filter((related) => ["inactive", "queued", "running"].includes(related.status));
+  if (active.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+      <p className="font-medium">Follow-up job already active</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {active.map((related) => (
+          <button
+            type="button"
+            key={related.id}
+            className="rounded-md border border-amber-300 bg-background px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            onClick={() => onSelectJob(related.id)}
+          >
+            {jobLineageActionLabel(related.action)} {shortJobId(related.id)} · {related.status}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function jobLineageActionLabel(action: unknown): string {
+  if (action === "rerun") {
+    return "Rerun";
+  }
+  if (action === "retry_failed_artists") {
+    return "Retry failed artists";
+  }
+  return "Retry";
+}
+
 function failureSummaryText(job: Job, primaryReason: string | undefined, failedRetryableArtists: number | null): string {
   const failedArtists = failedRetryableArtists ?? job.failed_files;
   if (job.type === "hydrate_legacy_import") {
@@ -524,6 +662,26 @@ function countFailureReasons(job: Awaited<ReturnType<typeof getJob>>): Array<{ r
   return [...counts.entries()]
     .map(([reason, count]) => ({ reason, count }))
     .sort((left, right) => right.count - left.count);
+}
+
+function activeRelatedJob(job: Job, action: "retry" | "rerun"): Job["related_jobs"][number] | undefined {
+  return job.related_jobs.find((related) => {
+    const relatedAction = related.action === "rerun" ? "rerun" : "retry";
+    return relatedAction === action && ["inactive", "queued", "running"].includes(related.status);
+  });
+}
+
+function shortJobId(jobId: string): string {
+  return jobId.slice(0, 8);
+}
+
+function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+      <RotateCcw className={cn("h-4 w-4", spinning && "animate-spin")} />
+      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-amber-700" />
+    </span>
+  );
 }
 
 function Detail({ label, value }: { label: string; value: string }): JSX.Element {

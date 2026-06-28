@@ -152,6 +152,9 @@ class JobService:
     def get_job(self, job_id: str) -> Job | None:
         return self.repository.get_by_id(job_id)
 
+    def list_child_jobs(self, job_id: str, *, limit: int = 20) -> list[Job]:
+        return self.repository.list_child_jobs(job_id, limit=limit)
+
     def cancel_job(self, job_id: str) -> Job | None:
         job = self.repository.get_by_id(job_id)
         if job is None:

@@ -133,6 +133,21 @@ class JobRepository:
         jobs_by_id = {str(row["id"]): job_from_row(row) for row in rows}
         return [jobs_by_id[job_id] for job_id in job_ids if job_id in jobs_by_id]
 
+    def list_child_jobs(self, job_id: str, *, limit: int = 20) -> list[Job]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE json_extract(options_json, '$.source_job_id') = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (job_id, limit),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list child jobs for {job_id}") from exc
+        return [job_from_row(row) for row in rows]
+
     def next_queued(self) -> Job | None:
         try:
             row = self.conn.execute(

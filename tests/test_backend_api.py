@@ -1496,6 +1496,40 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert rerun.options["source_job_id"] == "job-1"
 
 
+def test_job_detail_reports_related_retry_and_rerun_jobs(tmp_path):
+    client = make_client(tmp_path)
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        repository.create(Job(id="job-1", type="download_artist", status="failed"))
+        repository.create(
+            Job(
+                id="retry-job",
+                type="download_artist",
+                status="queued",
+                options={"source_job_id": "job-1", "job_action": "retry"},
+            )
+        )
+        repository.create(
+            Job(
+                id="rerun-job",
+                type="download_artist",
+                status="running",
+                options={"source_job_id": "job-1", "job_action": "rerun"},
+            )
+        )
+    finally:
+        repository.close()
+
+    response = client.get("/api/jobs/job-1")
+
+    assert response.status_code == 200
+    related = response.json()["related_jobs"]
+    assert {job["id"]: job["action"] for job in related} == {
+        "retry-job": "retry",
+        "rerun-job": "rerun",
+    }
+
+
 def test_recent_logs_endpoint_returns_paginated_items(tmp_path):
     client = make_client(tmp_path)
     repository = JobRepository(tmp_path / "pixiv.sqlite3")

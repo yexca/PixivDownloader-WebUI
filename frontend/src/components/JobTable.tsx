@@ -1,16 +1,17 @@
 import { Link } from "react-router-dom";
-import { Info, RefreshCw, RotateCcw, XCircle } from "lucide-react";
+import { AlertCircle, Info, RefreshCw, RotateCcw, XCircle } from "lucide-react";
 
 import type { Job } from "@/api/jobs";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ScrollableTable } from "@/components/ScrollableTable";
-import { formatDate, isCancellable, isRerunnable, isRetryable, percent } from "@/lib/utils";
+import { cn, formatDate, isCancellable, isRerunnable, isRetryable, percent } from "@/lib/utils";
 
 type JobTableProps = {
   jobs: Job[];
   onSelect?: (job: Job) => void;
+  onSelectJobId?: (jobId: string) => void;
   onCancel?: (job: Job) => void;
   onRetry?: (job: Job) => void;
   onRerun?: (job: Job) => void;
@@ -25,6 +26,7 @@ type JobTableProps = {
 export function JobTable({
   jobs,
   onSelect,
+  onSelectJobId,
   onCancel,
   onRetry,
   onRerun,
@@ -90,6 +92,7 @@ export function JobTable({
                 <td className={onToggleSelected ? "table-cell sticky-col-left-offset min-w-64 max-w-80" : "table-cell sticky-col-left min-w-64 max-w-80"}>
                   <div className="font-medium">{job.type.replaceAll("_", " ")}</div>
                   <div className="break-all text-xs text-muted-foreground">{job.id}</div>
+                  <JobLineage job={job} onSelectJobId={onSelectJobId} />
                 </td>
                 <td className="table-cell">
                   {job.input_user_id ? (
@@ -121,15 +124,16 @@ export function JobTable({
                         type="button"
                         variant="outline"
                         size="icon"
-                        title={job.type === "hydrate_legacy_import" ? "Retry failed artists" : "Retry job"}
-                        aria-label={job.type === "hydrate_legacy_import" ? "Retry failed artists" : "Retry job"}
-                        disabled={busyRetryJobId === job.id}
+                        className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                        title={retryTitle(job)}
+                        aria-label={retryTitle(job)}
+                        disabled={busyRetryJobId === job.id || Boolean(activeRelatedJob(job, "retry"))}
                         onClick={(event) => {
                           event.stopPropagation();
                           onRetry(job);
                         }}
                       >
-                        <RotateCcw className={busyRetryJobId === job.id ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
+                        <RetryFailedIcon spinning={busyRetryJobId === job.id} />
                       </Button>
                     ) : null}
                     {onRerun && isRerunnable(job.status) ? (
@@ -137,9 +141,9 @@ export function JobTable({
                         type="button"
                         variant="outline"
                         size="icon"
-                        title="Rerun job"
-                        aria-label="Rerun job"
-                        disabled={busyRerunJobId === job.id}
+                        title={rerunTitle(job)}
+                        aria-label={rerunTitle(job)}
+                        disabled={busyRerunJobId === job.id || Boolean(activeRelatedJob(job, "rerun"))}
                         onClick={(event) => {
                           event.stopPropagation();
                           onRerun(job);
@@ -164,8 +168,9 @@ export function JobTable({
                     {onCancel && isCancellable(job.status) ? (
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant={job.status === "running" ? "outline" : "ghost"}
                         size="icon"
+                        className="text-destructive hover:bg-destructive/10"
                         title={job.status === "running" ? "Request job cancellation" : "Cancel job"}
                         aria-label={job.status === "running" ? "Request job cancellation" : "Cancel job"}
                         disabled={job.cancel_requested}
@@ -194,4 +199,98 @@ function compareJobsByCreatedDesc(left: Job, right: Job): number {
 
 function timestamp(value: string | null): number {
   return value ? Date.parse(value) || 0 : 0;
+}
+
+function JobLineage({ job, onSelectJobId }: { job: Job; onSelectJobId?: (jobId: string) => void }): JSX.Element | null {
+  const sourceJobId = job.options.source_job_id;
+  const action = job.options.job_action;
+  const latestRelated = latestRelatedJob(job);
+  if ((typeof sourceJobId !== "string" || !sourceJobId) && !latestRelated) {
+    return null;
+  }
+  if (latestRelated) {
+    return (
+      <div className="mt-1 text-xs text-muted-foreground">
+        {jobActionPastLabel(latestRelated.action)} by{" "}
+        <button
+          type="button"
+          className="font-medium text-primary hover:underline"
+          onClick={(event) => {
+            event.stopPropagation();
+            onSelectJobId?.(latestRelated.id);
+          }}
+        >
+          {shortJobId(latestRelated.id)}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="mt-1 text-xs text-muted-foreground">
+      {typeof sourceJobId === "string" && sourceJobId
+        ? `${jobActionLabel(action)} of ${shortJobId(sourceJobId)}`
+        : null}
+    </div>
+  );
+}
+
+function jobActionLabel(action: unknown): string {
+  if (action === "rerun") {
+    return "Rerun";
+  }
+  if (action === "retry_failed_artists") {
+    return "Retry failed artists";
+  }
+  return "Retry";
+}
+
+function jobActionPastLabel(action: unknown): string {
+  if (action === "rerun") {
+    return "Reran";
+  }
+  if (action === "retry_failed_artists") {
+    return "Retry failed artists";
+  }
+  return "Retried";
+}
+
+function shortJobId(jobId: string): string {
+  return jobId.slice(0, 8);
+}
+
+function activeRelatedJob(job: Job, action: "retry" | "rerun"): Job["related_jobs"][number] | undefined {
+  return job.related_jobs.find((related) => {
+    const relatedAction = normalizeAction(related.action);
+    return relatedAction === action && ["inactive", "queued", "running"].includes(related.status);
+  });
+}
+
+function latestRelatedJob(job: Job): Job["related_jobs"][number] | undefined {
+  return [...job.related_jobs].sort((left, right) => timestamp(right.created_at) - timestamp(left.created_at))[0];
+}
+
+function normalizeAction(action: unknown): "retry" | "rerun" {
+  return action === "rerun" ? "rerun" : "retry";
+}
+
+function retryTitle(job: Job): string {
+  const active = activeRelatedJob(job, "retry");
+  if (active) {
+    return `Retry already queued as ${shortJobId(active.id)}`;
+  }
+  return job.type === "hydrate_legacy_import" ? "Retry failed artists" : "Retry failed";
+}
+
+function rerunTitle(job: Job): string {
+  const active = activeRelatedJob(job, "rerun");
+  return active ? `Rerun already queued as ${shortJobId(active.id)}` : "Rerun job";
+}
+
+function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
+  return (
+    <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
+      <RotateCcw className={cn("h-4 w-4", spinning && "animate-spin")} />
+      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-amber-700" />
+    </span>
+  );
 }
