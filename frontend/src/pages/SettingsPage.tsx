@@ -8,10 +8,12 @@ import {
   ExternalLink,
   Eye,
   EyeOff,
+  Image,
   KeyRound,
   Loader2,
   Monitor,
   Moon,
+  Palette,
   Plus,
   RefreshCw,
   Save,
@@ -49,7 +51,13 @@ import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { useUiStore } from "@/hooks/useUiStore";
-import { allThemePresets, type AppearanceSettings, type ColorScheme, type ThemePreset } from "@/lib/theme";
+import {
+  allThemePresets,
+  type AppearanceSettings,
+  type ColorScheme,
+  type ThemePreset,
+  type ThemePresetIcon
+} from "@/lib/theme";
 
 type SettingsTab = "basic" | "pixiv" | "appearance" | "advanced";
 type BasicForm = Pick<
@@ -531,44 +539,61 @@ function AppearanceSettingsTab({
   return (
     <div className="mt-5 divide-y">
       <SettingsSection title="Mode" description="Choose whether preset selection follows the operating system.">
-        <div className="space-y-4">
+        <div className="space-y-3">
           <button
             type="button"
-            className={`flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-muted ${
-              settings.followSystem ? "border-primary bg-primary/10" : "bg-background"
-            }`}
+            className="flex w-full items-center justify-between gap-4 rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted"
             aria-pressed={settings.followSystem}
             onClick={() => onSetFollowSystem(!settings.followSystem)}
           >
-            <Monitor className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
-            <span>
-              <span className="block text-sm font-medium">Follow system</span>
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                Use the selected light preset when the OS is light and the selected dark preset when the OS is dark.
+            <span className="flex min-w-0 items-start gap-3">
+              <Monitor className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">Follow system appearance</span>
+                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                  Switch between the selected light and dark presets with the operating system.
+                </span>
               </span>
+            </span>
+            <span
+              className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+                settings.followSystem ? "border-primary bg-primary" : "bg-muted"
+              }`}
+              aria-hidden="true"
+            >
+              <span
+                className={`absolute top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform ${
+                  settings.followSystem ? "translate-x-5" : "translate-x-0.5"
+                }`}
+              />
             </span>
           </button>
 
           {settings.followSystem ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="System light preset">
-                <Select value={settings.systemLightPresetId} onChange={(event) => onSetSystemPreset("light", event.target.value)}>
-                  {lightPresets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="System dark preset">
-                <Select value={settings.systemDarkPresetId} onChange={(event) => onSetSystemPreset("dark", event.target.value)}>
-                  {darkPresets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
+            <div className="rounded-md border bg-muted/25 p-3">
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Current mapping
+              </span>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <Field label="When system is light">
+                  <Select value={settings.systemLightPresetId} onChange={(event) => onSetSystemPreset("light", event.target.value)}>
+                    {lightPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="When system is dark">
+                  <Select value={settings.systemDarkPresetId} onChange={(event) => onSetSystemPreset("dark", event.target.value)}>
+                    {darkPresets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.name}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
             </div>
           ) : (
             <Field label="Active preset">
@@ -630,7 +655,7 @@ function ThemePresetCard({
   onDelete: () => void;
   onEdit: () => void;
 }): JSX.Element {
-  const Icon = preset.scheme === "dark" ? Moon : Sun;
+  const Icon = themePresetIcon(preset.icon);
   return (
     <div className={`rounded-md border p-3 ${active ? "border-primary bg-primary/10" : "bg-background"}`}>
       <div className="flex items-start justify-between gap-3">
@@ -697,6 +722,17 @@ function ThemePresetEditor({
         >
           <option value="light">Light</option>
           <option value="dark">Dark</option>
+        </Select>
+      </Field>
+      <Field label="Icon">
+        <Select
+          value={draft.icon}
+          onChange={(event) => setDraft({ ...draft, icon: event.target.value as ThemePresetIcon })}
+        >
+          <option value="sun">Sun</option>
+          <option value="moon">Moon</option>
+          <option value="palette">Palette</option>
+          <option value="image">Image</option>
         </Select>
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -772,6 +808,19 @@ function ThemePresetEditor({
       </SettingsActions>
     </div>
   );
+}
+
+function themePresetIcon(icon: ThemePresetIcon): typeof Palette {
+  if (icon === "sun") {
+    return Sun;
+  }
+  if (icon === "moon") {
+    return Moon;
+  }
+  if (icon === "image") {
+    return Image;
+  }
+  return Palette;
 }
 
 function BasicSettingsTab({

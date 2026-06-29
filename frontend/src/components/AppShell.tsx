@@ -4,11 +4,13 @@ import {
   Activity,
   Briefcase,
   Check,
+  Image,
   Home,
   Library,
   Menu,
   Monitor,
   Moon,
+  Palette,
   ScrollText,
   Settings,
   Sun,
@@ -22,6 +24,7 @@ import { listJobs } from "@/api/jobs";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useUiStore } from "@/hooks/useUiStore";
+import { allThemePresets, type ThemePresetIcon } from "@/lib/theme";
 import { cn, percent } from "@/lib/utils";
 
 const navItems = [
@@ -126,19 +129,13 @@ export function AppShell(): JSX.Element {
 
 function ThemeModeMenu(): JSX.Element {
   const settings = useUiStore((state) => state.appearanceSettings);
+  const customPresets = useUiStore((state) => state.customThemePresets);
   const activePreset = useUiStore((state) => state.activeThemePreset);
   const setFollowSystemTheme = useUiStore((state) => state.setFollowSystemTheme);
   const setActiveThemePreset = useUiStore((state) => state.setActiveThemePreset);
   const [open, setOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
-  const options = [
-    { value: "system", label: "System", icon: Monitor },
-    { value: "light", label: "Light", icon: Sun },
-    { value: "dark", label: "Dark", icon: Moon }
-  ];
-  const currentValue = settings.followSystem ? "system" : activePreset.scheme;
-  const current = options.find((option) => option.value === currentValue) ?? options[0];
-  const CurrentIcon = current.icon;
+  const presets = allThemePresets(customPresets);
 
   React.useEffect(() => {
     if (!open) {
@@ -159,46 +156,90 @@ function ThemeModeMenu(): JSX.Element {
         type="button"
         variant="ghost"
         size="icon"
-        aria-label={`Theme: ${current.label}`}
-        title={`Theme: ${current.label}`}
+        aria-label="Open theme menu"
+        title={`Theme: ${settings.followSystem ? "Follow system" : activePreset.name}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <CurrentIcon className="h-5 w-5" aria-hidden="true" />
+        <Palette className="h-5 w-5" aria-hidden="true" />
       </Button>
       {open ? (
-        <div className="absolute right-0 top-11 z-50 w-40 rounded-md border bg-card p-1 text-sm shadow-lg">
-          {options.map((option) => {
-            const Icon = option.icon;
-            const selected = option.value === currentValue;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                className={cn(
-                  "flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-muted-foreground hover:bg-muted hover:text-foreground",
-                  selected && "bg-secondary text-secondary-foreground"
-                )}
+        <div className="absolute right-0 top-11 z-50 w-56 rounded-md border bg-card p-1 text-sm shadow-lg">
+          <div className="px-2 py-1.5 text-xs font-medium uppercase text-muted-foreground">System</div>
+          <ThemeMenuItem
+            icon="system"
+            label="Follow system"
+            selected={settings.followSystem}
+            onClick={() => {
+              setFollowSystemTheme(true);
+              setOpen(false);
+            }}
+          />
+          <div className="my-1 border-t" />
+          <div className="px-2 py-1.5 text-xs font-medium uppercase text-muted-foreground">Presets</div>
+          <div className="max-h-72 overflow-y-auto">
+            {presets.map((preset) => (
+              <ThemeMenuItem
+                key={preset.id}
+                icon={preset.icon}
+                label={preset.name}
+                meta={preset.scheme}
+                selected={!settings.followSystem && activePreset.id === preset.id}
                 onClick={() => {
-                  if (option.value === "system") {
-                    setFollowSystemTheme(true);
-                  } else {
-                    setFollowSystemTheme(false);
-                    setActiveThemePreset(option.value);
-                  }
+                  setActiveThemePreset(preset.id);
                   setOpen(false);
                 }}
-              >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                <span className="flex-1">{option.label}</span>
-                {selected ? <Check className="h-4 w-4" aria-hidden="true" /> : null}
-              </button>
-            );
-          })}
+              />
+            ))}
+          </div>
         </div>
       ) : null}
     </div>
   );
+}
+
+function ThemeMenuItem({
+  icon,
+  label,
+  meta,
+  selected,
+  onClick
+}: {
+  icon: ThemePresetIcon | "system";
+  label: string;
+  meta?: string;
+  selected: boolean;
+  onClick: () => void;
+}): JSX.Element {
+  const Icon = icon === "system" ? Monitor : themeIcon(icon);
+  return (
+    <button
+      type="button"
+      className={cn(
+        "flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-muted-foreground hover:bg-muted hover:text-foreground",
+        selected && "bg-secondary text-secondary-foreground"
+      )}
+      onClick={onClick}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {meta ? <span className="text-xs capitalize opacity-70">{meta}</span> : null}
+      {selected ? <Check className="h-4 w-4 shrink-0" aria-hidden="true" /> : null}
+    </button>
+  );
+}
+
+function themeIcon(icon: ThemePresetIcon): typeof Palette {
+  if (icon === "sun") {
+    return Sun;
+  }
+  if (icon === "moon") {
+    return Moon;
+  }
+  if (icon === "image") {
+    return Image;
+  }
+  return Palette;
 }
 
 function Navigation({ onNavigate }: { onNavigate?: () => void }): JSX.Element {

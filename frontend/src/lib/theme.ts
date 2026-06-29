@@ -1,5 +1,6 @@
 export type ColorScheme = "light" | "dark";
 export type ThemePresetSource = "system" | "user";
+export type ThemePresetIcon = "sun" | "moon" | "palette" | "image";
 
 export type ThemeTokens = {
   background: string;
@@ -41,6 +42,7 @@ export type ThemePreset = {
   scheme: ColorScheme;
   source: ThemePresetSource;
   readonly: boolean;
+  icon: ThemePresetIcon;
   tokens: ThemeTokens;
   background: ThemeBackground;
 };
@@ -128,6 +130,7 @@ export const builtinThemePresets: ThemePreset[] = [
     scheme: "light",
     source: "system",
     readonly: true,
+    icon: "sun",
     tokens: lightTokens,
     background: defaultBackground
   },
@@ -137,6 +140,7 @@ export const builtinThemePresets: ThemePreset[] = [
     scheme: "dark",
     source: "system",
     readonly: true,
+    icon: "moon",
     tokens: darkTokens,
     background: defaultBackground
   },
@@ -146,6 +150,7 @@ export const builtinThemePresets: ThemePreset[] = [
     scheme: "light",
     source: "system",
     readonly: true,
+    icon: "palette",
     tokens: {
       ...lightTokens,
       primary: "207 88% 48%",
@@ -163,6 +168,7 @@ export const builtinThemePresets: ThemePreset[] = [
     scheme: "dark",
     source: "system",
     readonly: true,
+    icon: "palette",
     tokens: {
       ...darkTokens,
       background: "224 28% 9%",
@@ -281,6 +287,7 @@ export function createUserPreset(base: ThemePreset, values: Partial<ThemePreset>
     name: values.name ?? `${base.name} Copy`,
     source: "user",
     readonly: false,
+    icon: values.icon ?? base.icon ?? (base.background.type === "image" ? "image" : "palette"),
     tokens: { ...base.tokens, ...values.tokens },
     background: { ...base.background, ...values.background }
   };
@@ -288,7 +295,9 @@ export function createUserPreset(base: ThemePreset, values: Partial<ThemePreset>
 
 function normalizeStoredAppearance(value: Partial<StoredAppearance>, fallback: StoredAppearance): StoredAppearance {
   const customPresets = Array.isArray(value.customPresets)
-    ? value.customPresets.filter(isThemePreset).map((preset) => ({ ...preset, source: "user" as const, readonly: false }))
+    ? value.customPresets
+        .filter(isThemePreset)
+        .map((preset) => ({ ...preset, icon: preset.icon ?? defaultPresetIcon(preset), source: "user" as const, readonly: false }))
     : fallback.customPresets;
   const presets = allThemePresets(customPresets);
   const settings = normalizeSettings(value.settings, fallback.settings, presets);
@@ -341,6 +350,13 @@ function isThemePreset(value: unknown): value is ThemePreset {
     Boolean(preset.tokens) &&
     Boolean(preset.background)
   );
+}
+
+function defaultPresetIcon(preset: Pick<ThemePreset, "background" | "scheme">): ThemePresetIcon {
+  if (preset.background.type === "image") {
+    return "image";
+  }
+  return preset.scheme === "dark" ? "moon" : "sun";
 }
 
 function systemColorScheme(): ColorScheme {
