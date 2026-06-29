@@ -26,7 +26,10 @@ from backend.services.legacy_import_hydration_service import (
 )
 from backend.services.library_sync_service import LibrarySyncService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
-from backend.services.random_sleep import RandomSleep
+from backend.services.pixiv_rate_policy import (
+    file_download_request_policy,
+    metadata_request_policy,
+)
 from backend.services.settings_service import AppSettingsService
 
 logger = logging.getLogger(__name__)
@@ -459,11 +462,13 @@ class DownloadWorker:
             settings = settings_service.load()
         finally:
             settings_service.close()
-        sleeper = RandomSleep(
-            base_seconds=settings.request_base_delay_seconds,
-            random_seconds=settings.request_random_delay_seconds,
+        return PixivClient(
+            refresh_token=settings.refresh_token,
+            request_policy=metadata_request_policy(
+                min_interval_seconds=settings.request_base_delay_seconds,
+                random_delay_seconds=settings.request_random_delay_seconds,
+            ),
         )
-        return PixivClient(refresh_token=settings.refresh_token, sleeper=sleeper)
 
     def _create_file_downloader(self) -> FileDownloader:
         settings_service = AppSettingsService(
@@ -477,6 +482,10 @@ class DownloadWorker:
         return FileDownloader(
             settings.download_path,
             existing_file_behavior=settings.existing_file_behavior,
+            request_policy=file_download_request_policy(
+                min_interval_seconds=settings.file_download_base_delay_seconds,
+                random_delay_seconds=settings.file_download_random_delay_seconds,
+            ),
         )
 
 
@@ -588,7 +597,12 @@ def string_list_option(value: object) -> list[str]:
 
 
 def action_list_option(value: object) -> list[str]:
-    actions = [item for item in string_list_option(value) if item in {"download_artist", "sync_artist", "retry_failed_artist"}]
+    valid_actions = {"download_artist", "sync_artist", "retry_failed_artist"}
+    actions = [
+        item
+        for item in string_list_option(value)
+        if item in valid_actions
+    ]
     return actions or ["download_artist"]
 
 

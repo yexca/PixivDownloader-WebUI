@@ -1,8 +1,10 @@
 {
     "download_path": "downloads",
     "refresh_token": "",
-    "request_base_delay_seconds": 0.0,
-    "request_random_delay_seconds": 2.0,
+    "request_base_delay_seconds": 0.5,
+    "request_random_delay_seconds": 1.5,
+    "file_download_base_delay_seconds": 1.0,
+    "file_download_random_delay_seconds": 1.0,
     "max_concurrent_downloads": 1,
     "max_active_scheduled_tasks": 1,
     "max_active_one_time_tasks": 1,

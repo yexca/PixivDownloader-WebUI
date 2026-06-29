@@ -9,6 +9,7 @@ import requests
 
 from backend.core.config import ExistingFileBehavior, SettingsService
 from backend.core.errors import DownloadError
+from backend.services.pixiv_rate_policy import PixivRequestPolicy, file_download_request_policy
 
 
 class HttpResponse(Protocol):
@@ -45,17 +46,24 @@ class FileDownloader:
         http_client: HttpClient | None = None,
         skip_existing: bool = False,
         existing_file_behavior: ExistingFileBehavior | None = None,
+        request_policy: PixivRequestPolicy | None = None,
     ) -> None:
         if download_path is None:
             settings = SettingsService().load()
             self.download_path = Path(settings.download_path)
             self.existing_file_behavior = settings.existing_file_behavior
+            if request_policy is None:
+                request_policy = file_download_request_policy(
+                    min_interval_seconds=settings.file_download_base_delay_seconds,
+                    random_delay_seconds=settings.file_download_random_delay_seconds,
+                )
         else:
             self.download_path = Path(download_path)
             self.existing_file_behavior = existing_file_behavior or (
                 "skip" if skip_existing else "overwrite"
             )
         self.http_client = http_client or requests
+        self.request_policy = request_policy
         try:
             self.download_path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -103,8 +111,7 @@ class FileDownloader:
         }
 
         try:
-            response = self.http_client.get(url, headers=headers, stream=True, timeout=60)
-            response.raise_for_status()
+            response = self._get(url, headers=headers)
             size_bytes = 0
             with local_path.open("wb") as file:
                 for chunk in response.iter_content(chunk_size=8192):
@@ -122,6 +129,16 @@ class FileDownloader:
             local_path=local_path,
             size_bytes=size_bytes,
         )
+
+    def _get(self, url: str, *, headers: dict[str, str]) -> HttpResponse:
+        def request() -> HttpResponse:
+            response = self.http_client.get(url, headers=headers, stream=True, timeout=60)
+            response.raise_for_status()
+            return response
+
+        if self.request_policy is None:
+            return request()
+        return self.request_policy.run("file download", request)
 
 
 def clean_path(path: str) -> str:

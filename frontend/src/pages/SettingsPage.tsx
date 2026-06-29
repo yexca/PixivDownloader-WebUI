@@ -65,6 +65,8 @@ type BasicForm = Pick<
   | "download_path"
   | "request_base_delay_seconds"
   | "request_random_delay_seconds"
+  | "file_download_base_delay_seconds"
+  | "file_download_random_delay_seconds"
   | "max_concurrent_downloads"
   | "max_active_scheduled_tasks"
   | "max_active_one_time_tasks"
@@ -899,26 +901,42 @@ function BasicSettingsTab({
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Requests and performance" description="Tune Pixiv request pacing and download concurrency.">
+      <SettingsSection title="Requests and performance" description="Tune Pixiv API pacing, file download pacing, and job concurrency.">
         <div className="space-y-3">
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
-              label="Base delay seconds"
+              label="API base delay seconds"
               value={form.request_base_delay_seconds}
               error={errors.request_base_delay_seconds}
-              tooltip="Fixed minimum wait before each Pixiv request or download attempt."
+              tooltip="Fixed minimum wait before each Pixiv metadata API request."
               onChange={(value) => onChange({ ...form, request_base_delay_seconds: value })}
             />
             <NumberField
-              label="Random delay seconds"
+              label="API random delay seconds"
               value={form.request_random_delay_seconds}
               error={errors.request_random_delay_seconds}
-              tooltip="Extra random wait from 0 up to this many seconds, added on top of the base delay."
+              tooltip="Extra random wait from 0 up to this many seconds before metadata API requests."
               onChange={(value) => onChange({ ...form, request_random_delay_seconds: value })}
             />
           </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <NumberField
+              label="File base delay seconds"
+              value={form.file_download_base_delay_seconds}
+              error={errors.file_download_base_delay_seconds}
+              tooltip="Fixed minimum wait before each real Pixiv image file download."
+              onChange={(value) => onChange({ ...form, file_download_base_delay_seconds: value })}
+            />
+            <NumberField
+              label="File random delay seconds"
+              value={form.file_download_random_delay_seconds}
+              error={errors.file_download_random_delay_seconds}
+              tooltip="Extra random wait from 0 up to this many seconds before image file downloads."
+              onChange={(value) => onChange({ ...form, file_download_random_delay_seconds: value })}
+            />
+          </div>
           <p className="text-xs leading-5 text-muted-foreground">
-            Each request waits base delay + random(0, random delay) seconds before running.
+            Existing local files are skipped without waiting. Retryable 429 and 5xx responses use a separate backoff schedule.
           </p>
           <div className="grid gap-4 sm:grid-cols-2">
             <NumberField
@@ -1469,6 +1487,8 @@ function toBasicForm(settings: SettingsResponse): BasicForm {
     download_path: settings.download_path,
     request_base_delay_seconds: settings.request_base_delay_seconds,
     request_random_delay_seconds: settings.request_random_delay_seconds,
+    file_download_base_delay_seconds: settings.file_download_base_delay_seconds,
+    file_download_random_delay_seconds: settings.file_download_random_delay_seconds,
     max_concurrent_downloads: settings.max_concurrent_downloads,
     max_active_scheduled_tasks: settings.max_active_scheduled_tasks,
     max_active_one_time_tasks: settings.max_active_one_time_tasks,
@@ -1488,6 +1508,12 @@ function validateBasic(form: BasicForm, downloadPathEditable: boolean): Record<s
   }
   if (form.request_random_delay_seconds < 0) {
     errors.request_random_delay_seconds = "Must be zero or greater.";
+  }
+  if (form.file_download_base_delay_seconds < 0) {
+    errors.file_download_base_delay_seconds = "Must be zero or greater.";
+  }
+  if (form.file_download_random_delay_seconds < 0) {
+    errors.file_download_random_delay_seconds = "Must be zero or greater.";
   }
   if (form.max_concurrent_downloads < 1 || !Number.isInteger(form.max_concurrent_downloads)) {
     errors.max_concurrent_downloads = "Must be a whole number of at least 1.";

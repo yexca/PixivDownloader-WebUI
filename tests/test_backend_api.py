@@ -60,6 +60,8 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
             "refresh_token": "",
             "request_base_delay_seconds": 0.2,
             "request_random_delay_seconds": 0.3,
+            "file_download_base_delay_seconds": 0.4,
+            "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 2,
             "max_active_scheduled_tasks": 3,
             "max_active_one_time_tasks": 4,
@@ -76,6 +78,8 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["runtime_mode"] == "local"
     assert body["max_active_scheduled_tasks"] == 3
     assert body["max_active_one_time_tasks"] == 4
+    assert body["file_download_base_delay_seconds"] == 0.4
+    assert body["file_download_random_delay_seconds"] == 0.5
     assert body["min_free_space_gb"] == 10.0
     assert body["library_stale_check_days"] == 14
     assert body["existing_file_behavior"] == "save_duplicate"
@@ -96,6 +100,7 @@ def test_settings_partial_update_preserves_other_values(tmp_path):
     assert body["refresh_token_configured"] is True
     assert body["refresh_token_preview"] == "secr...oken"
     assert body["request_base_delay_seconds"] == 0.1
+    assert body["file_download_base_delay_seconds"] == 1.0
     assert body["library_stale_check_days"] == 30
     assert body["existing_file_behavior"] == "skip"
 
@@ -111,6 +116,8 @@ def test_settings_download_path_is_fixed_in_docker_runtime(tmp_path, monkeypatch
             "refresh_token": "",
             "request_base_delay_seconds": 0.2,
             "request_random_delay_seconds": 0.3,
+            "file_download_base_delay_seconds": 0.4,
+            "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 2,
             "min_free_space_gb": 10.0,
             "library_stale_check_days": 30,
@@ -1920,6 +1927,8 @@ def make_config(tmp_path):
             "refresh_token": "",
             "request_base_delay_seconds": 0.1,
             "request_random_delay_seconds": 0.2,
+            "file_download_base_delay_seconds": 1.0,
+            "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 1,
             "max_active_scheduled_tasks": 1,
             "max_active_one_time_tasks": 1,

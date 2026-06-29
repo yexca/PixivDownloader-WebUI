@@ -19,6 +19,8 @@ class Settings:
     refresh_token: str = ""
     request_base_delay_seconds: float = 0.0
     request_random_delay_seconds: float = 2.0
+    file_download_base_delay_seconds: float = 1.0
+    file_download_random_delay_seconds: float = 0.5
     max_concurrent_downloads: int = 1
     max_active_scheduled_tasks: int = 1
     max_active_one_time_tasks: int = 1
@@ -49,6 +51,13 @@ class Settings:
         if request_base_delay_seconds < 0 or request_random_delay_seconds < 0:
             raise ConfigError("request delays must be non-negative")
 
+        file_download_base_delay_seconds = float(data.get("file_download_base_delay_seconds", 1.0))
+        file_download_random_delay_seconds = float(
+            data.get("file_download_random_delay_seconds", 0.5)
+        )
+        if file_download_base_delay_seconds < 0 or file_download_random_delay_seconds < 0:
+            raise ConfigError("file download delays must be non-negative")
+
         min_free_space_gb = float(data.get("min_free_space_gb", 10.0))
         if min_free_space_gb < 0:
             raise ConfigError("minimum free space must be non-negative")
@@ -71,6 +80,8 @@ class Settings:
             refresh_token=str(data.get("refresh_token", "")),
             request_base_delay_seconds=request_base_delay_seconds,
             request_random_delay_seconds=request_random_delay_seconds,
+            file_download_base_delay_seconds=file_download_base_delay_seconds,
+            file_download_random_delay_seconds=file_download_random_delay_seconds,
             max_concurrent_downloads=max_concurrent_downloads,
             max_active_scheduled_tasks=max_active_scheduled_tasks,
             max_active_one_time_tasks=max_active_one_time_tasks,
@@ -85,6 +96,8 @@ class Settings:
             "refresh_token": self.refresh_token,
             "request_base_delay_seconds": self.request_base_delay_seconds,
             "request_random_delay_seconds": self.request_random_delay_seconds,
+            "file_download_base_delay_seconds": self.file_download_base_delay_seconds,
+            "file_download_random_delay_seconds": self.file_download_random_delay_seconds,
             "max_concurrent_downloads": self.max_concurrent_downloads,
             "max_active_scheduled_tasks": self.max_active_scheduled_tasks,
             "max_active_one_time_tasks": self.max_active_one_time_tasks,
@@ -160,6 +173,8 @@ class SettingsService:
             "refresh_token_preview": mask_token(token),
             "request_base_delay_seconds": settings.request_base_delay_seconds,
             "request_random_delay_seconds": settings.request_random_delay_seconds,
+            "file_download_base_delay_seconds": settings.file_download_base_delay_seconds,
+            "file_download_random_delay_seconds": settings.file_download_random_delay_seconds,
             "max_concurrent_downloads": settings.max_concurrent_downloads,
             "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
             "max_active_one_time_tasks": settings.max_active_one_time_tasks,

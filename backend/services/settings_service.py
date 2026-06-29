@@ -71,7 +71,7 @@ class AppSettingsService:
             raise PixivAuthError("Pixiv refresh token is not configured")
         client = PixivClient(refresh_token=settings.refresh_token, api=api)
         try:
-            result = client.api.user_detail(client.api.user_id)
+            result = client.get_authenticated_user_detail()
         except PixivAuthError:
             raise
         except Exception as exc:
@@ -115,6 +115,8 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         "refresh_token_preview": preview,
         "request_base_delay_seconds": settings.request_base_delay_seconds,
         "request_random_delay_seconds": settings.request_random_delay_seconds,
+        "file_download_base_delay_seconds": settings.file_download_base_delay_seconds,
+        "file_download_random_delay_seconds": settings.file_download_random_delay_seconds,
         "max_concurrent_downloads": settings.max_concurrent_downloads,
         "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
         "max_active_one_time_tasks": settings.max_active_one_time_tasks,

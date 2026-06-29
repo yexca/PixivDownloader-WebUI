@@ -8,6 +8,7 @@ from backend.core.config import SettingsService
 from backend.core.errors import PixivApiError, PixivAuthError
 from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.domain.types import ArtistAccountStatus
+from backend.services.pixiv_rate_policy import PixivRequestPolicy, metadata_request_policy
 
 
 class PixivApi(Protocol):
@@ -38,6 +39,7 @@ class PixivClient:
         *,
         api: PixivApi | None = None,
         sleeper: object | None = None,
+        request_policy: PixivRequestPolicy | None = None,
     ) -> None:
         self.refresh_token = refresh_token
         if self.refresh_token is None:
@@ -45,12 +47,20 @@ class PixivClient:
         if not self.refresh_token:
             raise PixivAuthError("Pixiv refresh token is not configured")
 
+        api_was_injected = api is not None
         if api is None:
             from pixivpy3 import AppPixivAPI
 
             api = AppPixivAPI()
         self.api = api
         self.sleeper = sleeper
+        if request_policy is None and sleeper is None and not api_was_injected:
+            settings = SettingsService().load()
+            request_policy = metadata_request_policy(
+                min_interval_seconds=settings.request_base_delay_seconds,
+                random_delay_seconds=settings.request_random_delay_seconds,
+            )
+        self.request_policy = request_policy
         try:
             self.api.auth(refresh_token=self.refresh_token)
         except Exception as exc:
@@ -88,6 +98,9 @@ class PixivClient:
             raise PixivApiError(f"failed to fetch Pixiv artwork {artwork_id}") from exc
         return artist_from_pixiv_user(illust.user)
 
+    def get_authenticated_user_detail(self) -> Any:
+        return self._request(lambda: self.api.user_detail(self.api.user_id))
+
     def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
         illusts: list[Any] = []
         next_qs: dict[str, Any] | None = {}
@@ -115,8 +128,11 @@ class PixivClient:
         return [artwork_from_pixiv_illust(illust) for illust in illusts]
 
     def _request(self, request: Callable[[], Any]) -> Any:
+        if self.request_policy is not None:
+            return self.request_policy.run("metadata request", request)
         if self.sleeper is not None:
             self.sleeper()
+            return request()
         return request()
 
 
@@ -274,5 +290,7 @@ class PixivClientProtocol(Protocol):
     def get_artist_by_user_id(self, user_id: str) -> Artist: ...
 
     def get_artist_by_artwork_id(self, artwork_id: str) -> Artist: ...
+
+    def get_authenticated_user_detail(self) -> Any: ...
 
     def get_artworks_by_user_id(self, user_id: str) -> Iterable[Artwork]: ...

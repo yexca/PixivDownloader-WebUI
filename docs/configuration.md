@@ -38,8 +38,10 @@ env\python.exe tools\migrate_settings_to_config.py
 
 - `download_path`: local target directory for downloaded files.
 - `refresh_token`: Pixiv refresh token.
-- `request_base_delay_seconds`: minimum delay before requests/downloads.
-- `request_random_delay_seconds`: random delay range.
+- `request_base_delay_seconds`: minimum delay before Pixiv metadata API requests.
+- `request_random_delay_seconds`: random delay range for Pixiv metadata API requests.
+- `file_download_base_delay_seconds`: minimum delay before real image file downloads.
+- `file_download_random_delay_seconds`: random delay range for image file downloads.
 - `max_concurrent_downloads`: configured concurrency limit.
 - `overwrite_existing_files`: whether existing files should be overwritten.
 - `skip_existing_files`: whether existing files should be skipped.

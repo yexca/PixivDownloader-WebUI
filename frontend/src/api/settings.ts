@@ -10,6 +10,8 @@ export type SettingsResponse = {
   refresh_token_preview: string;
   request_base_delay_seconds: number;
   request_random_delay_seconds: number;
+  file_download_base_delay_seconds: number;
+  file_download_random_delay_seconds: number;
   max_concurrent_downloads: number;
   max_active_scheduled_tasks: number;
   max_active_one_time_tasks: number;
@@ -25,6 +27,8 @@ export type SettingsUpdateRequest = {
   refresh_token?: string | null;
   request_base_delay_seconds?: number;
   request_random_delay_seconds?: number;
+  file_download_base_delay_seconds?: number;
+  file_download_random_delay_seconds?: number;
   max_concurrent_downloads?: number;
   max_active_scheduled_tasks?: number;
   max_active_one_time_tasks?: number;

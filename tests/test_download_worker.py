@@ -6,7 +6,11 @@ from backend.domain.entities import Artist, Artwork, ArtworkFile, Job
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
-from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunItem, WorkflowRunRepository
+from backend.repositories.workflow_run_repository import (
+    WorkflowRun,
+    WorkflowRunItem,
+    WorkflowRunRepository,
+)
 from backend.services.file_downloader import FileDownloadResult
 from backend.workers.download_worker import DownloadWorker
 
