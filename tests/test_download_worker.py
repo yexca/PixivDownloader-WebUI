@@ -6,6 +6,7 @@ from backend.domain.entities import Artist, Artwork, ArtworkFile, Job
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunItem, WorkflowRunRepository
 from backend.services.file_downloader import FileDownloadResult
 from backend.workers.download_worker import DownloadWorker
 
@@ -33,6 +34,21 @@ class FakePixivClient:
                 ),
             )
         ]
+
+
+class ResolvingPixivClient:
+    def get_artist_by_user_id(self, user_id: str) -> Artist:
+        return Artist(id=user_id, name=f"Artist {user_id}")
+
+    def get_artist_by_artwork_id(self, artwork_id: str) -> Artist:
+        artists = {
+            "111": Artist(id="456", name="Resolved Artist"),
+            "222": Artist(id="123", name="Duplicate Artist"),
+        }
+        return artists[artwork_id]
+
+    def get_artworks_by_user_id(self, _user_id: str) -> list[Artwork]:
+        return []
 
 
 class FakeLegacyPixivClient:
@@ -337,3 +353,84 @@ def test_worker_accepts_library_shortcut_unavailable_artist(tmp_path):
         assert artist.account_status == "unavailable"
     finally:
         artist_repository.close()
+
+
+def test_worker_resolves_artwork_targets_and_appends_artist_jobs(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    workflow_repository = WorkflowRunRepository(db_path)
+    job_repository = JobRepository(db_path)
+    try:
+        workflow_repository.create_run(
+            WorkflowRun(
+                id="run-1",
+                status="running",
+                total=1,
+                completed=0,
+                failed=0,
+                skipped=0,
+                concurrency=1,
+            )
+        )
+        workflow_repository.create_item(
+            WorkflowRunItem(
+                id=1,
+                run_id="run-1",
+                draft_id="artists",
+                title="Artists",
+                status="running",
+                job_ids=["resolver-1"],
+            )
+        )
+        job_repository.create(
+            Job(
+                id="resolver-1",
+                type="resolve_artist_targets",
+                status="queued",
+                workflow_run_id="run-1",
+                workflow_item_id=1,
+                workflow_source="workflow_batch",
+                options={
+                    "artist_ids": ["123"],
+                    "artwork_ids": ["111", "222"],
+                    "actions": ["sync_artist", "retry_failed_artist"],
+                    "download_options": {"only_new_artworks": True},
+                    "max_targets_per_run": 25,
+                    "workflow_run_id": "run-1",
+                    "workflow_item_id": 1,
+                    "workflow_source": "workflow_batch",
+                },
+            )
+        )
+    finally:
+        workflow_repository.close()
+        job_repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=ResolvingPixivClient,
+        file_downloader_factory=lambda: FakeFileDownloader(tmp_path),
+    )
+
+    job = worker.run_job("resolver-1")
+
+    assert job.status == "completed"
+    job_repository = JobRepository(db_path)
+    workflow_repository = WorkflowRunRepository(db_path)
+    try:
+        jobs = sorted(job_repository.list(limit=20), key=lambda item: item.created_at or "")
+        child_jobs = [item for item in jobs if item.id != "resolver-1"]
+        item = workflow_repository.list_items("run-1")[0]
+        run = workflow_repository.get_run("run-1")
+    finally:
+        job_repository.close()
+        workflow_repository.close()
+    assert [(item.type, item.input_user_id) for item in child_jobs] == [
+        ("sync_artist", "123"),
+        ("retry_failed_artist", "123"),
+        ("sync_artist", "456"),
+        ("retry_failed_artist", "456"),
+    ]
+    assert item.job_ids == ["resolver-1", *[job.id for job in child_jobs]]
+    assert item.status == "running"
+    assert run is not None
+    assert run.status == "running"

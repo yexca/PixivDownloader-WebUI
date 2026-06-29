@@ -131,6 +131,56 @@ class JobService:
         )
         return self.repository.get_by_id(job.id) or job
 
+    def create_resolve_artist_targets_job(
+        self,
+        *,
+        artist_ids: tuple[str, ...],
+        artwork_ids: tuple[str, ...],
+        actions: tuple[str, ...],
+        download_options: dict[str, object],
+        max_targets_per_run: int,
+        options: dict[str, object] | None = None,
+        gate_one_time: bool = True,
+    ) -> Job | None:
+        if not artist_ids and not artwork_ids:
+            return None
+        metadata = clean_job_options(options or {})
+        job_options = {
+            "artist_ids": list(artist_ids),
+            "artwork_ids": list(artwork_ids),
+            "actions": list(actions),
+            "download_options": download_options,
+            "max_targets_per_run": max_targets_per_run,
+            **metadata,
+        }
+        workflow_link = workflow_link_from_options(job_options)
+        status: JobStatus = "queued"
+        if gate_one_time:
+            job_options["activation_scope"] = "one_time"
+            status = self._next_one_time_status()
+        job = Job(
+            id=str(uuid4()),
+            type="resolve_artist_targets",
+            status=status,
+            total_files=len(artist_ids) + len(artwork_ids),
+            options=job_options,
+            workflow_run_id=workflow_link.run_id,
+            workflow_item_id=workflow_link.item_id,
+            workflow_source=workflow_link.source,
+        )
+        self.repository.create(job)
+        self.repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Artist target resolver queued"
+                if status == "queued"
+                else "Artist target resolver waiting for one-time task capacity",
+                payload=job_options,
+            )
+        )
+        return self.repository.get_by_id(job.id) or job
+
     def rerun_job(self, job_id: str) -> Job:
         source = self.repository.get_by_id(job_id)
         if source is None:

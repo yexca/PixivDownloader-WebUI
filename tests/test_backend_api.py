@@ -1317,7 +1317,7 @@ def test_workflow_artists_target_creates_multiple_artist_jobs(tmp_path):
     ]
 
 
-def test_workflow_artists_target_from_artwork_ids_creates_artwork_jobs(tmp_path):
+def test_workflow_artists_target_from_artwork_ids_creates_resolver_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
 
@@ -1346,22 +1346,17 @@ def test_workflow_artists_target_from_artwork_ids_creates_artwork_jobs(tmp_path)
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["items"][0]["job_ids"]) == 2
+    assert len(body["items"][0]["job_ids"]) == 1
     assert queue.wake_count == 1
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        jobs = [
-            job
-            for job_id in body["items"][0]["job_ids"]
-            if (job := repository.get_by_id(job_id)) is not None
-        ]
+        job = repository.get_by_id(body["items"][0]["job_ids"][0])
     finally:
         repository.close()
-    jobs = sorted(jobs, key=lambda job: job.input_artwork_id or "")
-    assert [(job.type, job.input_artwork_id) for job in jobs] == [
-        ("download_from_artwork", "111"),
-        ("download_from_artwork", "222"),
-    ]
+    assert job is not None
+    assert job.type == "resolve_artist_targets"
+    assert job.options["artwork_ids"] == ["111", "222"]
+    assert job.options["actions"] == ["download_artist"]
 
 
 def test_workflow_artists_target_combines_artist_and_artwork_id_queues(tmp_path):
@@ -1394,20 +1389,55 @@ def test_workflow_artists_target_combines_artist_and_artwork_id_queues(tmp_path)
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["items"][0]["job_ids"]) == 2
+    assert len(body["items"][0]["job_ids"]) == 1
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        jobs = [
-            job
-            for job_id in body["items"][0]["job_ids"]
-            if (job := repository.get_by_id(job_id)) is not None
-        ]
+        job = repository.get_by_id(body["items"][0]["job_ids"][0])
     finally:
         repository.close()
-    assert sorted((job.type, job.input_user_id, job.input_artwork_id) for job in jobs) == [
-        ("download_artist", "123", None),
-        ("download_from_artwork", None, "111"),
-    ]
+    assert job is not None
+    assert job.type == "resolve_artist_targets"
+    assert job.options["artist_ids"] == ["123"]
+    assert job.options["artwork_ids"] == ["111"]
+
+
+def test_workflow_artists_target_from_artwork_ids_accepts_artist_actions(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 1,
+            "items": [
+                {
+                    "draft_id": "artists-from-artworks-sync",
+                    "title": "Sync artists from artworks",
+                    "config": {
+                        "target": {
+                            "type": "artists",
+                            "artist_source": "artwork_ids",
+                            "artwork_ids": ["111"],
+                        },
+                        "filters": [],
+                        "actions": ["sync_artist", "retry_failed_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        job = repository.get_by_id(body["items"][0]["job_ids"][0])
+    finally:
+        repository.close()
+    assert job is not None
+    assert job.type == "resolve_artist_targets"
+    assert job.options["actions"] == ["sync_artist", "retry_failed_artist"]
 
 
 def test_workflow_batch_schedules_create_enabled_triggers(tmp_path):

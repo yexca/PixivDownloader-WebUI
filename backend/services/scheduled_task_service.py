@@ -236,41 +236,20 @@ class ScheduledTaskService:
     def _create_jobs(self, task: ScheduledTask, *, gate_one_time: bool) -> list[Job]:
         config = task.config or legacy_config(task)
         if config.target.type == "artists" and config.target.artwork_ids:
-            jobs: list[Job] = []
-            artists = self._resolve_artists(config)
-            target_slots = config.max_artists_per_run
-            for artist in artists[:target_slots]:
-                for action in config.actions:
-                    active_job = self._find_active_job(action, artist.id, None)
-                    if active_job is not None:
-                        continue
-                    jobs.append(
-                        self._create_job(
-                            action,
-                            artist.id,
-                            options=config.download_options,
-                            gate_one_time=gate_one_time,
-                        )
-                    )
-            remaining_slots = max(0, target_slots - len(artists[:target_slots]))
-            for artwork_id in config.target.artwork_ids[:remaining_slots]:
-                active_job = self._find_active_job(
-                    "download_from_artwork",
-                    None,
-                    artwork_id,
+            service = JobService(self.db_path, settings_json_path=self.settings_json_path)
+            try:
+                job = service.create_resolve_artist_targets_job(
+                    artist_ids=config.target.artist_ids,
+                    artwork_ids=config.target.artwork_ids,
+                    actions=config.actions,
+                    download_options=config.download_options,
+                    max_targets_per_run=config.max_artists_per_run,
+                    options=config.download_options,
+                    gate_one_time=gate_one_time,
                 )
-                if active_job is not None:
-                    continue
-                jobs.append(
-                    self._create_job(
-                        "download_artist",
-                        None,
-                        artwork_id=artwork_id,
-                        options=config.download_options,
-                        gate_one_time=gate_one_time,
-                    )
-                )
-            return jobs
+                return [] if job is None else [job]
+            finally:
+                service.close()
         if config.target.type == "single_artwork":
             if not config.target.artwork_id:
                 return []

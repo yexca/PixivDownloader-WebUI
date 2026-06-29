@@ -13,7 +13,6 @@ import {
   Search,
   Trash2,
   Wand2,
-  PlusCircle,
   XCircle
 } from "lucide-react";
 
@@ -966,8 +965,7 @@ function ArtistsTargetFields({
             const artist_source = event.target.value as ArtistTargetSource;
             setForm({
               ...form,
-              artist_source,
-              actions: artist_source === "artwork_ids" ? ["download_artist"] : form.actions
+              artist_source
             });
           }}
         >
@@ -987,8 +985,16 @@ function ArtistsTargetFields({
             }
           }}
         />
-        <Button type="button" variant="outline" size="icon" onClick={addIds} title="Add ID" aria-label="Add ID">
-          <PlusCircle className="h-4 w-4" aria-hidden="true" />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="shrink-0"
+          onClick={addIds}
+          title="Add ID"
+          aria-label="Add ID"
+        >
+          <Plus className="h-4 w-4" aria-hidden="true" />
         </Button>
       </div>
       <div className="space-y-3">
@@ -1114,11 +1120,10 @@ function FiltersCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
 
 function ActionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
   const artworkTarget = form.target_type === "single_artwork" || form.target_type === "artworks";
-  const artworkArtistSource = form.target_type === "artists" && form.artist_source === "artwork_ids";
   return (
     <>
       {(Object.keys(actionLabels) as WorkflowAction[]).map((action) => {
-        const disabled = (artworkTarget || artworkArtistSource) && action !== "download_artist";
+        const disabled = artworkTarget && action !== "download_artist";
         return (
           <label
             key={action}
@@ -2134,13 +2139,6 @@ function validateForm(form: WorkflowForm): string[] {
   if (form.target_type === "artworks") {
     errors.push("Artwork-only workflows are not available yet.");
   }
-  if (
-    form.target_type === "artists"
-    && queuedArtworkIds(form).length > 0
-    && form.actions.some((action) => action !== "download_artist")
-  ) {
-    errors.push("Artists from artwork IDs only support download.");
-  }
   if (form.target_type === "single_artist" && !/^\d+$/.test(form.artist_id.trim())) {
     errors.push("Artist ID must contain digits only.");
   }
@@ -2366,7 +2364,7 @@ function normalizeStoredForm(form: WorkflowForm): WorkflowForm {
     artist_source: artistSource,
     artist_ids: artistIds,
     artwork_ids: artworkIds,
-    actions: artistSource === "artwork_ids" ? ["download_artist"] : form.actions,
+    actions: form.actions,
     modules,
     naming_rule: form.naming_rule || defaultNamingRule,
     rules: {

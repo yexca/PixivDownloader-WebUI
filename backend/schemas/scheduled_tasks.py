@@ -51,12 +51,6 @@ class ScheduledTaskConfigRequest(BaseModel):
             action != "download_artist" for action in self.actions
         ):
             raise ValueError("artwork target only supports download_artist")
-        if (
-            self.target.type == "artists"
-            and self.target.artwork_ids
-            and any(action != "download_artist" for action in self.actions)
-        ):
-            raise ValueError("artists target with artwork IDs only supports download_artist")
         return self
 
 

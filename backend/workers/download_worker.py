@@ -13,8 +13,10 @@ from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.workflow_run_repository import WorkflowRunRepository
 from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
+from backend.services.job_service import JobService, workflow_metadata_from_job
 from backend.services.legacy_import_hydration_service import (
     LegacyImportHydrationArtistResult,
     LegacyImportHydrationRetryableError,
@@ -64,6 +66,8 @@ class DownloadWorker:
             job = self._start(repository, job)
             if job.type == "hydrate_legacy_import":
                 return self._run_legacy_import_hydration_job(repository, job)
+            if job.type == "resolve_artist_targets":
+                return self._run_resolve_artist_targets_job(repository, job)
             if job.type == "sync_artist":
                 return self._run_sync_job(repository, job)
             service = DownloadService(
@@ -213,6 +217,98 @@ class DownloadWorker:
             )
         )
         return repository.get_by_id(job.id) or finished
+
+    def _run_resolve_artist_targets_job(self, repository: JobRepository, job: Job) -> Job:
+        artist_ids = string_list_option(job.options.get("artist_ids"))
+        artwork_ids = string_list_option(job.options.get("artwork_ids"))
+        actions = action_list_option(job.options.get("actions"))
+        download_options = dict_option(job.options.get("download_options"))
+        max_targets = positive_int_option(job.options.get("max_targets_per_run")) or max(
+            1,
+            len(artist_ids) + len(artwork_ids),
+        )
+        pixiv_client = self.pixiv_client_factory()
+        resolved_artist_ids = list(artist_ids)
+        resolved_from_artworks: list[dict[str, str]] = []
+        for artwork_id in artwork_ids:
+            artist = pixiv_client.get_artist_by_artwork_id(artwork_id)
+            resolved_artist_ids.append(artist.id)
+            resolved_from_artworks.append(
+                {"artwork_id": artwork_id, "artist_id": artist.id, "artist_name": artist.name}
+            )
+
+        deduped_artist_ids = dedupe_preserve_order(resolved_artist_ids)[:max_targets]
+        finished = replace(
+            repository.get_by_id(job.id) or job,
+            status="completed",
+            total_files=len(artist_ids) + len(artwork_ids),
+            completed_files=len(deduped_artist_ids),
+            skipped_files=max(0, len(resolved_artist_ids) - len(deduped_artist_ids)),
+            failed_files=0,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message=f"Resolved {len(deduped_artist_ids)} artist target(s)",
+                payload={
+                    "resolved_artist_ids": deduped_artist_ids,
+                    "resolved_from_artworks": resolved_from_artworks,
+                },
+            )
+        )
+
+        created_jobs = self._create_resolved_artist_jobs(
+            source_job=finished,
+            artist_ids=deduped_artist_ids,
+            actions=actions,
+            download_options=download_options,
+        )
+        if created_jobs:
+            self._append_workflow_item_jobs(finished, [created.id for created in created_jobs])
+        return repository.get_by_id(job.id) or finished
+
+    def _create_resolved_artist_jobs(
+        self,
+        *,
+        source_job: Job,
+        artist_ids: list[str],
+        actions: list[str],
+        download_options: dict[str, object],
+    ) -> list[Job]:
+        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
+        try:
+            jobs: list[Job] = []
+            metadata = workflow_metadata_from_job(source_job)
+            for artist_id in artist_ids:
+                for action in actions:
+                    job = service.create_download_job(
+                        user_id=artist_id,
+                        artwork_id=None,
+                        sync_only=action == "sync_artist",
+                        retry_failed_artist=action == "retry_failed_artist",
+                        options={**download_options, **metadata},
+                    )
+                    jobs.append(job)
+            return jobs
+        finally:
+            service.close()
+
+    def _append_workflow_item_jobs(self, job: Job, job_ids: list[str]) -> None:
+        if not job.workflow_run_id or job.workflow_item_id is None:
+            return
+        repository = WorkflowRunRepository(self.db_path)
+        try:
+            for item in repository.list_items(job.workflow_run_id):
+                if item.id != job.workflow_item_id:
+                    continue
+                next_job_ids = dedupe_preserve_order([*item.job_ids, *job_ids])
+                repository.update_item(replace(item, status="running", job_ids=next_job_ids))
+                break
+        finally:
+            repository.close()
 
     def _record_legacy_hydration_progress(
         self,
@@ -478,6 +574,37 @@ def tuple_tag_variant_option(
         if len(variant) > 1:
             result.append(variant)
     return tuple(result)
+
+
+def string_list_option(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item).strip()
+        if text:
+            result.append(text)
+    return result
+
+
+def action_list_option(value: object) -> list[str]:
+    actions = [item for item in string_list_option(value) if item in {"download_artist", "sync_artist", "retry_failed_artist"}]
+    return actions or ["download_artist"]
+
+
+def dict_option(value: object) -> dict[str, object]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        result.append(value)
+        seen.add(value)
+    return result
 
 
 def legacy_tag_variant_option(value: object, action: object) -> list[dict[str, str]]:
