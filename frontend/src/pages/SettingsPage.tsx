@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Copy,
   DatabaseBackup,
+  Edit3,
   ExternalLink,
   Eye,
   EyeOff,
@@ -11,10 +12,12 @@ import {
   Loader2,
   Monitor,
   Moon,
+  Plus,
   RefreshCw,
   Save,
   ShieldCheck,
   Sun,
+  Trash2,
   Undo2
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,12 +43,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { useUiStore } from "@/hooks/useUiStore";
-import type { ThemeMode } from "@/lib/theme";
+import { allThemePresets, type AppearanceSettings, type ColorScheme, type ThemePreset } from "@/lib/theme";
 
 type SettingsTab = "basic" | "pixiv" | "appearance" | "advanced";
 type BasicForm = Pick<
@@ -98,8 +102,15 @@ export function SettingsPage(): JSX.Element {
   const [authCode, setAuthCode] = React.useState("");
   const [authTestStatus, setAuthTestStatus] = React.useState<TestStatus>(notConfiguredAuthStatus());
   const [connectionTestStatus, setConnectionTestStatus] = React.useState<TestStatus>(notConfiguredConnectionStatus());
-  const themeMode = useUiStore((state) => state.themeMode);
-  const setThemeMode = useUiStore((state) => state.setThemeMode);
+  const appearanceSettings = useUiStore((state) => state.appearanceSettings);
+  const customThemePresets = useUiStore((state) => state.customThemePresets);
+  const activeThemePreset = useUiStore((state) => state.activeThemePreset);
+  const setFollowSystemTheme = useUiStore((state) => state.setFollowSystemTheme);
+  const setActiveThemePreset = useUiStore((state) => state.setActiveThemePreset);
+  const setSystemThemePreset = useUiStore((state) => state.setSystemThemePreset);
+  const createThemePreset = useUiStore((state) => state.createThemePreset);
+  const updateThemePreset = useUiStore((state) => state.updateThemePreset);
+  const deleteThemePreset = useUiStore((state) => state.deleteThemePreset);
   const legacyDatabaseInputId = React.useId();
   const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
   const isPixivStartUrl = isPixivAuthStartUrl(authCode);
@@ -441,7 +452,17 @@ export function SettingsPage(): JSX.Element {
             ) : null}
 
             {activeTab === "appearance" ? (
-              <AppearanceSettingsTab themeMode={themeMode} onThemeModeChange={setThemeMode} />
+              <AppearanceSettingsTab
+                activePreset={activeThemePreset}
+                customPresets={customThemePresets}
+                settings={appearanceSettings}
+                onCreatePreset={createThemePreset}
+                onDeletePreset={deleteThemePreset}
+                onSetActivePreset={setActiveThemePreset}
+                onSetFollowSystem={setFollowSystemTheme}
+                onSetSystemPreset={setSystemThemePreset}
+                onUpdatePreset={updateThemePreset}
+              />
             ) : null}
 
             {activeTab === "advanced" ? (
@@ -481,45 +502,274 @@ export function SettingsPage(): JSX.Element {
 }
 
 function AppearanceSettingsTab({
-  themeMode,
-  onThemeModeChange
+  activePreset,
+  customPresets,
+  settings,
+  onCreatePreset,
+  onDeletePreset,
+  onSetActivePreset,
+  onSetFollowSystem,
+  onSetSystemPreset,
+  onUpdatePreset
 }: {
-  themeMode: ThemeMode;
-  onThemeModeChange: (mode: ThemeMode) => void;
+  activePreset: ThemePreset;
+  customPresets: ThemePreset[];
+  settings: AppearanceSettings;
+  onCreatePreset: (basePresetId: string, name?: string) => void;
+  onDeletePreset: (presetId: string) => void;
+  onSetActivePreset: (presetId: string) => void;
+  onSetFollowSystem: (followSystem: boolean) => void;
+  onSetSystemPreset: (scheme: ColorScheme, presetId: string) => void;
+  onUpdatePreset: (preset: ThemePreset) => void;
 }): JSX.Element {
-  const options: Array<{ value: ThemeMode; label: string; description: string; icon: typeof Monitor }> = [
-    { value: "system", label: "System", description: "Follow the operating system setting.", icon: Monitor },
-    { value: "light", label: "Light", description: "Use the bright interface.", icon: Sun },
-    { value: "dark", label: "Dark", description: "Use the low-light interface.", icon: Moon }
-  ];
+  const presets = allThemePresets(customPresets);
+  const lightPresets = presets.filter((preset) => preset.scheme === "light");
+  const darkPresets = presets.filter((preset) => preset.scheme === "dark");
+  const [editingPresetId, setEditingPresetId] = React.useState<string | null>(null);
+  const editingPreset = customPresets.find((preset) => preset.id === editingPresetId) ?? null;
 
   return (
     <div className="mt-5 divide-y">
-      <SettingsSection title="Theme" description="Choose how the local WebUI should render on this browser.">
-        <div className="grid gap-2 sm:grid-cols-3">
-          {options.map((option) => {
-            const Icon = option.icon;
-            const selected = themeMode === option.value;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                className={`rounded-md border p-3 text-left transition-colors hover:bg-muted ${
-                  selected ? "border-primary bg-primary/10 text-primary" : "bg-background"
-                }`}
-                aria-pressed={selected}
-                onClick={() => onThemeModeChange(option.value)}
-              >
-                <span className="flex items-center gap-2 text-sm font-medium">
-                  <Icon className="h-4 w-4" aria-hidden="true" />
-                  {option.label}
-                </span>
-                <span className="mt-2 block text-xs leading-5 text-muted-foreground">{option.description}</span>
-              </button>
-            );
-          })}
+      <SettingsSection title="Mode" description="Choose whether preset selection follows the operating system.">
+        <div className="space-y-4">
+          <button
+            type="button"
+            className={`flex w-full items-start gap-3 rounded-md border p-3 text-left transition-colors hover:bg-muted ${
+              settings.followSystem ? "border-primary bg-primary/10" : "bg-background"
+            }`}
+            aria-pressed={settings.followSystem}
+            onClick={() => onSetFollowSystem(!settings.followSystem)}
+          >
+            <Monitor className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
+            <span>
+              <span className="block text-sm font-medium">Follow system</span>
+              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                Use the selected light preset when the OS is light and the selected dark preset when the OS is dark.
+              </span>
+            </span>
+          </button>
+
+          {settings.followSystem ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="System light preset">
+                <Select value={settings.systemLightPresetId} onChange={(event) => onSetSystemPreset("light", event.target.value)}>
+                  {lightPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="System dark preset">
+                <Select value={settings.systemDarkPresetId} onChange={(event) => onSetSystemPreset("dark", event.target.value)}>
+                  {darkPresets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.name}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+          ) : (
+            <Field label="Active preset">
+              <Select value={settings.activePresetId} onChange={(event) => onSetActivePreset(event.target.value)}>
+                {presets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
         </div>
       </SettingsSection>
+
+      <SettingsSection title="Presets" description="Apply, duplicate, edit, or delete local appearance presets.">
+        <div className="space-y-3">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {presets.map((preset) => (
+              <ThemePresetCard
+                key={preset.id}
+                active={activePreset.id === preset.id}
+                preset={preset}
+                onApply={() => onSetActivePreset(preset.id)}
+                onCreate={() => onCreatePreset(preset.id)}
+                onDelete={() => onDeletePreset(preset.id)}
+                onEdit={() => setEditingPresetId(preset.id)}
+              />
+            ))}
+          </div>
+          <Button type="button" variant="outline" onClick={() => onCreatePreset(activePreset.id, `${activePreset.name} Copy`)}>
+            <Plus className="h-4 w-4" aria-hidden="true" />
+            New From Current
+          </Button>
+        </div>
+      </SettingsSection>
+
+      {editingPreset ? (
+        <SettingsSection title="Editor" description="Edit the selected user preset. Built-in presets can be duplicated first.">
+          <ThemePresetEditor preset={editingPreset} onCancel={() => setEditingPresetId(null)} onSave={onUpdatePreset} />
+        </SettingsSection>
+      ) : null}
+    </div>
+  );
+}
+
+function ThemePresetCard({
+  active,
+  preset,
+  onApply,
+  onCreate,
+  onDelete,
+  onEdit
+}: {
+  active: boolean;
+  preset: ThemePreset;
+  onApply: () => void;
+  onCreate: () => void;
+  onDelete: () => void;
+  onEdit: () => void;
+}): JSX.Element {
+  const Icon = preset.scheme === "dark" ? Moon : Sun;
+  return (
+    <div className={`rounded-md border p-3 ${active ? "border-primary bg-primary/10" : "bg-background"}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="flex items-center gap-2 text-sm font-semibold">
+            <Icon className="h-4 w-4" aria-hidden="true" />
+            <span className="truncate">{preset.name}</span>
+          </span>
+          <span className="mt-1 block text-xs capitalize text-muted-foreground">
+            {preset.scheme} · {preset.source === "system" ? "Built-in" : "User"}
+          </span>
+        </div>
+        {active ? <span className="text-xs font-medium text-primary">Active</span> : null}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onApply}>
+          Apply
+        </Button>
+        <Button type="button" variant="outline" size="sm" onClick={onCreate}>
+          <Copy className="h-4 w-4" aria-hidden="true" />
+          Duplicate
+        </Button>
+        {!preset.readonly ? (
+          <>
+            <Button type="button" variant="outline" size="sm" onClick={onEdit}>
+              <Edit3 className="h-4 w-4" aria-hidden="true" />
+              Edit
+            </Button>
+            <Button type="button" variant="outline" size="sm" className="text-destructive" onClick={onDelete}>
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              Delete
+            </Button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ThemePresetEditor({
+  preset,
+  onCancel,
+  onSave
+}: {
+  preset: ThemePreset;
+  onCancel: () => void;
+  onSave: (preset: ThemePreset) => void;
+}): JSX.Element {
+  const [draft, setDraft] = React.useState<ThemePreset>(preset);
+
+  React.useEffect(() => {
+    setDraft(preset);
+  }, [preset]);
+
+  return (
+    <div className="space-y-4">
+      <Field label="Name">
+        <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+      </Field>
+      <Field label="Scheme">
+        <Select
+          value={draft.scheme}
+          onChange={(event) => setDraft({ ...draft, scheme: event.target.value as ColorScheme })}
+        >
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </Select>
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Primary token">
+          <Input
+            value={draft.tokens.primary}
+            onChange={(event) => setDraft({ ...draft, tokens: { ...draft.tokens, primary: event.target.value } })}
+            placeholder="207 80% 40%"
+          />
+        </Field>
+        <Field label="Accent token">
+          <Input
+            value={draft.tokens.accent}
+            onChange={(event) => setDraft({ ...draft, tokens: { ...draft.tokens, accent: event.target.value } })}
+            placeholder="46 88% 88%"
+          />
+        </Field>
+      </div>
+      <Field label="Background URL">
+        <Input
+          value={draft.background.imageUrl}
+          onChange={(event) =>
+            setDraft({
+              ...draft,
+              background: { ...draft.background, type: event.target.value.trim() ? "image" : "none", imageUrl: event.target.value }
+            })
+          }
+          placeholder="https://..."
+        />
+      </Field>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <NumberField
+          label="Opacity"
+          value={draft.background.opacity}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(value) => setDraft({ ...draft, background: { ...draft.background, opacity: clamp(value, 0, 1) } })}
+        />
+        <NumberField
+          label="Dim"
+          value={draft.background.dim}
+          min={0}
+          max={1}
+          step={0.05}
+          onChange={(value) => setDraft({ ...draft, background: { ...draft.background, dim: clamp(value, 0, 1) } })}
+        />
+        <NumberField
+          label="Blur"
+          value={draft.background.blur}
+          min={0}
+          step={1}
+          onChange={(value) => setDraft({ ...draft, background: { ...draft.background, blur: Math.max(0, value) } })}
+        />
+      </div>
+      <SettingsActions>
+        <Button
+          type="button"
+          onClick={() =>
+            onSave({
+              ...draft,
+              name: draft.name.trim() || preset.name,
+              background: { ...draft.background, type: draft.background.imageUrl.trim() ? "image" : "none" }
+            })
+          }
+        >
+          <Save className="h-4 w-4" aria-hidden="true" />
+          Save Preset
+        </Button>
+        <Button type="button" variant="outline" onClick={onCancel}>
+          Cancel
+        </Button>
+      </SettingsActions>
     </div>
   );
 }
@@ -1296,6 +1546,7 @@ function NumberField({
   error,
   onChange,
   min = 0,
+  max,
   step = 0.1,
   tooltip
 }: {
@@ -1304,6 +1555,7 @@ function NumberField({
   error?: string;
   onChange: (value: number) => void;
   min?: number;
+  max?: number;
   step?: number;
   tooltip?: string;
 }): JSX.Element {
@@ -1312,10 +1564,15 @@ function NumberField({
       <Input
         type="number"
         min={min}
+        max={max}
         step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
       />
     </Field>
   );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

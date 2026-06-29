@@ -5,6 +5,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 
 import { AppShell } from "@/components/AppShell";
 import { ToastProvider } from "@/components/ToastProvider";
+import { useUiStore } from "@/hooks/useUiStore";
 import { ArtistDetailPage } from "@/pages/ArtistDetailPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { JobsPage } from "@/pages/JobsPage";
@@ -12,11 +13,10 @@ import { LibraryPage } from "@/pages/LibraryPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WorkflowsPage } from "@/pages/WorkflowsPage";
-import { applyThemeMode, getStoredThemeMode, watchSystemTheme } from "@/lib/theme";
+import { watchSystemTheme } from "@/lib/theme";
 import "./index.css";
 
-applyThemeMode(getStoredThemeMode());
-watchSystemTheme(() => applyThemeMode(getStoredThemeMode()));
+watchSystemTheme(() => useUiStore.getState().refreshResolvedTheme());
 
 const queryClient = new QueryClient({
   defaultOptions: {

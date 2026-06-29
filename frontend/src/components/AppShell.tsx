@@ -22,7 +22,6 @@ import { listJobs } from "@/api/jobs";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useUiStore } from "@/hooks/useUiStore";
-import type { ThemeMode } from "@/lib/theme";
 import { cn, percent } from "@/lib/utils";
 
 const navItems = [
@@ -48,8 +47,8 @@ export function AppShell(): JSX.Element {
   );
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center border-b bg-card px-3 sm:px-4">
+    <div className="min-h-screen bg-background/95">
+      <header className="fixed inset-x-0 top-0 z-40 flex h-14 items-center border-b bg-card/95 px-3 backdrop-blur sm:px-4">
         <Button
           type="button"
           variant="ghost"
@@ -85,7 +84,7 @@ export function AppShell(): JSX.Element {
         <ThemeModeMenu />
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-14 z-30 hidden w-56 flex-col border-r bg-card lg:flex">
+      <aside className="fixed bottom-0 left-0 top-14 z-30 hidden w-56 flex-col border-r bg-card/95 backdrop-blur lg:flex">
         <Navigation />
         <ActiveJobStatus job={activeJob} />
       </aside>
@@ -98,7 +97,7 @@ export function AppShell(): JSX.Element {
             aria-label="Close navigation"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="absolute bottom-0 left-0 top-0 flex w-64 flex-col border-r bg-card shadow-lg">
+          <aside className="absolute bottom-0 left-0 top-0 flex w-64 flex-col border-r bg-card/95 shadow-lg backdrop-blur">
             <div className="flex h-14 items-center justify-between border-b px-4">
               <span className="text-sm font-semibold">Navigation</span>
               <Button
@@ -126,16 +125,19 @@ export function AppShell(): JSX.Element {
 }
 
 function ThemeModeMenu(): JSX.Element {
-  const themeMode = useUiStore((state) => state.themeMode);
-  const setThemeMode = useUiStore((state) => state.setThemeMode);
+  const settings = useUiStore((state) => state.appearanceSettings);
+  const activePreset = useUiStore((state) => state.activeThemePreset);
+  const setFollowSystemTheme = useUiStore((state) => state.setFollowSystemTheme);
+  const setActiveThemePreset = useUiStore((state) => state.setActiveThemePreset);
   const [open, setOpen] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
-  const options: Array<{ value: ThemeMode; label: string; icon: typeof Monitor }> = [
+  const options = [
     { value: "system", label: "System", icon: Monitor },
     { value: "light", label: "Light", icon: Sun },
     { value: "dark", label: "Dark", icon: Moon }
   ];
-  const current = options.find((option) => option.value === themeMode) ?? options[0];
+  const currentValue = settings.followSystem ? "system" : activePreset.scheme;
+  const current = options.find((option) => option.value === currentValue) ?? options[0];
   const CurrentIcon = current.icon;
 
   React.useEffect(() => {
@@ -168,7 +170,7 @@ function ThemeModeMenu(): JSX.Element {
         <div className="absolute right-0 top-11 z-50 w-40 rounded-md border bg-card p-1 text-sm shadow-lg">
           {options.map((option) => {
             const Icon = option.icon;
-            const selected = option.value === themeMode;
+            const selected = option.value === currentValue;
             return (
               <button
                 key={option.value}
@@ -178,7 +180,12 @@ function ThemeModeMenu(): JSX.Element {
                   selected && "bg-secondary text-secondary-foreground"
                 )}
                 onClick={() => {
-                  setThemeMode(option.value);
+                  if (option.value === "system") {
+                    setFollowSystemTheme(true);
+                  } else {
+                    setFollowSystemTheme(false);
+                    setActiveThemePreset(option.value);
+                  }
                   setOpen(false);
                 }}
               >
