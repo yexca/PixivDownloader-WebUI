@@ -12,7 +12,11 @@ import { LibraryPage } from "@/pages/LibraryPage";
 import { LogsPage } from "@/pages/LogsPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { WorkflowsPage } from "@/pages/WorkflowsPage";
+import { applyThemeMode, getStoredThemeMode, watchSystemTheme } from "@/lib/theme";
 import "./index.css";
+
+applyThemeMode(getStoredThemeMode());
+watchSystemTheme(() => applyThemeMode(getStoredThemeMode()));
 
 const queryClient = new QueryClient({
   defaultOptions: {

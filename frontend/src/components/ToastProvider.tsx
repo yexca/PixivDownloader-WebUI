@@ -44,7 +44,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }): JSX.
             key={toast.id}
             className={cn(
               "rounded-md border bg-card p-3 text-sm shadow-lg",
-              toast.tone === "success" && "border-emerald-200",
+              toast.tone === "success" && "border-[hsl(var(--success)/0.35)]",
               toast.tone === "error" && "border-destructive/40"
             )}
             role="status"

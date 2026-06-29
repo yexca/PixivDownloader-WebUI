@@ -43,7 +43,7 @@ export function actionIconClass(tone: "default" | "selected" | "warning" | "dang
     return "border-primary/50 bg-transparent text-primary hover:bg-primary/10";
   }
   if (tone === "warning") {
-    return "border-amber-300 bg-transparent text-amber-700 hover:bg-amber-50";
+    return "border-[hsl(var(--warning)/0.45)] bg-transparent text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning-muted))]";
   }
   if (tone === "danger") {
     return "border-destructive/30 bg-transparent text-destructive hover:bg-destructive/10";

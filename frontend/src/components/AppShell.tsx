@@ -54,7 +54,11 @@ export function AppShell(): JSX.Element {
             <span
               className={cn(
                 "h-2 w-2 rounded-full",
-                health.isSuccess ? "bg-emerald-500" : health.isError ? "bg-destructive" : "bg-amber-500"
+                health.isSuccess
+                  ? "bg-[hsl(var(--success))]"
+                  : health.isError
+                    ? "bg-destructive"
+                    : "bg-[hsl(var(--warning))]"
               )}
             />
             <span className="text-xs text-muted-foreground">

@@ -9,9 +9,12 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  Monitor,
+  Moon,
   RefreshCw,
   Save,
   ShieldCheck,
+  Sun,
   Undo2
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -41,8 +44,10 @@ import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
+import { useUiStore } from "@/hooks/useUiStore";
+import type { ThemeMode } from "@/lib/theme";
 
-type SettingsTab = "basic" | "pixiv" | "advanced";
+type SettingsTab = "basic" | "pixiv" | "appearance" | "advanced";
 type BasicForm = Pick<
   SettingsUpdateRequest,
   | "download_path"
@@ -93,6 +98,8 @@ export function SettingsPage(): JSX.Element {
   const [authCode, setAuthCode] = React.useState("");
   const [authTestStatus, setAuthTestStatus] = React.useState<TestStatus>(notConfiguredAuthStatus());
   const [connectionTestStatus, setConnectionTestStatus] = React.useState<TestStatus>(notConfiguredConnectionStatus());
+  const themeMode = useUiStore((state) => state.themeMode);
+  const setThemeMode = useUiStore((state) => state.setThemeMode);
   const legacyDatabaseInputId = React.useId();
   const pixivReturnToUrl = getPixivPostRedirectReturnTo(authCode);
   const isPixivStartUrl = isPixivAuthStartUrl(authCode);
@@ -368,6 +375,7 @@ export function SettingsPage(): JSX.Element {
               items={[
                 { value: "basic", label: "Basic" },
                 { value: "pixiv", label: "Pixiv" },
+                { value: "appearance", label: "Appearance" },
                 { value: "advanced", label: "Advanced" }
               ]}
             />
@@ -432,6 +440,10 @@ export function SettingsPage(): JSX.Element {
               />
             ) : null}
 
+            {activeTab === "appearance" ? (
+              <AppearanceSettingsTab themeMode={themeMode} onThemeModeChange={setThemeMode} />
+            ) : null}
+
             {activeTab === "advanced" ? (
               <AdvancedSettingsTab
                 importLegacyDatabaseData={importLegacyDatabaseMutation.data}
@@ -465,6 +477,50 @@ export function SettingsPage(): JSX.Element {
         }}
       />
     </>
+  );
+}
+
+function AppearanceSettingsTab({
+  themeMode,
+  onThemeModeChange
+}: {
+  themeMode: ThemeMode;
+  onThemeModeChange: (mode: ThemeMode) => void;
+}): JSX.Element {
+  const options: Array<{ value: ThemeMode; label: string; description: string; icon: typeof Monitor }> = [
+    { value: "system", label: "System", description: "Follow the operating system setting.", icon: Monitor },
+    { value: "light", label: "Light", description: "Use the bright interface.", icon: Sun },
+    { value: "dark", label: "Dark", description: "Use the low-light interface.", icon: Moon }
+  ];
+
+  return (
+    <div className="mt-5 divide-y">
+      <SettingsSection title="Theme" description="Choose how the local WebUI should render on this browser.">
+        <div className="grid gap-2 sm:grid-cols-3">
+          {options.map((option) => {
+            const Icon = option.icon;
+            const selected = themeMode === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={`rounded-md border p-3 text-left transition-colors hover:bg-muted ${
+                  selected ? "border-primary bg-primary/10 text-primary" : "bg-background"
+                }`}
+                aria-pressed={selected}
+                onClick={() => onThemeModeChange(option.value)}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Icon className="h-4 w-4" aria-hidden="true" />
+                  {option.label}
+                </span>
+                <span className="mt-2 block text-xs leading-5 text-muted-foreground">{option.description}</span>
+              </button>
+            );
+          })}
+        </div>
+      </SettingsSection>
+    </div>
   );
 }
 
@@ -1041,10 +1097,10 @@ function PixivTestStatus({
             : "Token not configured";
   const className =
     status.state === "valid"
-      ? "border-green-200 bg-green-50 text-green-900"
+      ? "status-success"
       : status.state === "checking"
         ? "border-border bg-muted/30 text-foreground"
-        : "border-yellow-200 bg-yellow-50 text-yellow-950";
+        : "status-warning";
 
   return (
     <div className={`rounded-md border p-3 ${className}`}>

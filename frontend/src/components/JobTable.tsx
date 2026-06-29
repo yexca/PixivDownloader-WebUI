@@ -292,7 +292,7 @@ function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
   return (
     <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
       <RotateCcw className={cn("h-4 w-4", spinning && "animate-spin")} />
-      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-amber-700" />
+      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-[hsl(var(--warning))]" />
     </span>
   );
 }

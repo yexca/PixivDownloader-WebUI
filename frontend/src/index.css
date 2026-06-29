@@ -18,9 +18,41 @@
     --accent-foreground: 38 72% 24%;
     --destructive: 0 72% 44%;
     --destructive-foreground: 0 0% 100%;
+    --success: 153 62% 34%;
+    --success-muted: 150 64% 94%;
+    --success-foreground: 153 55% 19%;
+    --warning: 37 92% 42%;
+    --warning-muted: 48 96% 89%;
+    --warning-foreground: 32 82% 22%;
     --border: 220 13% 86%;
     --input: 220 13% 82%;
     --ring: 207 80% 40%;
+  }
+
+  .dark {
+    --background: 222 24% 10%;
+    --foreground: 210 26% 92%;
+    --card: 222 22% 13%;
+    --card-foreground: 210 26% 92%;
+    --primary: 205 88% 62%;
+    --primary-foreground: 222 38% 10%;
+    --secondary: 194 30% 20%;
+    --secondary-foreground: 180 34% 88%;
+    --muted: 222 18% 18%;
+    --muted-foreground: 215 14% 68%;
+    --accent: 42 57% 24%;
+    --accent-foreground: 43 85% 88%;
+    --destructive: 0 70% 58%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 153 62% 48%;
+    --success-muted: 154 30% 17%;
+    --success-foreground: 149 70% 86%;
+    --warning: 39 92% 56%;
+    --warning-muted: 39 42% 18%;
+    --warning-foreground: 42 84% 86%;
+    --border: 221 16% 24%;
+    --input: 221 16% 30%;
+    --ring: 205 88% 62%;
   }
 
   * {
@@ -44,6 +76,14 @@
 @layer components {
   .surface {
     @apply rounded-md border bg-card text-card-foreground shadow-sm;
+  }
+
+  .status-success {
+    @apply border-[hsl(var(--success)/0.35)] bg-[hsl(var(--success-muted))] text-[hsl(var(--success-foreground))];
+  }
+
+  .status-warning {
+    @apply border-[hsl(var(--warning)/0.35)] bg-[hsl(var(--warning-muted))] text-[hsl(var(--warning-foreground))];
   }
 
   .table-head {

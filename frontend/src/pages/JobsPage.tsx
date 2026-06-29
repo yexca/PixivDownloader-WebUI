@@ -280,7 +280,7 @@ export function JobsPage(): JSX.Element {
       <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <section className="space-y-3">
           {queueState.data?.paused ? (
-            <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            <div className="status-warning rounded-md border px-3 py-2 text-sm">
               Queue paused. Running jobs will finish; no new queued jobs will start until the queue resumes.
             </div>
           ) : null}
@@ -443,7 +443,7 @@ function JobDetailPanel({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="border-amber-300 text-amber-700 hover:bg-amber-50"
+                className="border-[hsl(var(--warning)/0.45)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning-muted))]"
                 title={activeRetry ? `Retry already queued as ${shortJobId(activeRetry.id)}` : "Retry only failed files or artists"}
                 disabled={retryMutation.isPending || Boolean(activeRetry)}
                 onClick={() => retryMutation.mutate()}
@@ -595,14 +595,14 @@ function RelatedJobsNote({
     return null;
   }
   return (
-    <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+    <div className="status-warning mt-3 rounded-md border p-3 text-sm">
       <p className="font-medium">Follow-up job already active</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {active.map((related) => (
           <button
             type="button"
             key={related.id}
-            className="rounded-md border border-amber-300 bg-background px-2 py-1 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            className="rounded-md border border-[hsl(var(--warning)/0.45)] bg-background px-2 py-1 text-xs font-medium text-[hsl(var(--warning-foreground))] hover:bg-[hsl(var(--warning-muted))]"
             onClick={() => onSelectJob(related.id)}
           >
             {jobLineageActionLabel(related.action)} {shortJobId(related.id)} · {related.status}
@@ -679,7 +679,7 @@ function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
   return (
     <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
       <RotateCcw className={cn("h-4 w-4", spinning && "animate-spin")} />
-      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-amber-700" />
+      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-[hsl(var(--warning))]" />
     </span>
   );
 }

@@ -688,7 +688,7 @@ export function WorkflowsPage(): JSX.Element {
                 <p className="mt-2 text-muted-foreground">{canSubmit ? previewText(form) : firstError}</p>
               </div>
               {form.modules.schedule && form.download_scope === "full" ? (
-                <p className="rounded-md border border-amber-500/30 bg-amber-50 p-3 text-sm text-amber-800">
+                <p className="status-warning rounded-md border p-3 text-sm">
                   Full download schedules re-check already tracked works every run.
                 </p>
               ) : null}

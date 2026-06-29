@@ -726,7 +726,7 @@ function RemoveArtistConfirmDialog({
         Future syncs or downloads may add this artist back to the library.
       </p>
       {hasActiveJob ? (
-        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+        <p className="status-warning rounded-md border p-3 text-sm">
           This artist has active work queued or running. Wait for it to finish or cancel the job before removing the artist.
         </p>
       ) : null}
@@ -754,7 +754,7 @@ function ArtistDangerZone({
             Remove {artist.name} from the local library without deleting downloaded files.
           </p>
           {hasActiveJob ? (
-            <p className="mt-2 text-xs text-amber-700">Active artist jobs must finish or be cancelled first.</p>
+            <p className="mt-2 text-xs text-[hsl(var(--warning))]">Active artist jobs must finish or be cancelled first.</p>
           ) : null}
         </div>
         <Button
@@ -902,7 +902,7 @@ function RetryFailedIcon({ spinning }: { spinning: boolean }): JSX.Element {
   return (
     <span className="relative inline-flex h-4 w-4 items-center justify-center" aria-hidden="true">
       <RotateCcw className={spinning ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
-      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-amber-700" />
+      <AlertCircle className="absolute -right-1 -top-1 h-2.5 w-2.5 fill-background text-[hsl(var(--warning))]" />
     </span>
   );
 }
