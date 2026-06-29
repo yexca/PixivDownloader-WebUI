@@ -18,6 +18,7 @@ from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.file_downloader import FileDownloader
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.random_sleep import RandomSleep
+from backend.services.unavailable_artist_policy import confirm_unavailable_artist
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ class DownloadOptions:
     retry_failed: bool = False
     full_download: bool = False
     pending_only: bool = False
+    source: str | None = None
     max_artworks: int | None = None
     min_artwork_id: str | None = None
     max_artwork_id: str | None = None
@@ -88,7 +90,11 @@ class DownloadService:
 
         resolved_options = options or DownloadOptions()
         self._report(progress_callback, "Getting user info...")
-        artist = self._resolve_artist(user_id=user_id, artwork_id=artwork_id)
+        artist = self._resolve_artist(
+            user_id=user_id,
+            artwork_id=artwork_id,
+            source=resolved_options.source,
+        )
         self._check_cancelled(cancel_callback)
 
         self._report(progress_callback, "Got user info. Getting artworks info...")
@@ -266,8 +272,7 @@ class DownloadService:
             account_status=artist.account_status,
             account_status_checked_at=artist.account_status_checked_at,
             account_status_reason=artist.account_status_reason,
-            remote_latest_artwork_id=latest_artwork_id(artworks)
-            or artist.remote_latest_artwork_id,
+            remote_latest_artwork_id=latest_artwork_id(artworks) or artist.remote_latest_artwork_id,
             remote_latest_checked_at=remote_checked_at,
         )
         self.artist_repository.upsert(updated_artist)
@@ -370,11 +375,22 @@ class DownloadService:
 
             raise JobCancelledError("job cancellation requested")
 
-    def _resolve_artist(self, *, user_id: str | None, artwork_id: str | None) -> Artist:
+    def _resolve_artist(
+        self,
+        *,
+        user_id: str | None,
+        artwork_id: str | None,
+        source: str | None,
+    ) -> Artist:
         if user_id:
             existing_artist = self.artist_repository.get_by_id(user_id)
             fetched_artist = self.pixiv_client.get_artist_by_user_id(user_id)
             now = utc_now()
+            confirm_unavailable_artist(
+                existing_artist=existing_artist,
+                fetched_artist=fetched_artist,
+                source=source,
+            )
             record_name_change(
                 self.name_history_repository,
                 existing_artist=existing_artist,

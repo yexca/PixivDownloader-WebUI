@@ -94,22 +94,29 @@ class JobService:
         *,
         artist_ids: tuple[str, ...],
         legacy_latest_download_id_by_artist: dict[str, str | None],
+        options: dict[str, object] | None = None,
     ) -> Job | None:
         if not artist_ids:
             return None
-        options = {
+        metadata = options or {}
+        job_options = {
             "source": "legacy_database",
             "artist_ids": list(artist_ids),
             "legacy_latest_download_id_by_artist": legacy_latest_download_id_by_artist,
             "activation_scope": "one_time",
+            **metadata,
         }
+        workflow_link = workflow_link_from_options(job_options)
         status: JobStatus = self._next_one_time_status()
         job = Job(
             id=str(uuid4()),
             type="hydrate_legacy_import",
             status=status,
             total_files=len(artist_ids),
-            options=options,
+            options=job_options,
+            workflow_run_id=workflow_link.run_id,
+            workflow_item_id=workflow_link.item_id,
+            workflow_source=workflow_link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -119,7 +126,7 @@ class JobService:
                 message="Legacy import hydration queued"
                 if status == "queued"
                 else "Legacy import hydration waiting for one-time task capacity",
-                payload=options,
+                payload=job_options,
             )
         )
         return self.repository.get_by_id(job.id) or job
@@ -157,6 +164,32 @@ class JobService:
 
     def get_job(self, job_id: str) -> Job | None:
         return self.repository.get_by_id(job_id)
+
+    def relink_job_to_workflow(
+        self,
+        job_id: str,
+        *,
+        workflow_run_id: str,
+        workflow_item_id: int,
+        workflow_source: str,
+    ) -> Job:
+        job = self.repository.get_by_id(job_id)
+        if job is None:
+            raise JobNotFoundError(f"job {job_id} was not found")
+        options = {
+            **job.options,
+            "workflow_run_id": workflow_run_id,
+            "workflow_item_id": workflow_item_id,
+            "workflow_source": workflow_source,
+        }
+        self.repository.update_workflow_link(
+            job.id,
+            options=options,
+            workflow_run_id=workflow_run_id,
+            workflow_item_id=workflow_item_id,
+            workflow_source=workflow_source,
+        )
+        return self.repository.get_by_id(job_id) or job
 
     def list_child_jobs(self, job_id: str, *, limit: int = 20) -> list[Job]:
         return self.repository.list_child_jobs(job_id, limit=limit)
@@ -359,9 +392,9 @@ class JobService:
             "source": source.options.get("source", "legacy_database"),
             "artist_ids": failed_artist_ids,
             "legacy_latest_download_id_by_artist": {
-                artist_id: legacy_latest_by_artist.get(artist_id)
-                for artist_id in failed_artist_ids
+                artist_id: legacy_latest_by_artist.get(artist_id) for artist_id in failed_artist_ids
             },
+            **workflow_metadata_from_job(source),
         }
 
     def _failed_legacy_hydration_artist_ids(self, job_id: str, *, limit: int) -> list[str]:
@@ -424,6 +457,17 @@ def workflow_link_from_options(options: dict[str, object]) -> WorkflowJobLink:
         item_id=int_metadata_option(options.get("workflow_item_id")),
         source=string_metadata_option(options.get("workflow_source")),
     )
+
+
+def workflow_metadata_from_job(job: Job) -> dict[str, object]:
+    metadata: dict[str, object] = {}
+    if job.workflow_run_id:
+        metadata["workflow_run_id"] = job.workflow_run_id
+    if job.workflow_item_id is not None:
+        metadata["workflow_item_id"] = job.workflow_item_id
+    if job.workflow_source:
+        metadata["workflow_source"] = job.workflow_source
+    return metadata
 
 
 def string_metadata_option(value: object) -> str | None:

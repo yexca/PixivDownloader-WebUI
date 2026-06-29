@@ -80,6 +80,7 @@ class DownloadWorker:
                 retry_failed=job.type in {"retry_failed", "retry_failed_artist"},
                 full_download=bool(job.options.get("full_download", False)),
                 pending_only=bool(job.options.get("pending_only", False)),
+                source=job_source(job),
                 max_artworks=positive_int_option(job.options.get("max_artworks")),
                 min_artwork_id=string_option(job.options.get("min_artwork_id")),
                 max_artwork_id=string_option(job.options.get("max_artwork_id")),
@@ -268,7 +269,7 @@ class DownloadWorker:
             repository.add_event(
                 JobEvent(job_id=job.id, level="info", message="Syncing Pixiv metadata")
             )
-            summary = service.sync_artist(job.input_user_id)
+            summary = service.sync_artist(job.input_user_id, source=job_source(job))
         finally:
             service.close()
         finished = replace(
@@ -412,6 +413,13 @@ def legacy_hydration_summary_payload(
 
 def legacy_hydrated_artist_count(summary: LegacyImportHydrationSummary) -> int:
     return summary.completed_artists + summary.completed_unavailable_artists
+
+
+def job_source(job: Job) -> str | None:
+    if job.workflow_source:
+        return job.workflow_source
+    source = job.options.get("source")
+    return source if isinstance(source, str) and source else None
 
 
 def positive_int_option(value: object) -> int | None:

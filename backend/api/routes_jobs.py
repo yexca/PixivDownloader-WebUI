@@ -23,6 +23,7 @@ from backend.schemas.jobs import (
     job_response,
 )
 from backend.services.job_service import JobService
+from backend.services.workflow_run_service import WorkflowRunService
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -40,10 +41,7 @@ def list_jobs(
     try:
         jobs, total = service.list_jobs(status=status, limit=limit, offset=offset)
         return JobListResponse(
-            items=[
-                job_response(job, related_jobs=service.list_child_jobs(job.id))
-                for job in jobs
-            ],
+            items=[job_response(job, related_jobs=service.list_child_jobs(job.id)) for job in jobs],
             total=total,
         )
     finally:
@@ -114,9 +112,9 @@ def retry_job(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> JobActionResponse:
-    service = JobService(db_path, settings_json_path=settings_json_path)
+    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
     try:
-        job = service.retry_job(job_id)
+        _run, job = service.run_job_action(job_id, action="retry")
     finally:
         service.close()
     queue.wake()
@@ -135,9 +133,9 @@ def rerun_job(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> JobActionResponse:
-    service = JobService(db_path, settings_json_path=settings_json_path)
+    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
     try:
-        job = service.rerun_job(job_id)
+        _run, job = service.run_job_action(job_id, action="rerun")
     finally:
         service.close()
     queue.wake()

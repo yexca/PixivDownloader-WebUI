@@ -6,8 +6,8 @@ from fastapi import APIRouter, File, UploadFile
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.imports import LegacyDatabaseImportResponse
-from backend.services.job_service import JobService
 from backend.services.legacy_import_service import LegacyDatabaseImportService
+from backend.services.workflow_run_service import WorkflowRunService
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -23,20 +23,21 @@ def import_legacy_database(
         summary = LegacyDatabaseImportService(db_path).import_file(file.file)
     finally:
         file.file.close()
-    job_service = JobService(db_path, settings_json_path=settings_json_path)
+    workflow_service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
     try:
-        job = job_service.create_legacy_import_hydration_job(
+        run = workflow_service.run_legacy_import_hydration(
             artist_ids=summary.imported_artist_ids,
             legacy_latest_download_id_by_artist=summary.legacy_latest_download_id_by_artist or {},
         )
     finally:
-        job_service.close()
-    if job is not None:
+        workflow_service.close()
+    job_id = run.items[0].job_ids[0] if run is not None and run.items[0].job_ids else None
+    if job_id is not None:
         queue.wake()
     return LegacyDatabaseImportResponse(
         imported_artists=summary.imported_artists,
         skipped_rows=summary.skipped_rows,
         total_rows=summary.total_rows,
-        hydration_job_id=job.id if job is not None else None,
+        hydration_job_id=job_id,
         message=f"Imported {summary.imported_artists} artists from legacy database.",
     )

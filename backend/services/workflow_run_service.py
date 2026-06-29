@@ -195,6 +195,126 @@ class WorkflowRunService:
         self.repository.update_run(updated_run)
         return self.refresh_run_status(updated_run)
 
+    def run_legacy_import_hydration(
+        self,
+        *,
+        artist_ids: tuple[str, ...],
+        legacy_latest_download_id_by_artist: dict[str, str | None],
+    ) -> WorkflowRun | None:
+        if not artist_ids:
+            return None
+        now = utc_now()
+        run = WorkflowRun(
+            id=str(uuid.uuid4()),
+            status="running",
+            total=1,
+            completed=0,
+            failed=0,
+            skipped=0,
+            concurrency=1,
+            source="legacy_import",
+            created_at=now,
+        )
+        self.repository.create_run(run)
+        config = {
+            "target": {"type": "legacy_import", "artist_count": len(artist_ids)},
+            "actions": ["hydrate_legacy_import"],
+        }
+        item_id = self.repository.create_item(
+            WorkflowRunItem(
+                id=None,
+                run_id=run.id,
+                draft_id=f"legacy-import:{run.id}",
+                title="Legacy import hydration",
+                status="running",
+                config=config,
+                request={
+                    "source": "legacy_import",
+                    "artist_count": len(artist_ids),
+                },
+                created_at=utc_now(),
+            )
+        )
+        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
+        try:
+            job = service.create_legacy_import_hydration_job(
+                artist_ids=artist_ids,
+                legacy_latest_download_id_by_artist=legacy_latest_download_id_by_artist,
+                options={
+                    "workflow_run_id": run.id,
+                    "workflow_item_id": item_id,
+                    "workflow_source": "legacy_import",
+                },
+            )
+        finally:
+            service.close()
+        item = self.repository.list_items(run.id)[0]
+        updated_item = replace(
+            item,
+            id=item_id,
+            status="running" if job is not None else "completed",
+            job_ids=[] if job is None else [job.id],
+            finished_at=None if job is not None else utc_now(),
+        )
+        self.repository.update_item(updated_item)
+        updated_run = replace(
+            run,
+            status="running" if job is not None else "completed",
+            completed=0 if job is not None else 1,
+            finished_at=None if job is not None else utc_now(),
+            items=[updated_item],
+        )
+        self.repository.update_run(updated_run)
+        return self.refresh_run_status(updated_run)
+
+    def run_job_action(self, job_id: str, *, action: str) -> tuple[WorkflowRun, Job]:
+        if action not in {"retry", "rerun"}:
+            raise ValueError("job action must be retry or rerun")
+        now = utc_now()
+        source = f"job_{action}"
+        title = "Retry job" if action == "retry" else "Rerun job"
+        run = WorkflowRun(
+            id=str(uuid.uuid4()),
+            status="running",
+            total=1,
+            completed=0,
+            failed=0,
+            skipped=0,
+            concurrency=1,
+            source=source,
+            created_at=now,
+        )
+        self.repository.create_run(run)
+        item_id = self.repository.create_item(
+            WorkflowRunItem(
+                id=None,
+                run_id=run.id,
+                draft_id=f"{source}:{job_id}",
+                title=title,
+                status="running",
+                config={"target": {"type": "job", "job_id": job_id}, "actions": [action]},
+                request={"source": source, "source_job_id": job_id, "action": action},
+                created_at=utc_now(),
+            )
+        )
+        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
+        try:
+            job = service.retry_job(job_id) if action == "retry" else service.rerun_job(job_id)
+            job = service.relink_job_to_workflow(
+                job.id,
+                workflow_run_id=run.id,
+                workflow_item_id=item_id,
+                workflow_source=source,
+            )
+        finally:
+            service.close()
+        item = self.repository.list_items(run.id)[0]
+        updated_item = replace(item, id=item_id, status="running", job_ids=[job.id])
+        self.repository.update_item(updated_item)
+        updated_run = replace(run, status="running", items=[updated_item])
+        self.repository.update_run(updated_run)
+        return self.refresh_run_status(updated_run), job
+
     def process_run(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run is None:

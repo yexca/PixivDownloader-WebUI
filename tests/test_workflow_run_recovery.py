@@ -212,6 +212,36 @@ def test_process_run_respects_skip_if_last_run_failed_without_matching_current_i
     assert second.items[0].status == "skipped"
 
 
+def test_legacy_import_hydration_runs_inside_workflow_boundary(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    settings_path = write_settings(tmp_path)
+    migrate_database(db_path, settings_json_path=settings_path)
+    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    try:
+        run = service.run_legacy_import_hydration(
+            artist_ids=("111", "222"),
+            legacy_latest_download_id_by_artist={"111": "1000", "222": "2000"},
+        )
+    finally:
+        service.close()
+
+    assert run is not None
+    assert run.source == "legacy_import"
+    assert run.status == "running"
+    assert run.items[0].job_ids
+    job_repository = JobRepository(db_path)
+    try:
+        job = job_repository.get_by_id(run.items[0].job_ids[0])
+    finally:
+        job_repository.close()
+    assert job is not None
+    assert job.type == "hydrate_legacy_import"
+    assert job.workflow_run_id == run.id
+    assert job.workflow_item_id == run.items[0].id
+    assert job.workflow_source == "legacy_import"
+    assert job.options["source"] == "legacy_database"
+
+
 def workflow_request(
     draft_id: str,
     title: str,

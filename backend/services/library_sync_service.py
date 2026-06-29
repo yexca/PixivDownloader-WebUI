@@ -10,6 +10,7 @@ from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
+from backend.services.unavailable_artist_policy import confirm_unavailable_artist
 
 
 @dataclass(frozen=True)
@@ -37,10 +38,20 @@ class LibrarySyncService:
         self.file_repository = file_repository or ArtworkFileRepository()
         self.avatar_cache_service = avatar_cache_service or AvatarCacheService()
 
-    def sync_artist(self, artist_id: str) -> LibrarySyncSummary:
+    def sync_artist(
+        self,
+        artist_id: str,
+        *,
+        source: str | None = "library_shortcut",
+    ) -> LibrarySyncSummary:
         existing_artist = self.artist_repository.get_by_id(artist_id)
         now = utc_now()
         artist = self.pixiv_client.get_artist_by_user_id(artist_id)
+        confirm_unavailable_artist(
+            existing_artist=existing_artist,
+            fetched_artist=artist,
+            source=source,
+        )
         artworks = (
             []
             if artist.account_status == "unavailable"

@@ -14,6 +14,10 @@ class PixivApiError(PixivDownloaderError):
     """Raised when Pixiv API calls fail."""
 
 
+class UnconfirmedUnavailableArtistError(PixivDownloaderError):
+    """Raised when a new manually-entered artist is unavailable and needs confirmation."""
+
+
 class DownloadError(PixivDownloaderError):
     """Raised when a file download fails."""
 

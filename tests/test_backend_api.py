@@ -374,9 +374,21 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert job is not None
     assert job.type == "hydrate_legacy_import"
     assert job.total_files == 2
+    assert job.workflow_run_id is not None
+    assert job.workflow_item_id is not None
+    assert job.workflow_source == "legacy_import"
+    assert job.options["workflow_source"] == "legacy_import"
     assert job.options["source"] == "legacy_database"
     assert job.options["artist_ids"] == ["100058387", "101013492"]
     assert job.options["legacy_latest_download_id_by_artist"]["100058387"] == "113381074"
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(job.workflow_run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.source == "legacy_import"
+    assert run.items[0].job_ids == [job.id]
 
 
 def test_create_download_job(tmp_path):
@@ -1556,11 +1568,17 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
                 id="job-1",
                 type="hydrate_legacy_import",
                 status="failed",
+                workflow_run_id="run-1",
+                workflow_item_id=1,
+                workflow_source="legacy_import",
                 options={
                     "source": "legacy_database",
                     "artist_ids": ["111", "222"],
                     "legacy_latest_download_id_by_artist": {"111": "1000", "222": "2000"},
                     "activation_scope": "one_time",
+                    "workflow_run_id": "run-1",
+                    "workflow_item_id": 1,
+                    "workflow_source": "legacy_import",
                 },
             )
         )
@@ -1589,8 +1607,21 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
         repository.close()
     assert retry is not None
     assert retry.type == "hydrate_legacy_import"
+    assert retry.workflow_run_id is not None
+    assert retry.workflow_run_id != "run-1"
+    assert retry.workflow_item_id is not None
+    assert retry.workflow_source == "job_retry"
     assert retry.options["artist_ids"] == ["222"]
     assert retry.options["legacy_latest_download_id_by_artist"] == {"222": "2000"}
+    assert retry.options["workflow_source"] == "job_retry"
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(retry.workflow_run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.source == "job_retry"
+    assert run.items[0].job_ids == [retry.id]
 
 
 def test_rerun_job_queues_copy_with_original_options(tmp_path):
@@ -1625,6 +1656,17 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert rerun.input_user_id == "123"
     assert rerun.options["max_artworks"] == 5
     assert rerun.options["source_job_id"] == "job-1"
+    assert rerun.workflow_run_id is not None
+    assert rerun.workflow_source == "job_rerun"
+    assert rerun.options["workflow_source"] == "job_rerun"
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(rerun.workflow_run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.source == "job_rerun"
+    assert run.items[0].job_ids == [rerun.id]
 
 
 def test_job_detail_reports_related_retry_and_rerun_jobs(tmp_path):

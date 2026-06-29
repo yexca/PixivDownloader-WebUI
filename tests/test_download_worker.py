@@ -3,6 +3,7 @@ import json
 from backend.core.paths import downloads_dir
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile, Job
+from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.services.file_downloader import FileDownloadResult
@@ -69,6 +70,22 @@ class FakeLegacyPixivClient:
                 ),
             )
         ]
+
+
+class FakeUnavailablePixivClient:
+    def get_artist_by_user_id(self, user_id: str) -> Artist:
+        return Artist(
+            id=user_id,
+            name=user_id,
+            account_status="unavailable",
+            account_status_reason="Your access is currently restricted.",
+        )
+
+    def get_artist_by_artwork_id(self, _artwork_id: str) -> Artist:
+        raise NotImplementedError
+
+    def get_artworks_by_user_id(self, _user_id: str) -> list[Artwork]:
+        return []
 
 
 class FakeFileDownloader:
@@ -251,3 +268,72 @@ def test_legacy_hydration_progress_uses_artist_counts(tmp_path):
     assert job.completed_files == 2
     assert job.skipped_files == 0
     assert job.failed_files == 0
+
+
+def test_worker_requires_confirmation_for_new_manual_unavailable_artist(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = JobRepository(db_path)
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="download_artist",
+                status="queued",
+                input_user_id="missing",
+                options={"workflow_source": "download_api"},
+                workflow_source="download_api",
+            )
+        )
+    finally:
+        repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=FakeUnavailablePixivClient,
+        file_downloader_factory=lambda: FakeFileDownloader(tmp_path),
+    )
+
+    job = worker.run_job("job-1")
+
+    assert job.status == "failed"
+    assert "Confirm the artist ID" in job.error_message
+    artist_repository = ArtistRepository(db_path)
+    try:
+        assert artist_repository.get_by_id("missing") is None
+    finally:
+        artist_repository.close()
+
+
+def test_worker_accepts_library_shortcut_unavailable_artist(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    repository = JobRepository(db_path)
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="sync_artist",
+                status="queued",
+                input_user_id="missing",
+                options={"workflow_source": "library_shortcut"},
+                workflow_source="library_shortcut",
+            )
+        )
+    finally:
+        repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=FakeUnavailablePixivClient,
+        file_downloader_factory=lambda: FakeFileDownloader(tmp_path),
+    )
+
+    job = worker.run_job("job-1")
+
+    assert job.status == "completed"
+    artist_repository = ArtistRepository(db_path)
+    try:
+        artist = artist_repository.get_by_id("missing")
+        assert artist is not None
+        assert artist.account_status == "unavailable"
+    finally:
+        artist_repository.close()

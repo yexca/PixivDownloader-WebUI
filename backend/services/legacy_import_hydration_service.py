@@ -18,6 +18,7 @@ from backend.services.library_sync_service import (
     record_name_change,
 )
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
+from backend.services.unavailable_artist_policy import confirm_unavailable_artist
 
 LegacyHydrationProgressCallback = Callable[["LegacyImportHydrationArtistResult"], None]
 
@@ -105,6 +106,11 @@ class LegacyImportHydrationService:
         existing_artist = self.artist_repository.get_by_id(target.artist_id)
         now = utc_now()
         fetched_artist = self.pixiv_client.get_artist_by_user_id(target.artist_id)
+        confirm_unavailable_artist(
+            existing_artist=existing_artist,
+            fetched_artist=fetched_artist,
+            source="legacy_database",
+        )
         record_name_change(
             self.name_history_repository,
             existing_artist=existing_artist,
