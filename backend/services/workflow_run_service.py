@@ -427,7 +427,15 @@ class WorkflowRunService:
     def recover_interrupted_runs(self) -> list[WorkflowRun]:
         recovered: list[WorkflowRun] = []
         for run in self.repository.list_runs_by_status("running"):
+            self._requeue_interrupted_item_jobs(run)
             recovered.append(self.process_run(run.id))
+        return recovered
+
+    def recover_startup(self) -> list[WorkflowRun]:
+        recovered = self.recover_interrupted_runs()
+        orphan_run = self._recover_active_orphan_jobs()
+        if orphan_run is not None:
+            recovered.append(orphan_run)
         return recovered
 
     def list_runs(self, *, limit: int = 5, offset: int = 0) -> tuple[list[WorkflowRun], int]:
@@ -588,6 +596,85 @@ class WorkflowRunService:
         if refreshed != item:
             self.repository.update_item(refreshed)
         return refreshed
+
+    def _requeue_interrupted_item_jobs(self, run: WorkflowRun) -> None:
+        running_job_ids: list[str] = []
+        for item in run.items:
+            if item.status != "running" or not item.job_ids:
+                continue
+            repository = JobRepository(self.db_path)
+            try:
+                jobs = repository.list_by_ids(item.job_ids)
+            finally:
+                repository.close()
+            running_job_ids.extend(job.id for job in jobs if job.status == "running")
+        if not running_job_ids:
+            return
+        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
+        try:
+            service.requeue_interrupted_jobs(running_job_ids)
+        finally:
+            service.close()
+
+    def _recover_active_orphan_jobs(self) -> WorkflowRun | None:
+        job_repository = JobRepository(self.db_path)
+        try:
+            orphan_jobs = job_repository.list_active_orphan_jobs()
+        finally:
+            job_repository.close()
+        if not orphan_jobs:
+            return None
+
+        now = utc_now()
+        run = WorkflowRun(
+            id=str(uuid.uuid4()),
+            status="running",
+            total=1,
+            completed=0,
+            failed=0,
+            skipped=0,
+            concurrency=1,
+            source="startup_recovery",
+            created_at=now,
+        )
+        self.repository.create_run(run)
+        item_id = self.repository.create_item(
+            WorkflowRunItem(
+                id=None,
+                run_id=run.id,
+                draft_id=f"startup-recovery:{run.id}",
+                title="Startup recovery",
+                status="running",
+                job_ids=[job.id for job in orphan_jobs],
+                config={
+                    "target": {"type": "orphan_jobs", "job_count": len(orphan_jobs)},
+                    "actions": ["recover_jobs"],
+                },
+                request={
+                    "source": "startup_recovery",
+                    "job_ids": [job.id for job in orphan_jobs],
+                },
+                created_at=utc_now(),
+            )
+        )
+        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
+        try:
+            for job in orphan_jobs:
+                service.relink_job_to_workflow(
+                    job.id,
+                    workflow_run_id=run.id,
+                    workflow_item_id=item_id,
+                    workflow_source="startup_recovery",
+                )
+            running_job_ids = [job.id for job in orphan_jobs if job.status == "running"]
+            service.requeue_interrupted_jobs(running_job_ids)
+        finally:
+            service.close()
+        refreshed = replace(
+            run,
+            items=self.repository.list_items(run.id),
+        )
+        return self.refresh_run_status(refreshed)
 
     def _create_download_jobs(
         self,

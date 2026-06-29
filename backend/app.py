@@ -109,9 +109,9 @@ def recover_interrupted_workflow_runs(
 ):
     service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
     try:
-        runs = service.recover_interrupted_runs()
+        runs = service.recover_startup()
         if runs:
-            logger.warning("recovered %s interrupted workflow run(s)", len(runs))
+            logger.warning("recovered %s startup workflow run(s)", len(runs))
         return runs
     except Exception:
         logger.exception("workflow run recovery failed")

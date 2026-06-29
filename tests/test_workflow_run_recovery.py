@@ -127,6 +127,172 @@ def test_recover_interrupted_workflow_run_does_not_duplicate_existing_item_jobs(
     assert [job.id for job in jobs] == ["job-1"]
 
 
+def test_startup_recovery_requeues_linked_running_job(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    settings_path = write_settings(tmp_path)
+    migrate_database(db_path, settings_json_path=settings_path)
+    repository = WorkflowRunRepository(db_path)
+    job_repository = JobRepository(db_path)
+    request = workflow_request("draft-1", "Interrupted job", "123")
+    try:
+        repository.create_run(
+            WorkflowRun(
+                id="run-1",
+                status="running",
+                total=1,
+                completed=0,
+                failed=0,
+                skipped=0,
+                concurrency=1,
+            )
+        )
+        item_id = repository.create_item(
+            WorkflowRunItem(
+                id=None,
+                run_id="run-1",
+                draft_id=request.draft_id,
+                title=request.title,
+                status="running",
+                job_ids=["job-1"],
+                config=request.config.model_dump(),
+                request=workflow_item_request_to_dict(request),
+            )
+        )
+        job_repository.create(
+            Job(
+                id="job-1",
+                type="download_artist",
+                status="running",
+                input_user_id="123",
+                workflow_run_id="run-1",
+                workflow_item_id=item_id,
+                workflow_source="workflow_batch",
+                total_files=10,
+                completed_files=3,
+                started_at="2026-01-01T00:00:00Z",
+                options={
+                    "workflow_run_id": "run-1",
+                    "workflow_item_id": item_id,
+                    "workflow_source": "workflow_batch",
+                },
+            )
+        )
+    finally:
+        repository.close()
+        job_repository.close()
+
+    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    try:
+        recovered = service.recover_startup()
+    finally:
+        service.close()
+
+    assert [run.id for run in recovered] == ["run-1"]
+    job_repository = JobRepository(db_path)
+    try:
+        job = job_repository.get_by_id("job-1")
+        events = job_repository.list_events("job-1")
+    finally:
+        job_repository.close()
+    assert job is not None
+    assert job.status == "queued"
+    assert job.total_files == 0
+    assert job.completed_files == 0
+    assert job.started_at is None
+    assert any(event.message == "Job requeued after service restart" for event in events)
+
+
+def test_startup_recovery_wraps_active_orphan_jobs(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    settings_path = write_settings(tmp_path)
+    migrate_database(db_path, settings_json_path=settings_path)
+    job_repository = JobRepository(db_path)
+    try:
+        job_repository.create(
+            Job(
+                id="running-orphan",
+                type="download_artist",
+                status="running",
+                input_user_id="123",
+                total_files=4,
+                completed_files=2,
+                started_at="2026-01-01T00:00:00Z",
+            )
+        )
+        job_repository.create(
+            Job(
+                id="queued-orphan",
+                type="download_artist",
+                status="queued",
+                input_user_id="456",
+            )
+        )
+        job_repository.create(
+            Job(
+                id="done-orphan",
+                type="download_artist",
+                status="completed",
+                input_user_id="789",
+            )
+        )
+    finally:
+        job_repository.close()
+
+    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    try:
+        recovered = service.recover_startup()
+    finally:
+        service.close()
+
+    assert len(recovered) == 1
+    run = recovered[0]
+    assert run.source == "startup_recovery"
+    assert run.status == "running"
+    assert run.items[0].status == "running"
+    assert run.items[0].job_ids == ["running-orphan", "queued-orphan"]
+    job_repository = JobRepository(db_path)
+    try:
+        running = job_repository.get_by_id("running-orphan")
+        queued = job_repository.get_by_id("queued-orphan")
+        done = job_repository.get_by_id("done-orphan")
+    finally:
+        job_repository.close()
+    assert running is not None
+    assert running.status == "queued"
+    assert running.workflow_run_id == run.id
+    assert running.workflow_item_id == run.items[0].id
+    assert running.workflow_source == "startup_recovery"
+    assert running.options["workflow_source"] == "startup_recovery"
+    assert queued is not None
+    assert queued.status == "queued"
+    assert queued.workflow_run_id == run.id
+    assert queued.workflow_item_id == run.items[0].id
+    assert queued.workflow_source == "startup_recovery"
+    assert done is not None
+    assert done.workflow_run_id is None
+
+
+def test_startup_recovery_does_not_create_empty_run(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    settings_path = write_settings(tmp_path)
+    migrate_database(db_path, settings_json_path=settings_path)
+
+    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    try:
+        recovered = service.recover_startup()
+    finally:
+        service.close()
+
+    assert recovered == []
+    repository = WorkflowRunRepository(db_path)
+    try:
+        runs, total = repository.list_runs(), repository.count_runs()
+    finally:
+        repository.close()
+    assert runs == []
+    assert total == 0
+
+
 def test_recover_interrupted_workflow_run_fails_legacy_item_without_request(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     settings_path = write_settings(tmp_path)

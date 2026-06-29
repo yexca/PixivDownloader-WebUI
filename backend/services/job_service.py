@@ -351,6 +351,20 @@ class JobService:
             )
         return jobs
 
+    def requeue_interrupted_jobs(self, job_ids: list[str]) -> list[Job]:
+        jobs = self.repository.requeue_jobs(job_ids)
+        for job in jobs:
+            if job.status != "queued":
+                continue
+            self.repository.add_event(
+                JobEvent(
+                    job_id=job.id,
+                    level="warning",
+                    message="Job requeued after service restart",
+                )
+            )
+        return jobs
+
     def _next_one_time_status(self) -> JobStatus:
         return "queued" if self._one_time_activation_capacity() > 0 else "inactive"
 

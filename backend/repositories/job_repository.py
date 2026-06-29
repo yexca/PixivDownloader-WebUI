@@ -234,6 +234,49 @@ class JobRepository:
             raise DatabaseError("failed to list inactive one-time jobs") from exc
         return [job_from_row(row) for row in rows]
 
+    def list_active_orphan_jobs(self) -> list[Job]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE status IN ('inactive', 'queued', 'running')
+                  AND workflow_run_id IS NULL
+                  AND workflow_item_id IS NULL
+                  AND json_extract(options_json, '$.workflow_run_id') IS NULL
+                  AND json_extract(options_json, '$.workflow_item_id') IS NULL
+                ORDER BY created_at
+                """
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to list active orphan jobs") from exc
+        return [job_from_row(row) for row in rows]
+
+    def requeue_jobs(self, job_ids: list[str]) -> list[Job]:
+        if not job_ids:
+            return []
+        try:
+            with self.conn:
+                for job_id in job_ids:
+                    self.conn.execute(
+                        """
+                        UPDATE jobs
+                        SET status = 'queued',
+                            total_files = 0,
+                            completed_files = 0,
+                            skipped_files = 0,
+                            failed_files = 0,
+                            error_message = NULL,
+                            started_at = NULL,
+                            finished_at = NULL
+                        WHERE id = ?
+                          AND status = 'running'
+                        """,
+                        (job_id,),
+                    )
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to requeue jobs") from exc
+        return self.list_by_ids(job_ids)
+
     def requeue_running(self) -> list[Job]:
         try:
             rows = self.conn.execute(

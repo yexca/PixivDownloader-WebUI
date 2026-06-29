@@ -35,7 +35,6 @@ class JobQueue:
 
     async def start(self) -> None:
         if self._task is None or self._task.done():
-            self._requeue_interrupted_running_jobs()
             self._stop_event.clear()
             self._task = asyncio.create_task(self._run(), name="pixiv-download-job-queue")
 
@@ -101,19 +100,5 @@ class JobQueue:
             service.activate_inactive_one_time_jobs()
         except Exception:
             logger.exception("one-time job activation failed")
-        finally:
-            service.close()
-
-    def _requeue_interrupted_running_jobs(self) -> None:
-        service = JobService(
-            self.db_path,
-            settings_json_path=self.settings_json_path,
-        )
-        try:
-            jobs = service.requeue_interrupted_running_jobs()
-            if jobs:
-                logger.warning("requeued %s interrupted running job(s)", len(jobs))
-        except Exception:
-            logger.exception("running job recovery failed")
         finally:
             service.close()
