@@ -2,7 +2,7 @@ import { apiRequest } from "./client";
 
 export type ScheduledTaskAction = "sync_artist" | "download_artist" | "retry_failed_artist";
 export type ScheduledTaskStatus = "active" | "inactive" | "paused" | "blocked" | "archived";
-export type ScheduledTaskTargetType = "single_artist" | "single_artwork" | "all_artists" | "artists_with_tag" | "artists_not_checked";
+export type ScheduledTaskTargetType = "artists" | "artworks" | "single_artist" | "single_artwork" | "all_artists" | "artists_with_tag" | "artists_not_checked";
 export type ScheduledTaskFilterType = "last_checked_before_days" | "has_failed_files";
 export type ScheduledTaskArtistSelection = "oldest_checked_first" | "newest_checked_first" | "random";
 export type FailureReason = "auth" | "disk" | "network" | "cancelled" | "target" | "rule" | "unknown";
@@ -12,6 +12,9 @@ export type ScheduledTaskConfig = {
     type: ScheduledTaskTargetType;
     artist_id?: string | null;
     artwork_id?: string | null;
+    artist_ids?: string[];
+    artwork_ids?: string[];
+    artist_source?: "artist_ids" | "artwork_ids";
     tag?: string | null;
     tags?: string[];
     days?: number | null;

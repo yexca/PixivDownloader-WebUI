@@ -11,6 +11,7 @@ from backend.domain.types import (
     JobType,
     ScheduledTaskAction,
     ScheduledTaskArtistSelection,
+    ScheduledTaskArtistSource,
     ScheduledTaskFilterType,
     ScheduledTaskStatus,
     ScheduledTaskTargetType,
@@ -149,6 +150,9 @@ class ScheduledTaskTarget:
     type: ScheduledTaskTargetType
     artist_id: str | None = None
     artwork_id: str | None = None
+    artist_ids: tuple[str, ...] = ()
+    artwork_ids: tuple[str, ...] = ()
+    artist_source: ScheduledTaskArtistSource = "artist_ids"
     tag: str | None = None
     tags: tuple[str, ...] = ()
     days: int | None = None

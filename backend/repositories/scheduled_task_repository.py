@@ -305,6 +305,8 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
         artist_selection = "oldest_checked_first"
     target_type = target_data.get("type")
     if target_type not in {
+        "artists",
+        "artworks",
         "single_artist",
         "single_artwork",
         "all_artists",
@@ -314,11 +316,17 @@ def scheduled_task_config_from_dict(data: dict[str, object]) -> ScheduledTaskCon
         target_type = "single_artist"
     tag = optional_str(target_data.get("tag"))
     tags = tuple(normalize_tags(target_data.get("tags"), fallback=tag))
+    artist_source = target_data.get("artist_source")
+    if artist_source not in {"artist_ids", "artwork_ids"}:
+        artist_source = "artist_ids"
     return ScheduledTaskConfig(
         target=ScheduledTaskTarget(
             type=target_type,
             artist_id=optional_str(target_data.get("artist_id")),
             artwork_id=optional_str(target_data.get("artwork_id")),
+            artist_ids=tuple(normalize_ids(target_data.get("artist_ids"))),
+            artwork_ids=tuple(normalize_ids(target_data.get("artwork_ids"))),
+            artist_source=artist_source,
             tag=tag,
             tags=tags,
             days=optional_int(target_data.get("days")),
@@ -337,6 +345,20 @@ def optional_str(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def normalize_ids(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_id in value:
+        item_id = str(raw_id).strip()
+        if not item_id or item_id in seen:
+            continue
+        normalized.append(item_id)
+        seen.add(item_id)
+    return normalized
 
 
 def optional_int(value: object) -> int | None:

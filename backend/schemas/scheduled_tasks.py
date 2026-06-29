@@ -23,6 +23,9 @@ class ScheduledTaskTargetRequest(BaseModel):
     type: ScheduledTaskTargetType
     artist_id: str | None = None
     artwork_id: str | None = None
+    artist_ids: list[str] = Field(default_factory=list)
+    artwork_ids: list[str] = Field(default_factory=list)
+    artist_source: str = "artist_ids"
     tag: str | None = None
     tags: list[str] = Field(default_factory=list)
     days: int | None = Field(default=None, ge=1)
@@ -44,10 +47,16 @@ class ScheduledTaskConfigRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_target_actions(self) -> ScheduledTaskConfigRequest:
-        if self.target.type == "single_artwork" and any(
+        if self.target.type in {"single_artwork", "artworks"} and any(
             action != "download_artist" for action in self.actions
         ):
-            raise ValueError("single_artwork target only supports download_artist")
+            raise ValueError("artwork target only supports download_artist")
+        if (
+            self.target.type == "artists"
+            and self.target.artwork_ids
+            and any(action != "download_artist" for action in self.actions)
+        ):
+            raise ValueError("artists target with artwork IDs only supports download_artist")
         return self
 
 
@@ -153,6 +162,9 @@ def scheduled_task_config_from_request(
             type=request.target.type,
             artist_id=request.target.artist_id,
             artwork_id=request.target.artwork_id,
+            artist_ids=tuple(normalize_ids(request.target.artist_ids)),
+            artwork_ids=tuple(normalize_ids(request.target.artwork_ids)),
+            artist_source=normalize_artist_source(request.target.artist_source),
             tag=request.target.tag,
             tags=tuple(normalize_tags(request.target.tags)),
             days=request.target.days,
@@ -176,6 +188,9 @@ def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[st
             "type": config.target.type,
             "artist_id": config.target.artist_id,
             "artwork_id": config.target.artwork_id,
+            "artist_ids": list(config.target.artist_ids),
+            "artwork_ids": list(config.target.artwork_ids),
+            "artist_source": config.target.artist_source,
             "tag": config.target.tag,
             "tags": list(config.target.tags),
             "days": config.target.days,
@@ -208,6 +223,22 @@ def normalize_tags(tags: list[str]) -> list[str]:
         normalized.append(tag)
         seen.add(key)
     return normalized
+
+
+def normalize_ids(ids: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw_id in ids:
+        item_id = str(raw_id).strip()
+        if not item_id or item_id in seen:
+            continue
+        normalized.append(item_id)
+        seen.add(item_id)
+    return normalized
+
+
+def normalize_artist_source(value: object) -> str:
+    return "artwork_ids" if value == "artwork_ids" else "artist_ids"
 
 
 def clean_download_options(options: dict[str, object]) -> dict[str, object]:

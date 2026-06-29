@@ -13,6 +13,7 @@ import {
   Search,
   Trash2,
   Wand2,
+  PlusCircle,
   XCircle
 } from "lucide-react";
 
@@ -54,6 +55,8 @@ type WorkflowStatusTab = "active" | "failed" | "completed";
 type ArchiveFilter = "normal" | "include" | "archived";
 type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "rule";
 type WorkflowTarget =
+  | "artists"
+  | "artworks"
   | "single_artist"
   | "single_artwork"
   | "all_artists"
@@ -62,6 +65,7 @@ type WorkflowTarget =
 type WorkflowAction = "download_artist" | "sync_artist" | "retry_failed_artist";
 type DownloadScope = "incremental" | "full";
 type TagVariantBehavior = "download" | "skip" | "retry_failed";
+type ArtistTargetSource = "artist_ids" | "artwork_ids";
 
 type RuleConfig = {
   only_new_artworks: boolean;
@@ -83,6 +87,11 @@ type WorkflowForm = {
   target_type: WorkflowTarget;
   artist_id: string;
   artwork_id: string;
+  artist_ids: string[];
+  artist_id_input: string;
+  artwork_ids: string[];
+  artwork_id_input: string;
+  artist_source: ArtistTargetSource;
   tags: string[];
   stale_target_days: number;
   max_artists_per_run: number;
@@ -112,6 +121,7 @@ type DraftWorkflow = {
 
 const requiredModules: ModuleKey[] = ["target", "actions"];
 const moduleOrder: ModuleKey[] = ["schedule", "target", "filters", "actions", "options", "naming", "rule"];
+const targetOptions: WorkflowTarget[] = ["artists", "artworks", "all_artists", "artists_with_tag", "artists_not_checked"];
 const draftsStorageKey = "pixivdownloader.workflowDrafts.v1";
 const defaultNamingRule = "{artist}-{artist_id}/{original_filename}";
 const namingTokens = [
@@ -141,9 +151,14 @@ const initialForm: WorkflowForm = {
   interval_days: 30,
   enabled: true,
   run_after_startup: true,
-  target_type: "single_artist",
+  target_type: "artists",
   artist_id: "",
   artwork_id: "",
+  artist_ids: [],
+  artist_id_input: "",
+  artwork_ids: [],
+  artwork_id_input: "",
+  artist_source: "artist_ids",
   tags: [],
   stale_target_days: 30,
   max_artists_per_run: 25,
@@ -202,6 +217,8 @@ const tagVariantBehaviorLabels: Record<TagVariantBehavior, string> = {
 };
 
 const targetLabels: Record<WorkflowTarget, string> = {
+  artists: "Artists",
+  artworks: "Artworks",
   single_artist: "Single artist",
   single_artwork: "Single artwork",
   all_artists: "All artists",
@@ -800,7 +817,7 @@ function TargetCard({
       <div>
         <p className="mb-2 text-sm font-medium">Target type</p>
         <div className="flex flex-wrap gap-2">
-          {(Object.keys(targetLabels) as WorkflowTarget[]).map((target) => (
+          {targetOptions.map((target) => (
             <button
               key={target}
               type="button"
@@ -814,7 +831,7 @@ function TargetCard({
                 setForm({
                   ...form,
                   target_type: target,
-                  actions: target === "single_artwork" ? ["download_artist"] : form.actions
+                  actions: target === "single_artwork" || target === "artworks" ? ["download_artist"] : form.actions
                 })
               }
             >
@@ -823,6 +840,14 @@ function TargetCard({
           ))}
         </div>
       </div>
+      {form.target_type === "artists" ? (
+        <ArtistsTargetFields form={form} setForm={setForm} />
+      ) : null}
+      {form.target_type === "artworks" ? (
+        <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          Artwork-only downloads are reserved for the next step. Use Artists with Artwork ID input to download the owning artist for now.
+        </div>
+      ) : null}
       {form.target_type === "single_artist" ? (
         <Field label="Pixiv artist ID">
           <Input
@@ -876,7 +901,7 @@ function TargetCard({
       ) : null}
       {multiArtistTarget ? (
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Max artists per run">
+          <Field label="Max targets per run">
             <Input
               type="number"
               min={1}
@@ -910,6 +935,114 @@ function TargetCard({
         </div>
       ) : null}
     </>
+  );
+}
+
+function ArtistsTargetFields({
+  form,
+  setForm
+}: {
+  form: WorkflowForm;
+  setForm: (form: WorkflowForm) => void;
+}): JSX.Element {
+  const ids = form.artist_source === "artist_ids" ? form.artist_ids : form.artwork_ids;
+  const inputValue = form.artist_source === "artist_ids" ? form.artist_id_input : form.artwork_id_input;
+  const inputKey = form.artist_source === "artist_ids" ? "artist_id_input" : "artwork_id_input";
+  const idsKey = form.artist_source === "artist_ids" ? "artist_ids" : "artwork_ids";
+  const placeholder = form.artist_source === "artist_ids" ? "123456" : "987654321";
+
+  const addIds = () => {
+    const nextIds = appendNumericIds(ids, inputValue);
+    setForm({ ...form, [idsKey]: nextIds, [inputKey]: "" });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <Select
+          className="w-40 shrink-0"
+          value={form.artist_source}
+          onChange={(event) => {
+            const artist_source = event.target.value as ArtistTargetSource;
+            setForm({
+              ...form,
+              artist_source,
+              actions: artist_source === "artwork_ids" ? ["download_artist"] : form.actions
+            });
+          }}
+        >
+          <option value="artist_ids">Artist IDs</option>
+          <option value="artwork_ids">Artwork IDs</option>
+        </Select>
+        <Input
+          inputMode="numeric"
+          value={inputValue}
+          placeholder={placeholder}
+          aria-label={form.artist_source === "artist_ids" ? "Artist ID" : "Artwork ID"}
+          onChange={(event) => setForm({ ...form, [inputKey]: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              addIds();
+            }
+          }}
+        />
+        <Button type="button" variant="outline" size="icon" onClick={addIds} title="Add ID" aria-label="Add ID">
+          <PlusCircle className="h-4 w-4" aria-hidden="true" />
+        </Button>
+      </div>
+      <div className="space-y-3">
+        <IdQueue
+          title="Artist IDs"
+          emptyText="No artist IDs added"
+          ids={form.artist_ids}
+          onRemove={(id) => setForm({ ...form, artist_ids: form.artist_ids.filter((item) => item !== id) })}
+        />
+        <IdQueue
+          title="Artwork IDs"
+          emptyText="No artwork IDs added"
+          ids={form.artwork_ids}
+          onRemove={(id) => setForm({ ...form, artwork_ids: form.artwork_ids.filter((item) => item !== id) })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function IdQueue({
+  title,
+  emptyText,
+  ids,
+  onRemove
+}: {
+  title: string;
+  emptyText: string;
+  ids: string[];
+  onRemove: (id: string) => void;
+}): JSX.Element {
+  return (
+    <div>
+      <p className="mb-2 text-xs font-medium text-muted-foreground">{title} · {ids.length}</p>
+      {ids.length ? (
+        <div className="flex flex-wrap gap-2">
+          {ids.map((id) => (
+            <Badge key={id} tone="muted">
+              <span>{id}</span>
+              <button
+                type="button"
+                className="ml-1 text-muted-foreground hover:text-foreground"
+                onClick={() => onRemove(id)}
+                aria-label={`Remove ${id}`}
+              >
+                x
+              </button>
+            </Badge>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">{emptyText}</p>
+      )}
+    </div>
   );
 }
 
@@ -980,11 +1113,12 @@ function FiltersCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Wo
 }
 
 function ActionsCard({ form, setForm }: { form: WorkflowForm; setForm: (form: WorkflowForm) => void }): JSX.Element {
-  const artworkTarget = form.target_type === "single_artwork";
+  const artworkTarget = form.target_type === "single_artwork" || form.target_type === "artworks";
+  const artworkArtistSource = form.target_type === "artists" && form.artist_source === "artwork_ids";
   return (
     <>
       {(Object.keys(actionLabels) as WorkflowAction[]).map((action) => {
-        const disabled = artworkTarget && action !== "download_artist";
+        const disabled = (artworkTarget || artworkArtistSource) && action !== "download_artist";
         return (
           <label
             key={action}
@@ -1874,6 +2008,13 @@ async function submitDraft(form: WorkflowForm): Promise<{ jobIds: string[] }> {
     const task = await createScheduledTask(workflowToScheduleRequest(form));
     return { jobIds: task.last_job_id ? [task.last_job_id] : [] };
   }
+  if (form.target_type === "artists") {
+    const response = await runWorkflow({ config: workflowToConfig(form) });
+    return { jobIds: response.job_ids };
+  }
+  if (form.target_type === "artworks") {
+    throw new Error("Artwork-only workflows are not available yet.");
+  }
   if (form.target_type === "single_artist" && form.actions.length === 1 && form.actions[0] === "sync_artist") {
     const response = await createArtist(form.artist_id.trim());
     return { jobIds: [response.job_id] };
@@ -1923,7 +2064,7 @@ function workflowToScheduleRequest(form: WorkflowForm) {
   return {
     name: form.name.trim(),
     action: config.actions[0] ?? "download_artist",
-    target_artist_id: form.target_type === "single_artist" ? form.artist_id.trim() : null,
+    target_artist_id: scheduleTargetArtistId(form),
     interval_days: form.interval_days,
     enabled: form.enabled,
     run_after_startup: form.run_after_startup,
@@ -1937,6 +2078,9 @@ function workflowToConfig(form: WorkflowForm): ScheduledTaskConfig {
       type: form.target_type as ScheduledTaskTargetType,
       artist_id: form.target_type === "single_artist" ? form.artist_id.trim() : null,
       artwork_id: form.target_type === "single_artwork" ? form.artwork_id.trim() : null,
+      artist_ids: form.target_type === "artists" ? queuedArtistIds(form) : [],
+      artwork_ids: form.target_type === "artists" ? queuedArtworkIds(form) : [],
+      artist_source: form.target_type === "artists" ? form.artist_source : "artist_ids",
       tags: form.target_type === "artists_with_tag" ? form.tags : [],
       tag: form.target_type === "artists_with_tag" ? form.tags[0] ?? null : null,
       days: form.target_type === "artists_not_checked" ? form.stale_target_days : null
@@ -1967,7 +2111,7 @@ function workflowToConfig(form: WorkflowForm): ScheduledTaskConfig {
 }
 
 function workflowActionsForSchedule(form: WorkflowForm): ScheduledTaskAction[] {
-  if (form.target_type === "single_artwork") {
+  if (form.target_type === "single_artwork" || form.target_type === "artworks") {
     return ["download_artist"];
   }
   return form.actions;
@@ -1975,6 +2119,28 @@ function workflowActionsForSchedule(form: WorkflowForm): ScheduledTaskAction[] {
 
 function validateForm(form: WorkflowForm): string[] {
   const errors: string[] = [];
+  if (form.target_type === "artists") {
+    const ids = [...queuedArtistIds(form), ...queuedArtworkIds(form)];
+    if (!ids.length) {
+      errors.push("Add at least one artist target ID.");
+    }
+    for (const item of ids) {
+      if (!/^\d+$/.test(item)) {
+        errors.push("Artist target IDs must contain digits only.");
+        break;
+      }
+    }
+  }
+  if (form.target_type === "artworks") {
+    errors.push("Artwork-only workflows are not available yet.");
+  }
+  if (
+    form.target_type === "artists"
+    && queuedArtworkIds(form).length > 0
+    && form.actions.some((action) => action !== "download_artist")
+  ) {
+    errors.push("Artists from artwork IDs only support download.");
+  }
   if (form.target_type === "single_artist" && !/^\d+$/.test(form.artist_id.trim())) {
     errors.push("Artist ID must contain digits only.");
   }
@@ -1988,7 +2154,7 @@ function validateForm(form: WorkflowForm): string[] {
     errors.push("Select at least one action.");
   }
   if (!Number.isInteger(form.max_artists_per_run) || form.max_artists_per_run < 1) {
-    errors.push("Max artists per run must be at least 1.");
+    errors.push("Max targets per run must be at least 1.");
   }
   if (form.modules.schedule && (!Number.isInteger(form.interval_days) || form.interval_days < 1)) {
     errors.push("Interval days must be at least 1.");
@@ -2183,9 +2349,24 @@ function normalizeStoredForm(form: WorkflowForm): WorkflowForm {
     modules.rule = true;
   }
   const legacyRules = form.rules as RuleConfig & { tag_variant_action?: WorkflowAction };
+  const targetType = form.target_type === "single_artist" || form.target_type === "single_artwork" ? "artists" : form.target_type;
+  const artistSource = form.target_type === "single_artwork" ? "artwork_ids" : form.artist_source ?? "artist_ids";
+  const artistIds = normalizeNumericIds([
+    ...(form.artist_ids ?? []),
+    ...(form.target_type === "single_artist" && form.artist_id ? [form.artist_id] : [])
+  ]);
+  const artworkIds = normalizeNumericIds([
+    ...(form.artwork_ids ?? []),
+    ...(form.target_type === "single_artwork" && form.artwork_id ? [form.artwork_id] : [])
+  ]);
   return {
     ...initialForm,
     ...form,
+    target_type: targetType,
+    artist_source: artistSource,
+    artist_ids: artistIds,
+    artwork_ids: artworkIds,
+    actions: artistSource === "artwork_ids" ? ["download_artist"] : form.actions,
     modules,
     naming_rule: form.naming_rule || defaultNamingRule,
     rules: {
@@ -2206,7 +2387,7 @@ function previewText(form: WorkflowForm): string {
       ? "all discovered works"
       : "new works only";
   const rules = ruleSummary(form);
-  return `${targetLabels[form.target_type]}, ${actions}, ${scope}, ${mode}${rules ? `, ${rules}` : ""}.`;
+  return `${targetDetail(form)}, ${actions}, ${scope}, ${mode}${rules ? `, ${rules}` : ""}.`;
 }
 
 function ruleSummary(form: WorkflowForm): string {
@@ -2249,6 +2430,54 @@ function namingRuleOrNull(form: WorkflowForm): string | null {
   }
   const rule = form.naming_rule.trim();
   return rule && rule !== defaultNamingRule ? rule : null;
+}
+
+function appendNumericIds(ids: string[], value: string): string[] {
+  return normalizeNumericIds([...ids, ...value.split(/[,\s]+/)]);
+}
+
+function normalizeNumericIds(ids: string[]): string[] {
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const rawId of ids) {
+    const id = String(rawId).trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    normalized.push(id);
+    seen.add(id);
+  }
+  return normalized;
+}
+
+function activeArtistTargetIds(form: WorkflowForm): string[] {
+  return form.artist_source === "artist_ids" ? form.artist_ids : form.artwork_ids;
+}
+
+function activeArtistTargetInput(form: WorkflowForm): string {
+  return form.artist_source === "artist_ids" ? form.artist_id_input : form.artwork_id_input;
+}
+
+function artistTargetIds(form: WorkflowForm): string[] {
+  return appendNumericIds(activeArtistTargetIds(form), activeArtistTargetInput(form));
+}
+
+function queuedArtistIds(form: WorkflowForm): string[] {
+  return appendNumericIds(form.artist_ids, form.artist_source === "artist_ids" ? form.artist_id_input : "");
+}
+
+function queuedArtworkIds(form: WorkflowForm): string[] {
+  return appendNumericIds(form.artwork_ids, form.artist_source === "artwork_ids" ? form.artwork_id_input : "");
+}
+
+function scheduleTargetArtistId(form: WorkflowForm): string | null {
+  if (form.target_type === "single_artist") {
+    return form.artist_id.trim();
+  }
+  if (form.target_type === "artists" && form.artist_source === "artist_ids") {
+    return queuedArtistIds(form)[0] ?? null;
+  }
+  return null;
 }
 
 function ruleOnlyNewArtworks(form: WorkflowForm): boolean {
@@ -2311,6 +2540,14 @@ function scheduleSummary(task: ScheduledTask): string {
 }
 
 function targetDetail(form: WorkflowForm): string {
+  if (form.target_type === "artists") {
+    const artistCount = queuedArtistIds(form).length;
+    const artworkCount = queuedArtworkIds(form).length;
+    return `Artists from ${artistCount} artist IDs, ${artworkCount} artwork IDs`;
+  }
+  if (form.target_type === "artworks") {
+    return "Artworks placeholder";
+  }
   if (form.target_type === "single_artist") {
     return `Artist ${form.artist_id || "-"}`;
   }

@@ -235,6 +235,42 @@ class ScheduledTaskService:
 
     def _create_jobs(self, task: ScheduledTask, *, gate_one_time: bool) -> list[Job]:
         config = task.config or legacy_config(task)
+        if config.target.type == "artists" and config.target.artwork_ids:
+            jobs: list[Job] = []
+            artists = self._resolve_artists(config)
+            target_slots = config.max_artists_per_run
+            for artist in artists[:target_slots]:
+                for action in config.actions:
+                    active_job = self._find_active_job(action, artist.id, None)
+                    if active_job is not None:
+                        continue
+                    jobs.append(
+                        self._create_job(
+                            action,
+                            artist.id,
+                            options=config.download_options,
+                            gate_one_time=gate_one_time,
+                        )
+                    )
+            remaining_slots = max(0, target_slots - len(artists[:target_slots]))
+            for artwork_id in config.target.artwork_ids[:remaining_slots]:
+                active_job = self._find_active_job(
+                    "download_from_artwork",
+                    None,
+                    artwork_id,
+                )
+                if active_job is not None:
+                    continue
+                jobs.append(
+                    self._create_job(
+                        "download_artist",
+                        None,
+                        artwork_id=artwork_id,
+                        options=config.download_options,
+                        gate_one_time=gate_one_time,
+                    )
+                )
+            return jobs
         if config.target.type == "single_artwork":
             if not config.target.artwork_id:
                 return []
@@ -349,6 +385,24 @@ class ScheduledTaskService:
         repository = ArtistRepository(self.db_path)
         try:
             target = config.target
+            if target.type in {"single_artist", "artists"}:
+                if target.type == "artists":
+                    artist_ids = target.artist_ids
+                elif target.artist_id:
+                    artist_ids = (target.artist_id,)
+                else:
+                    artist_ids = ()
+                if not artist_ids:
+                    return []
+                artists: list[Artist] = []
+                for artist_id in artist_ids:
+                    artist = repository.get_by_id(artist_id)
+                    artists.append(
+                        artist
+                        if artist is not None
+                        else Artist(id=artist_id, name=artist_id)
+                    )
+                return artists
             if target.type == "single_artist":
                 if not target.artist_id:
                     return []
@@ -455,6 +509,12 @@ def default_task_name(
     }
     if config is not None:
         target = config.target
+        if target.type == "artists":
+            if target.artist_source == "artwork_ids":
+                return "Download artists from artworks"
+            return "Download artists"
+        if target.type == "artworks":
+            return "Download artworks"
         if target.type == "single_artwork" and target.artwork_id:
             return f"Download artwork {target.artwork_id}"
         if target.type == "all_artists":
@@ -481,7 +541,7 @@ def artist_is_stale(artist: Artist, days: int) -> bool:
 
 
 def select_artists(artists: list[Artist], config: ScheduledTaskConfig) -> list[Artist]:
-    if config.target.type == "single_artist":
+    if config.target.type in {"single_artist", "artists"}:
         return artists
     if config.artist_selection == "random":
         return random.sample(artists, k=len(artists))

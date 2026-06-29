@@ -1269,6 +1269,147 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert all(item["status"] == "completed" for item in completed_body["items"])
 
 
+def test_workflow_artists_target_creates_multiple_artist_jobs(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 1,
+            "items": [
+                {
+                    "draft_id": "artists",
+                    "title": "Download artists",
+                    "config": {
+                        "target": {
+                            "type": "artists",
+                            "artist_source": "artist_ids",
+                            "artist_ids": ["123", "456"],
+                        },
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "running"
+    assert len(body["items"][0]["job_ids"]) == 2
+    assert queue.wake_count == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        jobs = [
+            job
+            for job_id in body["items"][0]["job_ids"]
+            if (job := repository.get_by_id(job_id)) is not None
+        ]
+    finally:
+        repository.close()
+    jobs = sorted(jobs, key=lambda job: job.input_user_id or "")
+    assert [(job.type, job.input_user_id) for job in jobs] == [
+        ("download_artist", "123"),
+        ("download_artist", "456"),
+    ]
+
+
+def test_workflow_artists_target_from_artwork_ids_creates_artwork_jobs(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 1,
+            "items": [
+                {
+                    "draft_id": "artists-from-artworks",
+                    "title": "Download artists from artworks",
+                    "config": {
+                        "target": {
+                            "type": "artists",
+                            "artist_source": "artwork_ids",
+                            "artwork_ids": ["111", "222"],
+                        },
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"][0]["job_ids"]) == 2
+    assert queue.wake_count == 1
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        jobs = [
+            job
+            for job_id in body["items"][0]["job_ids"]
+            if (job := repository.get_by_id(job_id)) is not None
+        ]
+    finally:
+        repository.close()
+    jobs = sorted(jobs, key=lambda job: job.input_artwork_id or "")
+    assert [(job.type, job.input_artwork_id) for job in jobs] == [
+        ("download_from_artwork", "111"),
+        ("download_from_artwork", "222"),
+    ]
+
+
+def test_workflow_artists_target_combines_artist_and_artwork_id_queues(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+
+    response = client.post(
+        "/api/workflows/runs",
+        json={
+            "concurrency": 1,
+            "items": [
+                {
+                    "draft_id": "artists-combined",
+                    "title": "Download mixed artist targets",
+                    "config": {
+                        "target": {
+                            "type": "artists",
+                            "artist_source": "artist_ids",
+                            "artist_ids": ["123"],
+                            "artwork_ids": ["111"],
+                        },
+                        "filters": [],
+                        "actions": ["download_artist"],
+                        "max_artists_per_run": 25,
+                    },
+                },
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["items"][0]["job_ids"]) == 2
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        jobs = [
+            job
+            for job_id in body["items"][0]["job_ids"]
+            if (job := repository.get_by_id(job_id)) is not None
+        ]
+    finally:
+        repository.close()
+    assert sorted((job.type, job.input_user_id, job.input_artwork_id) for job in jobs) == [
+        ("download_artist", "123", None),
+        ("download_from_artwork", None, "111"),
+    ]
+
+
 def test_workflow_batch_schedules_create_enabled_triggers(tmp_path):
     client = make_client(tmp_path)
 

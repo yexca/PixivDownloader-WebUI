@@ -18,8 +18,15 @@ JobType = Literal[
 ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
 ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked", "archived"]
 ScheduledTaskTargetType = Literal[
-    "single_artist", "single_artwork", "all_artists", "artists_with_tag", "artists_not_checked"
+    "artists",
+    "artworks",
+    "single_artist",
+    "single_artwork",
+    "all_artists",
+    "artists_with_tag",
+    "artists_not_checked",
 ]
+ScheduledTaskArtistSource = Literal["artist_ids", "artwork_ids"]
 ScheduledTaskFilterType = Literal["last_checked_before_days", "has_failed_files"]
 ScheduledTaskArtistSelection = Literal["oldest_checked_first", "newest_checked_first", "random"]
 ArtistAccountStatus = Literal["unknown", "available", "unavailable"]
