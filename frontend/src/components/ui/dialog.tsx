@@ -12,6 +12,7 @@ type DialogProps = {
   footer?: React.ReactNode;
   className?: string;
   bodyClassName?: string;
+  overlayClassName?: string;
   onOpenChange: (open: boolean) => void;
 };
 
@@ -23,6 +24,7 @@ export function Dialog({
   footer,
   className,
   bodyClassName,
+  overlayClassName,
   onOpenChange
 }: DialogProps): JSX.Element | null {
   React.useEffect(() => {
@@ -47,7 +49,7 @@ export function Dialog({
       <button
         type="button"
         aria-label="Close dialog"
-        className="absolute inset-0 bg-foreground/30"
+        className={cn("absolute inset-0 bg-foreground/30", overlayClassName)}
         onClick={() => onOpenChange(false)}
       />
       <section
