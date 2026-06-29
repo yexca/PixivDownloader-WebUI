@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from backend.api import (
     routes_artists,
     routes_artwork_files,
+    routes_dashboard,
     routes_downloads,
     routes_health,
     routes_imports,
@@ -88,6 +89,7 @@ def create_app(
     app.state.pixiv_oauth_flow_store = PixivOAuthFlowStore()
     app.state.pixiv_browser_auth_store = PixivBrowserAuthStore()
     app.include_router(routes_health.router)
+    app.include_router(routes_dashboard.router)
     app.include_router(routes_settings.router)
     app.include_router(routes_downloads.router)
     app.include_router(routes_imports.router)

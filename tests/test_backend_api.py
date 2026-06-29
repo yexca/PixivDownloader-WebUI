@@ -9,12 +9,13 @@ from backend.api import routes_settings
 from backend.app import create_app
 from backend.core.errors import PixivApiError
 from backend.db.migrate import migrate_database
-from backend.domain.entities import Artist, Job, JobEvent
+from backend.domain.entities import Artist, Artwork, ArtworkFile, Job, JobEvent
 from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
+from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
-from backend.repositories.workflow_run_repository import WorkflowRunRepository
+from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunRepository
 from backend.services import scheduled_task_service
 from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
@@ -43,6 +44,127 @@ def test_health_endpoint(tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "version": "0.1.0"}
+
+
+def test_dashboard_summary_endpoint_returns_runtime_and_library_counts(tmp_path):
+    queue = NoopQueue()
+    queue.pause()
+    client = make_client(tmp_path, queue=queue)
+    db_path = tmp_path / "pixiv.sqlite3"
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    job_repository = JobRepository(db_path)
+    workflow_repository = WorkflowRunRepository(db_path)
+    try:
+        artist_repository.upsert(
+            Artist(
+                id="123",
+                name="Artist",
+                last_download_id="100",
+                remote_latest_artwork_id="101",
+            )
+        )
+        artwork_repository.upsert(
+            Artwork(
+                id="101",
+                artist_id="123",
+                title="Artwork",
+                page_count=3,
+            )
+        )
+        with artwork_repository.conn:
+            for file in (
+                ArtworkFile(
+                    artwork_id="101",
+                    page_index=0,
+                    original_url="https://example.test/0.jpg",
+                    file_name="0.jpg",
+                    status="downloaded",
+                ),
+                ArtworkFile(
+                    artwork_id="101",
+                    page_index=1,
+                    original_url="https://example.test/1.jpg",
+                    file_name="1.jpg",
+                    status="failed",
+                ),
+                ArtworkFile(
+                    artwork_id="101",
+                    page_index=2,
+                    original_url="https://example.test/2.jpg",
+                    file_name="2.jpg",
+                    status="pending",
+                ),
+            ):
+                artwork_repository.conn.execute(
+                    """
+                    INSERT INTO artwork_files(
+                        artwork_id, page_index, original_url, file_name, status,
+                        created_at, updated_at
+                    )
+                    VALUES(?, ?, ?, ?, ?, '2026-06-29T00:00:00Z', '2026-06-29T00:00:00Z')
+                    """,
+                    (
+                        file.artwork_id,
+                        file.page_index,
+                        file.original_url,
+                        file.file_name,
+                        file.status,
+                    ),
+                )
+        job_repository.create(
+            Job(
+                id="waiting-job",
+                type="download_artist",
+                status="inactive",
+                options={"activation_scope": "one_time"},
+            )
+        )
+        job_repository.create(Job(id="running-job", type="download_artist", status="running"))
+        workflow_repository.create_run(
+            WorkflowRun(
+                id="run-1",
+                status="failed",
+                total=1,
+                completed=0,
+                failed=1,
+                skipped=0,
+                concurrency=1,
+            )
+        )
+        with job_repository.conn:
+            job_repository.conn.execute(
+                """
+                INSERT INTO scheduled_tasks(
+                    name, action, status, target_artist_id, interval_days,
+                    run_after_startup, created_at, updated_at
+                )
+                VALUES('Daily sync', 'sync_artist', 'blocked', '123', 1, 1,
+                    '2026-06-29T00:00:00Z', '2026-06-29T00:00:00Z')
+                """
+            )
+    finally:
+        artist_repository.close()
+        artwork_repository.close()
+        job_repository.close()
+        workflow_repository.close()
+
+    response = client.get("/api/dashboard")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["queue_paused"] is True
+    assert body["library"]["artists"] == 1
+    assert body["library"]["artworks"] == 1
+    assert body["library"]["downloaded_files"] == 1
+    assert body["library"]["pending_files"] == 1
+    assert body["library"]["failed_files"] == 1
+    assert body["library"]["attention_artists"] == 1
+    assert body["workflows"]["failed_runs"] == 1
+    assert body["workflows"]["blocked_schedules"] == 1
+    assert body["workflows"]["waiting_jobs"] == 1
+    assert body["jobs"]["inactive"] == 1
+    assert body["jobs"]["running"] == 1
 
 
 def test_settings_get_and_update_masks_refresh_token(tmp_path):
