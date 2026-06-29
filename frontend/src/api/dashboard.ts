@@ -8,6 +8,9 @@ export type DashboardSummary = {
     pending_files: number;
     failed_files: number;
     attention_artists: number;
+    artists_with_updates: number;
+    artists_with_failed_files: number;
+    unavailable_artists: number;
   };
   workflows: {
     running_runs: number;

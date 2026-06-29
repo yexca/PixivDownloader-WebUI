@@ -40,6 +40,30 @@ class DashboardRepository:
                    )
                 """
             ).fetchone()
+            updates_row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM artists
+                WHERE remote_latest_artwork_id IS NOT NULL
+                  AND CAST(remote_latest_artwork_id AS INTEGER) >
+                      CAST(COALESCE(latest_downloaded_artwork_id, '0') AS INTEGER)
+                """
+            ).fetchone()
+            failed_artist_row = self.conn.execute(
+                """
+                SELECT COUNT(DISTINCT artworks.artist_id) AS total
+                FROM artworks
+                JOIN artwork_files ON artwork_files.artwork_id = artworks.id
+                WHERE artwork_files.status = 'failed'
+                """
+            ).fetchone()
+            unavailable_row = self.conn.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM artists
+                WHERE account_status = 'unavailable'
+                """
+            ).fetchone()
         except sqlite3.Error as exc:
             raise DatabaseError("failed to fetch dashboard library counts") from exc
 
@@ -51,6 +75,11 @@ class DashboardRepository:
             "pending_files": file_counts.get("pending", 0) + file_counts.get("remote_only", 0),
             "failed_files": file_counts.get("failed", 0),
             "attention_artists": int(attention_row["total"] if attention_row else 0),
+            "artists_with_updates": int(updates_row["total"] if updates_row else 0),
+            "artists_with_failed_files": int(
+                failed_artist_row["total"] if failed_artist_row else 0
+            ),
+            "unavailable_artists": int(unavailable_row["total"] if unavailable_row else 0),
         }
 
     def workflow_counts(self) -> dict[str, int]:

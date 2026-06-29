@@ -109,7 +109,7 @@ export function DashboardPage(): JSX.Element {
           <Metric label="Waiting queue" value={summary.data?.workflows.waiting_jobs ?? 0} loading={summary.isLoading} />
           <Metric label="Blocked schedules" value={summary.data?.workflows.blocked_schedules ?? 0} loading={summary.isLoading} tone="warning" />
           <Metric label="Failed files" value={summary.data?.library.failed_files ?? 0} loading={summary.isLoading} tone="danger" />
-          <Metric label="Needs attention" value={summary.data?.library.attention_artists ?? 0} loading={summary.isLoading} tone="warning" />
+          <Metric label="Artist updates" value={summary.data?.library.artists_with_updates ?? 0} loading={summary.isLoading} tone="warning" />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.8fr)]">
@@ -229,6 +229,10 @@ export function DashboardPage(): JSX.Element {
               <Metric label="Artworks" value={summary.data?.library.artworks ?? 0} loading={summary.isLoading} />
               <Metric label="Downloaded files" value={summary.data?.library.downloaded_files ?? 0} loading={summary.isLoading} />
               <Metric label="Pending files" value={summary.data?.library.pending_files ?? 0} loading={summary.isLoading} />
+              <Metric label="Artists with updates" value={summary.data?.library.artists_with_updates ?? 0} loading={summary.isLoading} tone="warning" />
+              <Metric label="Artists with failed files" value={summary.data?.library.artists_with_failed_files ?? 0} loading={summary.isLoading} tone="danger" />
+              <Metric label="Unavailable artists" value={summary.data?.library.unavailable_artists ?? 0} loading={summary.isLoading} tone="warning" />
+              <Metric label="Attention artists" value={summary.data?.library.attention_artists ?? 0} loading={summary.isLoading} tone="warning" />
             </div>
             <div className="surface p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">

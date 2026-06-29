@@ -160,6 +160,9 @@ def test_dashboard_summary_endpoint_returns_runtime_and_library_counts(tmp_path)
     assert body["library"]["pending_files"] == 1
     assert body["library"]["failed_files"] == 1
     assert body["library"]["attention_artists"] == 1
+    assert body["library"]["artists_with_updates"] == 1
+    assert body["library"]["artists_with_failed_files"] == 1
+    assert body["library"]["unavailable_artists"] == 0
     assert body["workflows"]["failed_runs"] == 1
     assert body["workflows"]["blocked_schedules"] == 1
     assert body["workflows"]["waiting_jobs"] == 1

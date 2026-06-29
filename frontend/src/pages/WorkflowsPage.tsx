@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   Copy,
   ListPlus,
-  Pause,
   Pencil,
   Play,
   Plus,
@@ -18,19 +17,15 @@ import {
 
 import { createArtist, listLocalTags, type LocalTag } from "@/api/artists";
 import { createDownloadJob } from "@/api/downloads";
-import { getJob, listJobs, type Job, type JobDetail } from "@/api/jobs";
-import { getSettings, updateSettings, type SettingsResponse } from "@/api/settings";
+import { listJobs } from "@/api/jobs";
+import { getSettings, updateSettings } from "@/api/settings";
 import {
   createScheduledTask,
-  deleteScheduledTask,
   listScheduledTasks,
-  runScheduledTask,
-  type ScheduledTask,
   type ScheduledTaskAction,
   type ScheduledTaskArtistSelection,
   type ScheduledTaskConfig,
-  type ScheduledTaskTargetType,
-  updateScheduledTask
+  type ScheduledTaskTargetType
 } from "@/api/scheduledTasks";
 import {
   createWorkflowRun,
@@ -48,6 +43,28 @@ import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
+import {
+  Detail,
+  loadRunJobs,
+  RunDetailDialog,
+  RunWorkflowCard,
+  ScheduleWorkflowCard,
+  WaitingJobCard,
+  WorkflowGroupSection,
+  WorkflowLimitPanel
+} from "@/components/workflows/WorkflowRuntimeCards";
+import {
+  emptyRunGroups,
+  filterSchedules,
+  filterWaitingJobs,
+  filterWorkflowRuns,
+  groupRunsByFailureReason,
+  groupSchedulesByFailureReason,
+  latestScheduleRun,
+  workflowRunGroups,
+  workflowScheduleGroups,
+  workflowWaitingJobs
+} from "@/components/workflows/runtime";
 import { cn, formatDate } from "@/lib/utils";
 
 type WorkflowStatusTab = "active" | "failed" | "completed";
@@ -276,7 +293,7 @@ export function WorkflowsPage(): JSX.Element {
   });
   const selectedRunJobs = useQuery({
     queryKey: ["workflow-run-jobs", selectedRun?.id],
-    queryFn: () => Promise.all(runJobIds(selectedRun).map((jobId) => getJob(jobId))),
+    queryFn: () => loadRunJobs(selectedRun),
     enabled: Boolean(selectedRun),
     refetchInterval: selectedRun?.status === "running" ? 4000 : false
   });
@@ -1318,56 +1335,6 @@ function RuleCard({ form, setForm }: { form: WorkflowForm; setForm: (form: Workf
   );
 }
 
-function RunWorkflowCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect: () => void }): JSX.Element {
-  return (
-    <article className="surface p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-sm font-semibold">{runTitle(run)}</h2>
-            <WorkflowRunStatusPill status={run.status} />
-            <Badge tone="muted">run</Badge>
-            {run.source === "schedule" || run.source === "manual_schedule" ? (
-              <Badge tone="default">{run.source === "manual_schedule" ? "manual schedule" : "schedule"}</Badge>
-            ) : null}
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {run.completed}/{run.total} completed, {run.failed} failed, {run.skipped} skipped
-          </p>
-        </div>
-        <div className="text-left text-sm text-muted-foreground sm:text-right">
-          <div>{formatDate(run.created_at)}</div>
-          <div className="mt-1">Concurrency {run.concurrency}</div>
-          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={onInspect}>
-            Inspect
-          </Button>
-        </div>
-      </div>
-      <div className="mt-3 space-y-2">
-        {run.items.map((item) => (
-          <div key={item.id ?? item.draft_id} className="rounded-md border bg-muted/20 p-3 text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <span className="truncate font-medium">{item.title}</span>
-              <Badge tone={workflowItemTone(item.status)}>
-                {item.status}
-              </Badge>
-            </div>
-            {item.job_ids.length ? (
-              <p className="mt-1 break-all text-xs text-muted-foreground">
-                {item.job_ids.length} job(s): {item.job_ids.join(", ")}
-              </p>
-            ) : item.error_message ? (
-              <p className="mt-1 break-words text-xs text-destructive">{item.error_message}</p>
-            ) : (
-              <p className="mt-1 text-xs text-muted-foreground">No job was created.</p>
-            )}
-          </div>
-        ))}
-      </div>
-    </article>
-  );
-}
-
 function SubmittedToolbar({
   search,
   archiveFilter,
@@ -1406,172 +1373,6 @@ function SubmittedToolbar({
         <option value="archived">Archived only</option>
       </Select>
     </form>
-  );
-}
-
-function WorkflowGroupSection({
-  title,
-  count,
-  children
-}: {
-  title: string;
-  count: number;
-  children: React.ReactNode;
-}): JSX.Element {
-  if (count === 0) {
-    return (
-      <section className="rounded-md border bg-muted/20 p-3">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          <Badge tone="muted">0</Badge>
-        </div>
-      </section>
-    );
-  }
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-2 px-1">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        <Badge tone="muted">{count}</Badge>
-      </div>
-      <div className="grid gap-3">{children}</div>
-    </section>
-  );
-}
-
-function WaitingJobCard({ job }: { job: Job }): JSX.Element {
-  return (
-    <article className="surface p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-sm font-semibold">{jobLabel(job)}</h2>
-            <Badge tone="muted">waiting</Badge>
-            {job.workflow_source ? <Badge tone="default">{sourceLabel(job.workflow_source)}</Badge> : null}
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
-        </div>
-        <div className="text-left text-sm text-muted-foreground sm:text-right">
-          <div>{formatDate(job.created_at)}</div>
-          <div className="mt-1">{job.completed_files}/{job.total_files || 0} files</div>
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function RunDetailDialog({
-  run,
-  jobs,
-  loading,
-  error,
-  onOpenChange
-}: {
-  run: WorkflowBatchRun | null;
-  jobs: JobDetail[];
-  loading: boolean;
-  error?: string;
-  onOpenChange: (open: boolean) => void;
-}): JSX.Element {
-  return (
-    <Dialog
-      open={Boolean(run)}
-      title={run ? runTitle(run) : "Run detail"}
-      description={run ? `${sourceLabel(run.source)} · ${run.status} · ${formatDate(run.created_at)}` : undefined}
-      className="flex h-[88vh] max-w-5xl flex-col overflow-hidden"
-      bodyClassName="min-h-0 flex-1 overflow-y-auto pr-1"
-      onOpenChange={onOpenChange}
-    >
-      {!run ? null : (
-        <div className="space-y-4">
-          <dl className="grid gap-3 text-sm sm:grid-cols-4">
-            <Detail label="Source" value={sourceLabel(run.source)} />
-            <Detail label="Schedule" value={run.schedule_id ? String(run.schedule_id) : "-"} />
-            <Detail label="Created" value={formatDate(run.created_at)} />
-            <Detail label="Finished" value={formatDate(run.finished_at)} />
-          </dl>
-          <section className="rounded-md border bg-muted/20 p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <WorkflowRunStatusPill status={run.status} />
-              <Badge tone="muted">{run.completed}/{run.total} completed</Badge>
-              <Badge tone={run.failed ? "danger" : "muted"}>{run.failed} failed</Badge>
-              <Badge tone={run.skipped ? "warning" : "muted"}>{run.skipped} skipped</Badge>
-            </div>
-          </section>
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold">Items</h3>
-            {run.items.map((item) => (
-              <div key={item.id ?? item.draft_id} className="rounded-md border bg-card p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium">{item.title}</span>
-                  <Badge tone={workflowItemTone(item.status)}>{item.status}</Badge>
-                </div>
-                <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-                  <Detail label="Draft" value={item.draft_id} />
-                  <Detail label="Jobs" value={item.job_ids.length ? item.job_ids.join(", ") : "-"} />
-                  <Detail label="Finished" value={formatDate(item.finished_at)} />
-                </dl>
-                {item.error_message ? (
-                  <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-                    {item.error_message}
-                  </p>
-                ) : null}
-              </div>
-            ))}
-          </section>
-          <section className="space-y-3">
-            <h3 className="text-sm font-semibold">Jobs</h3>
-            {loading ? (
-              <DataState title="Loading jobs" variant="loading" />
-            ) : error ? (
-              <DataState title="Could not load jobs" description={error} variant="error" />
-            ) : jobs.length === 0 ? (
-              <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No jobs were created.</p>
-            ) : (
-              jobs.map((job) => <RunJobDetail key={job.id} job={job} />)
-            )}
-          </section>
-        </div>
-      )}
-    </Dialog>
-  );
-}
-
-function RunJobDetail({ job }: { job: JobDetail }): JSX.Element {
-  const latestEvent = job.events.at(-1);
-  return (
-    <article className="rounded-md border bg-card p-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h4 className="break-words text-sm font-semibold">{jobLabel(job)}</h4>
-            <Badge tone={jobStatusTone(job.status)}>{job.status}</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
-        </div>
-        <p className="text-sm text-muted-foreground">{job.completed_files}/{job.total_files || 0} files</p>
-      </div>
-      {job.error_message ? (
-        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-          {job.error_message}
-        </p>
-      ) : null}
-      <div className="mt-3">
-        {latestEvent ? (
-          <div className="rounded-md border bg-muted/20 p-2 text-xs">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Badge tone={latestEvent.level === "error" ? "danger" : latestEvent.level === "warning" ? "warning" : "muted"}>
-                {latestEvent.level}
-              </Badge>
-              <span className="text-muted-foreground">{formatDate(latestEvent.created_at)}</span>
-            </div>
-            <p className="mt-1 break-words">{latestEvent.message}</p>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">No events recorded.</p>
-        )}
-      </div>
-    </article>
   );
 }
 
@@ -1650,254 +1451,6 @@ function DraftDetail({ draft, onEdit }: { draft: DraftWorkflow; onEdit: () => vo
         <Detail label="Created" value={formatDate(draft.createdAt)} />
       </dl>
     </section>
-  );
-}
-
-function ScheduleWorkflowCard({
-  task,
-  lastRun
-}: {
-  task: ScheduledTask;
-  lastRun: WorkflowBatchRun | null;
-}): JSX.Element {
-  const queryClient = useQueryClient();
-  const { pushToast } = useToast();
-  const invalidate = () => invalidateRuntimeQueries(queryClient);
-  const runMutation = useMutation({
-    mutationFn: () => runScheduledTask(task.id),
-    onSuccess: (response) => {
-      pushToast({
-        title: response.workflow_run_id
-          ? "Schedule run submitted"
-          : response.skipped
-            ? "Schedule skipped"
-            : "Schedule checked",
-        description: response.workflow_run_id ?? (response.job_ids.length ? response.job_ids.join(", ") : undefined),
-        tone: response.skipped ? "info" : "success"
-      });
-      invalidate();
-    },
-    onError: (error) => pushToast({ title: "Schedule could not run", description: error.message, tone: "error" })
-  });
-  const statusMutation = useMutation({
-    mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
-    onSuccess: (_response, status) => {
-      pushToast({
-        title:
-          status === "archived"
-            ? "Schedule archived"
-            : status === "active"
-              ? "Schedule activation requested"
-              : "Schedule paused",
-        tone: "success"
-      });
-      invalidate();
-    },
-    onError: (error) => pushToast({ title: "Schedule could not be updated", description: error.message, tone: "error" })
-  });
-  const deleteMutation = useMutation({
-    mutationFn: () => deleteScheduledTask(task.id),
-    onSuccess: () => {
-      pushToast({ title: "Schedule deleted", tone: "success" });
-      invalidate();
-    },
-    onError: (error) => pushToast({ title: "Schedule could not be deleted", description: error.message, tone: "error" })
-  });
-  const busy = runMutation.isPending || statusMutation.isPending || deleteMutation.isPending;
-
-  return (
-    <article className="surface p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-sm font-semibold">{task.name}</h2>
-            <Badge tone={task.status === "active" ? "success" : task.status === "blocked" ? "danger" : "muted"}>
-              {task.status}
-            </Badge>
-            <Badge tone="default">schedule</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{scheduleSummary(task)}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => runMutation.mutate()}>
-            <Play className="h-4 w-4" aria-hidden="true" />
-            Run
-          </Button>
-          {task.status === "active" ? (
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("paused")}>
-              <Pause className="h-4 w-4" aria-hidden="true" />
-              Pause
-            </Button>
-          ) : (
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("active")}>
-              <Play className="h-4 w-4" aria-hidden="true" />
-              Activate
-            </Button>
-          )}
-          {task.status === "archived" ? null : (
-            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => statusMutation.mutate("archived")}>
-              Archive
-            </Button>
-          )}
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => deleteMutation.mutate()}>
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-            Delete
-          </Button>
-        </div>
-      </div>
-      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
-        <Detail label="Next run" value={formatDate(task.next_run_at)} />
-        <Detail label="Last run" value={formatDate(task.last_run_at)} />
-        <Detail label="Latest run" value={lastRunLabel(task, lastRun)} />
-      </dl>
-      {task.last_error_message ? (
-        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-          {task.last_error_message}
-        </p>
-      ) : null}
-    </article>
-  );
-}
-
-function WorkflowLimitPanel({
-  jobs,
-  settings,
-  disabled,
-  onSync
-}: {
-  jobs: Job[];
-  settings?: SettingsResponse;
-  disabled: boolean;
-  onSync: (key: "max_active_one_time_tasks", value: number) => void;
-}): JSX.Element {
-  const runStats = workflowJobStats(jobs);
-
-  return (
-    <div className="min-w-0">
-      <WorkflowLimitControl
-        label="Run limit"
-        value={settings?.max_active_one_time_tasks ?? 1}
-        disabled={disabled || !settings}
-        active={runStats.active}
-        waiting={runStats.waiting}
-        onSync={(value) => onSync("max_active_one_time_tasks", value)}
-      />
-    </div>
-  );
-}
-
-function WorkflowLimitControl({
-  label,
-  value,
-  disabled,
-  active,
-  waiting,
-  onSync
-}: {
-  label: string;
-  value: number;
-  disabled: boolean;
-  active: number;
-  waiting: number;
-  onSync: (value: number) => void;
-}): JSX.Element {
-  const initialCustomValue = value >= 6 ? value : 6;
-  const [draftValue, setDraftValue] = React.useState(String(initialCustomValue));
-  const [customValue, setCustomValue] = React.useState(initialCustomValue);
-  const [editingCustom, setEditingCustom] = React.useState(value < 6);
-
-  React.useEffect(() => {
-    if (value >= 6) {
-      setCustomValue(value);
-      setDraftValue(String(value));
-      setEditingCustom(false);
-    }
-  }, [value]);
-
-  const parsedCustomValue = clampCustomLimit(Number(draftValue));
-  const customActive = value === customValue;
-  const customChanged = customValue !== value;
-
-  function normalizeCustomEdit() {
-    setCustomValue(parsedCustomValue);
-    setDraftValue(String(parsedCustomValue));
-  }
-
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="whitespace-nowrap text-xs font-medium">{label}</span>
-      <span className="whitespace-nowrap text-xs text-muted-foreground">
-        {active}/{waiting}
-      </span>
-      <div className="flex flex-wrap items-center gap-1">
-        {[1, 2, 3, 4, 5].map((item) => (
-          <Button
-            key={item}
-            type="button"
-            size="icon"
-            variant={value === item ? "default" : "outline"}
-            className="h-7 w-7 shrink-0 text-xs"
-            disabled={disabled}
-            title={`Set ${label} limit to ${item}`}
-            onClick={() => {
-              setDraftValue(String(item));
-              onSync(item);
-            }}
-          >
-            {item}
-          </Button>
-        ))}
-        {editingCustom ? (
-          <Input
-            type="number"
-            min={6}
-            value={draftValue}
-            disabled={disabled}
-            className="h-7 w-14 px-2 text-center text-xs"
-            title={`Custom ${label} limit, minimum 6`}
-            onChange={(event) => setDraftValue(event.target.value)}
-            onBlur={normalizeCustomEdit}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-              }
-            }}
-          />
-        ) : (
-          <Button
-            type="button"
-            size="sm"
-            variant={customActive ? "default" : "outline"}
-            className="h-7 min-w-10 shrink-0 px-2 text-xs"
-            disabled={disabled}
-            title={`Edit custom ${label} limit`}
-            onClick={() => setEditingCustom(true)}
-          >
-            {customValue}
-          </Button>
-        )}
-        <Button
-          type="button"
-          size="icon"
-          variant={customChanged ? "default" : "outline"}
-          className="h-7 w-7 shrink-0"
-          disabled={disabled}
-          title={`Sync ${label} limit`}
-          onClick={() => {
-            if (editingCustom) {
-              onSync(parsedCustomValue);
-              setCustomValue(parsedCustomValue);
-              setDraftValue(String(parsedCustomValue));
-              setEditingCustom(false);
-              return;
-            }
-            onSync(customValue);
-          }}
-        >
-          <RefreshCw className="h-4 w-4" aria-hidden="true" />
-        </Button>
-      </div>
-    </div>
   );
 }
 
@@ -2183,137 +1736,6 @@ function validateForm(form: WorkflowForm): string[] {
   return errors;
 }
 
-function workflowRunGroups(runs: WorkflowBatchRun[]): {
-  active: WorkflowBatchRun[];
-  failed: WorkflowBatchRun[];
-  completed: WorkflowBatchRun[];
-} {
-  return {
-    active: runs.filter((run) => run.status === "running"),
-    failed: runs.filter((run) => run.status === "failed" || run.status === "partial"),
-    completed: runs.filter((run) => run.status === "completed" || run.status === "skipped")
-  };
-}
-
-function emptyRunGroups(): {
-  active: WorkflowBatchRun[];
-  failed: WorkflowBatchRun[];
-  completed: WorkflowBatchRun[];
-} {
-  return { active: [], failed: [], completed: [] };
-}
-
-function workflowScheduleGroups(tasks: ScheduledTask[]): {
-  active: ScheduledTask[];
-  blocked: ScheduledTask[];
-  inactive: ScheduledTask[];
-  archived: ScheduledTask[];
-} {
-  return {
-    active: tasks.filter((task) => task.status === "active"),
-    blocked: tasks.filter((task) => task.status === "blocked"),
-    inactive: tasks.filter((task) => task.status === "paused" || task.status === "inactive"),
-    archived: tasks.filter((task) => task.status === "archived")
-  };
-}
-
-function workflowWaitingJobs(jobs: Job[]): Job[] {
-  return jobs.filter((job) => job.options.activation_scope === "one_time" && job.status === "inactive");
-}
-
-function filterWorkflowRuns(runs: WorkflowBatchRun[], search: string): WorkflowBatchRun[] {
-  const query = normalizeSearch(search);
-  if (!query) {
-    return runs;
-  }
-  return runs.filter((run) =>
-    searchableText([
-      run.id,
-      run.status,
-      run.source,
-      run.failure_reason,
-      run.items.flatMap((item) => [
-        item.title,
-        item.draft_id,
-        item.status,
-        item.failure_reason,
-        item.error_message,
-        item.job_ids.join(" ")
-      ]).join(" ")
-    ]).includes(query)
-  );
-}
-
-function filterSchedules(tasks: ScheduledTask[], search: string): ScheduledTask[] {
-  const query = normalizeSearch(search);
-  if (!query) {
-    return tasks;
-  }
-  return tasks.filter((task) =>
-    searchableText([
-      task.name,
-      task.status,
-      task.action,
-      task.target_artist_id,
-      task.failure_reason,
-      task.last_error_code,
-      task.last_error_message,
-      scheduleSummary(task)
-    ]).includes(query)
-  );
-}
-
-function filterWaitingJobs(jobs: Job[], search: string): Job[] {
-  const query = normalizeSearch(search);
-  if (!query) {
-    return jobs;
-  }
-  return jobs.filter((job) =>
-    searchableText([
-      job.id,
-      job.status,
-      job.type,
-      job.workflow_source,
-      job.input_user_id,
-      job.input_artwork_id,
-      job.error_message,
-      jobTarget(job)
-    ]).includes(query)
-  );
-}
-
-function normalizeSearch(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function searchableText(values: unknown[]): string {
-  return values.filter(Boolean).join(" ").toLowerCase();
-}
-
-function runJobIds(run: WorkflowBatchRun | null): string[] {
-  if (!run) {
-    return [];
-  }
-  return Array.from(new Set(run.items.flatMap((item) => item.job_ids)));
-}
-
-function groupRunsByFailureReason(runs: WorkflowBatchRun[]): Array<{ reason: string; items: WorkflowBatchRun[] }> {
-  return groupedByReason(runs, (run) => run.failure_reason || "unknown");
-}
-
-function groupSchedulesByFailureReason(tasks: ScheduledTask[]): Array<{ reason: string; items: ScheduledTask[] }> {
-  return groupedByReason(tasks, (task) => task.failure_reason || "unknown");
-}
-
-function groupedByReason<T>(items: T[], reasonFor: (item: T) => string): Array<{ reason: string; items: T[] }> {
-  const groups = new Map<string, T[]>();
-  for (const item of items) {
-    const reason = reasonFor(item);
-    groups.set(reason, [...(groups.get(reason) ?? []), item]);
-  }
-  return Array.from(groups.entries()).map(([reason, groupedItems]) => ({ reason, items: groupedItems }));
-}
-
 function invalidateRuntimeQueries(queryClient: ReturnType<typeof useQueryClient>) {
   void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   void queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
@@ -2532,12 +1954,6 @@ function draftTitle(form: WorkflowForm): string {
   return form.name.trim() || `${form.modules.schedule ? "Schedule" : "Workflow"}: ${targetLabels[form.target_type]}`;
 }
 
-function scheduleSummary(task: ScheduledTask): string {
-  const target = targetLabels[task.config.target.type as WorkflowTarget] ?? task.config.target.type;
-  const actions = task.config.actions.map((action) => actionLabels[action as WorkflowAction] ?? action).join(" then ");
-  return `${target} · ${actions} · every ${task.interval_days} days`;
-}
-
 function targetDetail(form: WorkflowForm): string {
   if (form.target_type === "artists") {
     const artistCount = queuedArtistIds(form).length;
@@ -2560,121 +1976,6 @@ function targetDetail(form: WorkflowForm): string {
     return `Not checked for ${form.stale_target_days} days`;
   }
   return "All artists";
-}
-
-function latestScheduleRun(task: ScheduledTask, runs: WorkflowBatchRun[]): WorkflowBatchRun | null {
-  const summaryRunId = task.last_run_summary?.workflow_run_id;
-  const matchedBySummary = typeof summaryRunId === "string" ? runs.find((run) => run.id === summaryRunId) : null;
-  if (matchedBySummary) {
-    return matchedBySummary;
-  }
-  return runs.find((run) => run.schedule_id === task.id) ?? null;
-}
-
-function lastRunLabel(task: ScheduledTask, run: WorkflowBatchRun | null): string {
-  if (run) {
-    return `${run.status} · ${run.completed}/${run.total}`;
-  }
-  const summaryRunId = task.last_run_summary?.workflow_run_id;
-  if (typeof summaryRunId === "string") {
-    return summaryRunId;
-  }
-  const count = task.last_run_summary?.created_jobs;
-  return typeof count === "number" ? String(count) : task.last_job_id ?? "-";
-}
-
-function workflowJobStats(jobs: Job[]): { active: number; waiting: number } {
-  const oneTimeJobs = jobs.filter((job) => job.options.activation_scope === "one_time");
-  return {
-    active: oneTimeJobs.filter((job) => job.status === "queued" || job.status === "running").length,
-    waiting: oneTimeJobs.filter((job) => job.status === "inactive").length
-  };
-}
-
-function jobLabel(job: Job): string {
-  return job.type.replaceAll("_", " ");
-}
-
-function jobTarget(job: Job): string {
-  if (job.input_user_id) {
-    return `Artist ${job.input_user_id}`;
-  }
-  if (job.input_artwork_id) {
-    return `Artwork ${job.input_artwork_id}`;
-  }
-  return "No target";
-}
-
-function sourceLabel(source: string): string {
-  if (source === "manual_schedule" || source === "schedule") {
-    return "schedule";
-  }
-  if (source === "workflow_batch") {
-    return "manual";
-  }
-  if (source.includes("shortcut")) {
-    return "shortcut";
-  }
-  return source.replaceAll("_", " ");
-}
-
-function runTitle(run: WorkflowBatchRun): string {
-  if (run.items.length === 1) {
-    return run.items[0].title;
-  }
-  return `${run.items.length} workflow item run`;
-}
-
-function WorkflowRunStatusPill({ status }: { status: WorkflowBatchRun["status"] }): JSX.Element {
-  return <Badge tone={workflowRunTone(status)}>{status}</Badge>;
-}
-
-function workflowRunTone(status: WorkflowBatchRun["status"]): "default" | "success" | "danger" | "warning" | "muted" {
-  if (status === "completed") {
-    return "success";
-  }
-  if (status === "failed" || status === "partial") {
-    return "danger";
-  }
-  if (status === "running") {
-    return "default";
-  }
-  return "muted";
-}
-
-function workflowItemTone(status: WorkflowBatchRunItem["status"]): "default" | "success" | "danger" | "warning" | "muted" {
-  if (status === "completed") {
-    return "success";
-  }
-  if (status === "failed") {
-    return "danger";
-  }
-  if (status === "running" || status === "pending") {
-    return "default";
-  }
-  return "muted";
-}
-
-function jobStatusTone(status: Job["status"]): "default" | "success" | "danger" | "warning" | "muted" {
-  if (status === "completed") {
-    return "success";
-  }
-  if (status === "failed" || status === "cancelled") {
-    return "danger";
-  }
-  if (status === "running" || status === "queued") {
-    return "default";
-  }
-  return "muted";
-}
-
-function Detail({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div>
-      <dt className="text-xs uppercase text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-words font-medium">{value}</dd>
-    </div>
-  );
 }
 
 function toggleItem<T>(items: T[], item: T, checked: boolean): T[] {
@@ -2700,9 +2001,3 @@ function clampConcurrency(value: number): number {
   return Math.max(1, Math.floor(value));
 }
 
-function clampCustomLimit(value: number): number {
-  if (!Number.isFinite(value)) {
-    return 6;
-  }
-  return Math.max(6, Math.floor(value));
-}

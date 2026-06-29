@@ -10,6 +10,9 @@ class DashboardLibrarySummary(BaseModel):
     pending_files: int
     failed_files: int
     attention_artists: int
+    artists_with_updates: int
+    artists_with_failed_files: int
+    unavailable_artists: int
 
 
 class DashboardWorkflowSummary(BaseModel):
