@@ -6,6 +6,7 @@ import { createBrowserRouter, Navigate, RouterProvider } from "react-router-dom"
 import { AppShell } from "@/components/AppShell";
 import { ToastProvider } from "@/components/ToastProvider";
 import { useUiStore } from "@/hooks/useUiStore";
+import { AboutPage } from "@/pages/AboutPage";
 import { ArtistDetailPage } from "@/pages/ArtistDetailPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { JobsPage } from "@/pages/JobsPage";
@@ -39,7 +40,8 @@ const router = createBrowserRouter([
       { path: "jobs", element: <JobsPage /> },
       { path: "jobs/schedules", element: <Navigate to="/workflows" replace /> },
       { path: "settings", element: <SettingsPage /> },
-      { path: "logs", element: <LogsPage /> }
+      { path: "logs", element: <LogsPage /> },
+      { path: "about", element: <AboutPage /> }
     ]
   }
 ]);

@@ -4,6 +4,7 @@ import {
   Activity,
   Briefcase,
   Check,
+  CircleHelp,
   Image,
   Home,
   Library,
@@ -33,7 +34,8 @@ const navItems = [
   { to: "/library", label: "Library", icon: Library },
   { to: "/jobs", label: "Jobs", icon: Briefcase },
   { to: "/settings", label: "Settings", icon: Settings },
-  { to: "/logs", label: "Logs", icon: ScrollText }
+  { to: "/logs", label: "Logs", icon: ScrollText },
+  { to: "/about", label: "About", icon: CircleHelp }
 ];
 
 export function AppShell(): JSX.Element {
