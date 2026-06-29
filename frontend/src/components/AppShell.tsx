@@ -1,5 +1,20 @@
-import { NavLink, Outlet } from "react-router-dom";
-import { Activity, Briefcase, Home, Library, Menu, ScrollText, Settings, Workflow, X } from "lucide-react";
+import * as React from "react";
+import { Link, NavLink, Outlet } from "react-router-dom";
+import {
+  Activity,
+  Briefcase,
+  Check,
+  Home,
+  Library,
+  Menu,
+  Monitor,
+  Moon,
+  ScrollText,
+  Settings,
+  Sun,
+  Workflow,
+  X
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 
 import { getHealth } from "@/api/health";
@@ -7,6 +22,7 @@ import { listJobs } from "@/api/jobs";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useUiStore } from "@/hooks/useUiStore";
+import type { ThemeMode } from "@/lib/theme";
 import { cn, percent } from "@/lib/utils";
 
 const navItems = [
@@ -66,28 +82,12 @@ export function AppShell(): JSX.Element {
             </span>
           </div>
         </div>
-        {activeJob ? (
-          <div className="hidden items-center gap-2 md:flex">
-            <Activity className="h-4 w-4 text-primary" aria-hidden="true" />
-            <span className="max-w-44 truncate text-xs text-muted-foreground">
-              {activeJob.input_user_id ? `User ${activeJob.input_user_id}` : `Artwork ${activeJob.input_artwork_id}`}
-            </span>
-            <StatusBadge status={activeJob.status} />
-            <span className="w-10 text-right text-xs text-muted-foreground">
-              {percent(
-                activeJob.completed_files + activeJob.skipped_files + activeJob.failed_files,
-                activeJob.total_files
-              )}
-              %
-            </span>
-          </div>
-        ) : (
-          <span className="hidden text-xs text-muted-foreground md:inline">No active job</span>
-        )}
+        <ThemeModeMenu />
       </header>
 
-      <aside className="fixed bottom-0 left-0 top-14 z-30 hidden w-56 border-r bg-card lg:block">
+      <aside className="fixed bottom-0 left-0 top-14 z-30 hidden w-56 flex-col border-r bg-card lg:flex">
         <Navigation />
+        <ActiveJobStatus job={activeJob} />
       </aside>
 
       {sidebarOpen ? (
@@ -98,7 +98,7 @@ export function AppShell(): JSX.Element {
             aria-label="Close navigation"
             onClick={() => setSidebarOpen(false)}
           />
-          <aside className="absolute bottom-0 left-0 top-0 w-64 border-r bg-card shadow-lg">
+          <aside className="absolute bottom-0 left-0 top-0 flex w-64 flex-col border-r bg-card shadow-lg">
             <div className="flex h-14 items-center justify-between border-b px-4">
               <span className="text-sm font-semibold">Navigation</span>
               <Button
@@ -113,6 +113,7 @@ export function AppShell(): JSX.Element {
               </Button>
             </div>
             <Navigation onNavigate={() => setSidebarOpen(false)} />
+            <ActiveJobStatus job={activeJob} onNavigate={() => setSidebarOpen(false)} />
           </aside>
         </div>
       ) : null}
@@ -124,9 +125,78 @@ export function AppShell(): JSX.Element {
   );
 }
 
+function ThemeModeMenu(): JSX.Element {
+  const themeMode = useUiStore((state) => state.themeMode);
+  const setThemeMode = useUiStore((state) => state.setThemeMode);
+  const [open, setOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement | null>(null);
+  const options: Array<{ value: ThemeMode; label: string; icon: typeof Monitor }> = [
+    { value: "system", label: "System", icon: Monitor },
+    { value: "light", label: "Light", icon: Sun },
+    { value: "dark", label: "Dark", icon: Moon }
+  ];
+  const current = options.find((option) => option.value === themeMode) ?? options[0];
+  const CurrentIcon = current.icon;
+
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={`Theme: ${current.label}`}
+        title={`Theme: ${current.label}`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <CurrentIcon className="h-5 w-5" aria-hidden="true" />
+      </Button>
+      {open ? (
+        <div className="absolute right-0 top-11 z-50 w-40 rounded-md border bg-card p-1 text-sm shadow-lg">
+          {options.map((option) => {
+            const Icon = option.icon;
+            const selected = option.value === themeMode;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={cn(
+                  "flex h-9 w-full items-center gap-2 rounded-sm px-2 text-left text-muted-foreground hover:bg-muted hover:text-foreground",
+                  selected && "bg-secondary text-secondary-foreground"
+                )}
+                onClick={() => {
+                  setThemeMode(option.value);
+                  setOpen(false);
+                }}
+              >
+                <Icon className="h-4 w-4" aria-hidden="true" />
+                <span className="flex-1">{option.label}</span>
+                {selected ? <Check className="h-4 w-4" aria-hidden="true" /> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Navigation({ onNavigate }: { onNavigate?: () => void }): JSX.Element {
   return (
-    <nav className="space-y-1 p-3">
+    <nav className="flex-1 space-y-1 p-3">
       {navItems.map((item) => (
         <NavLink
           key={item.to}
@@ -145,5 +215,44 @@ function Navigation({ onNavigate }: { onNavigate?: () => void }): JSX.Element {
         </NavLink>
       ))}
     </nav>
+  );
+}
+
+type ActiveJob = Awaited<ReturnType<typeof listJobs>>["items"][number];
+
+function ActiveJobStatus({ job, onNavigate }: { job?: ActiveJob; onNavigate?: () => void }): JSX.Element {
+  if (!job) {
+    return (
+      <div className="border-t p-3">
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          No active job
+        </div>
+      </div>
+    );
+  }
+
+  const completed = job.completed_files + job.skipped_files + job.failed_files;
+  const progress = percent(completed, job.total_files);
+  const target = job.input_user_id ? `User ${job.input_user_id}` : `Artwork ${job.input_artwork_id}`;
+
+  return (
+    <div className="border-t p-3">
+      <Link
+        to="/jobs"
+        className="block rounded-md border bg-background px-3 py-2 transition-colors hover:bg-muted"
+        title={`Open active job: ${target}`}
+        onClick={onNavigate}
+      >
+        <div className="flex items-center gap-2">
+          <Activity className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate text-xs font-medium">{target}</span>
+          <span className="text-xs text-muted-foreground">{progress}%</span>
+        </div>
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <StatusBadge status={job.status} />
+          <span className="truncate text-xs text-muted-foreground">{completed} / {job.total_files} files</span>
+        </div>
+      </Link>
+    </div>
   );
 }
