@@ -48,7 +48,9 @@ backend/
   domain/           typed domain entities.
   repositories/     SQL access layer.
   schemas/          Pydantic request and response models.
-  services/         Pixiv, settings, workflow runs, jobs, files, and downloads.
+  services/         Workflows, jobs, Pixiv, settings, files, and downloads.
+  services/workflow_nodes/
+                    Independent advanced workflow node executors.
   workers/          in-process background job queue and download worker.
 
 frontend/
@@ -98,13 +100,17 @@ API route
   -> response schema
 ```
 
-Services own workflows and execution:
+Services own orchestration and domain behavior:
 
 - settings read/write.
-- Pixiv API access.
-- workflow planning and dispatch.
-- download job creation and recovery.
-- file download and status updates.
+- workflow planning and node-run progression.
+- job creation, queue state, and recovery.
+- Pixiv API access through Pixiv/download/library services.
+- file download and status updates through download/file services.
+
+Workflow code must not call Pixiv directly. A workflow node either transforms
+workflow context locally or creates persisted jobs. Jobs and workers are the
+boundary that call Pixiv-facing services.
 
 Repositories own SQL:
 
@@ -136,23 +142,61 @@ The backend serves built files directly. During development, Vite runs separatel
 
 ## Workflows, Jobs, And Events
 
-The maintained execution model is:
+The maintained advanced execution model is:
 
 ```text
 WorkflowRun
-  -> WorkflowRunItem
-      -> Job
+  -> WorkflowNodeRun
+      -> Job[]
           -> JobEvent
 ```
 
-Workflow runs represent user intent and orchestration. A workflow target can be a
-single artist, a single artwork, all artists, artists with tags, or stale artists.
-Workflow actions such as sync, download, and retry failed files are expanded into
-one or more persisted jobs.
+Workflow runs represent user intent and orchestration. Workflow node runs are
+the executable stages in a workflow. Each node has isolated input, output,
+status, error, and linked job IDs.
 
-Library and Download page shortcuts are workflow shortcuts. For example, syncing
-one artist from the Library creates a workflow run with a single artist target and
-a `sync_artist` action, then dispatches a `sync_artist` job.
+The advanced linear workflow currently uses these node types:
+
+```text
+artist_target
+sync_metadata
+collect_artworks
+filter_artworks
+execute_actions
+file_output
+```
+
+The workflow runner owns only orchestration:
+
+```text
+create run
+create node runs
+load previous node output into context
+execute the next ready node executor
+wait for linked jobs to become terminal
+derive run status from node-run status
+```
+
+Node executors live under `backend/services/workflow_nodes/`. Each executor owns
+one module's config parsing and output shape. Heavy work is expressed by
+creating jobs, not by calling Pixiv or downloading files directly.
+
+Jobs are persisted execution units. A single workflow node can create zero, one,
+or many jobs. Jobs remain responsible for queueing, cancellation, retry,
+progress, and worker execution.
+
+Pixiv-facing behavior stays below the job layer:
+
+```text
+WorkflowNodeRun
+  -> Job
+      -> worker
+          -> download_service / library_sync_service / Pixiv client
+```
+
+Basic workflow items are no longer the primary runtime model. They may exist as
+a UI/editor convenience, but the runtime boundary is
+`WorkflowRun -> WorkflowNodeRun -> Job[]`.
 
 Scheduled tasks are triggers, not jobs. When a schedule is due, it creates jobs
 from its stored workflow config. One-time workflow runs and scheduled tasks both
@@ -170,9 +214,9 @@ queued -> running -> cancelled
 
 Job progress and events are stored in SQLite and exposed to the WebUI by API/WebSocket endpoints.
 
-Workflow run status is aggregated from linked job statuses. A run stays `running`
-while any linked job is inactive, queued, or running, and reaches `completed`,
-`failed`, `partial`, or `skipped` after its items reach terminal states.
+Workflow run status is aggregated from node-run statuses. A run stays `running`
+while any node is pending or running, and reaches `completed`, `failed`,
+`partial`, or `skipped` after node runs reach terminal states.
 
 ## Legacy Data Import
 

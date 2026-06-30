@@ -13,7 +13,9 @@ from backend.repositories.workflow_run_repository import (
     WorkflowRunRepository,
 )
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
-from backend.services.job_service import JobService, WorkflowJobLink
+from backend.services.workflow_nodes import default_node_registry
+from backend.services.workflow_nodes.base import WorkflowNodeContext, WorkflowNodeExecutor
+from backend.services.workflow_nodes.utils import dict_option
 
 ACTIVE_JOB_STATUSES = {"inactive", "queued", "running"}
 FAILED_JOB_STATUSES = {"failed", "cancelled"}
@@ -25,10 +27,12 @@ class AdvancedWorkflowRunner:
         db_path: Path | str | None = None,
         *,
         settings_json_path: Path | str | None = None,
+        node_registry: dict[str, WorkflowNodeExecutor] | None = None,
     ) -> None:
         self.db_path = db_path
         self.settings_json_path = settings_json_path
         self.repository = WorkflowRunRepository(db_path)
+        self.node_registry = node_registry or default_node_registry()
 
     def create_run(self, definition: AdvancedWorkflowDefinitionRequest) -> WorkflowRun:
         if not definition.nodes:
@@ -135,98 +139,30 @@ class AdvancedWorkflowRunner:
         item_id: int | None,
     ) -> WorkflowNodeRun:
         config = dict_option(node_run.input.get("config"))
-        if node_run.node_type == "artist_target":
-            output = {
-                "artist_ids": string_list(config.get("artist_ids")),
-                "artwork_ids": string_list(config.get("artwork_ids")),
-                "target_scope": str(config.get("scope") or "selected"),
-                "max_artists": positive_int(config.get("max_artists")),
-            }
-            return self._complete(node_run, output)
-        if node_run.node_type == "sync_metadata":
-            output = {
-                "sync_mode": str(config.get("mode") or "incremental"),
-            }
-            return self._complete(node_run, output)
-        if node_run.node_type == "collect_artworks":
-            output = {
-                "collect_mode": str(config.get("mode") or "new"),
-                "max_artworks": positive_int(config.get("max_artworks")),
-                "min_artwork_id": string_or_none(config.get("min_artwork_id")),
-                "max_artwork_id": string_or_none(config.get("max_artwork_id")),
-            }
-            return self._complete(node_run, output)
-        if node_run.node_type == "filter_artworks":
-            output = {
-                "filters": config,
-            }
-            return self._complete(node_run, output)
-        if node_run.node_type == "execute_actions":
-            return self._start_action_jobs(node_run, config, context, item_id=item_id)
-        if node_run.node_type == "file_output":
-            output = {
-                "naming_rule": string_or_none(config.get("naming_rule")),
-                "summary": "Workflow output recorded.",
-            }
-            return self._complete(node_run, output)
-        return self._complete(node_run, {"ignored": True})
-
-    def _start_action_jobs(
-        self,
-        node_run: WorkflowNodeRun,
-        config: dict[str, object],
-        context: dict[str, object],
-        *,
-        item_id: int | None,
-    ) -> WorkflowNodeRun:
-        artist_ids = tuple(string_list(context.get("artist_ids")))
-        artwork_ids = tuple(string_list(context.get("artwork_ids")))
-        actions = tuple(action_list(config.get("actions")))
-        if not artist_ids and not artwork_ids:
-            return self._complete(node_run, {"job_ids": [], "message": "No artist targets."})
-        download_options = {
-            "full_download": context.get("collect_mode") == "all_local",
-            "pending_only": context.get("collect_mode") == "new",
-            "max_artworks": context.get("max_artworks"),
-            "min_artwork_id": context.get("min_artwork_id"),
-            "max_artwork_id": context.get("max_artwork_id"),
-            "naming_rule": config.get("naming_rule") or context.get("naming_rule"),
-            "stop_if_artwork_count_above": dict_option(context.get("filters")).get(
-                "stop_above_limit"
+        executor = self.node_registry.get(node_run.node_type)
+        if executor is None:
+            return self._complete(node_run, {"ignored": True})
+        result = executor.execute(
+            node_run,
+            config,
+            WorkflowNodeContext(
+                db_path=self.db_path,
+                settings_json_path=self.settings_json_path,
+                workflow_item_id=item_id,
+                values=context,
             ),
-        }
-        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
-        try:
-            job = service.create_resolve_artist_targets_job(
-                artist_ids=artist_ids,
-                artwork_ids=artwork_ids,
-                actions=actions,
-                download_options=download_options,
-                max_targets_per_run=positive_int(context.get("max_artists")) or max(
-                    1,
-                    len(artist_ids) + len(artwork_ids),
-                ),
-                options=download_options,
-                workflow_link=WorkflowJobLink(
-                    run_id=node_run.workflow_run_id,
-                    item_id=item_id,
-                    source="advanced_workflow",
-                ),
-            )
-        finally:
-            service.close()
-        job_ids = [] if job is None else [job.id]
-        if not job_ids:
-            return self._complete(node_run, {"job_ids": []})
-        updated = replace(
+        )
+        if not result.job_ids:
+            return self._complete(node_run, result.output)
+        running = replace(
             node_run,
             status="running",
-            job_ids=job_ids,
-            output={"job_ids": job_ids, "actions": list(actions)},
+            job_ids=result.job_ids,
+            output=result.output,
         )
-        self.repository.update_node_run(updated)
-        self._sync_item_jobs(node_run.workflow_run_id, item_id, job_ids)
-        return updated
+        self.repository.update_node_run(running)
+        self._sync_item_jobs(node_run.workflow_run_id, item_id, result.job_ids)
+        return running
 
     def _refresh_node_jobs(self, node_run: WorkflowNodeRun) -> WorkflowNodeRun:
         repository = JobRepository(self.db_path)
@@ -317,37 +253,6 @@ class AdvancedWorkflowRunner:
             merged = dedupe([*item.job_ids, *job_ids])
             self.repository.update_item(replace(item, status="running", job_ids=merged))
             break
-
-
-def dict_option(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
-
-
-def string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
-def action_list(value: object) -> list[str]:
-    valid_actions = {"download_artist", "sync_artist", "retry_failed_artist"}
-    actions = [action for action in string_list(value) if action in valid_actions]
-    return actions or ["download_artist"]
-
-
-def string_or_none(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip()
-    return text or None
-
-
-def positive_int(value: object) -> int | None:
-    try:
-        parsed = int(str(value))
-    except (TypeError, ValueError):
-        return None
-    return parsed if parsed > 0 else None
 
 
 def dedupe(values: list[str]) -> list[str]:

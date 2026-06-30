@@ -70,6 +70,7 @@ Main WebUI tables:
 - `job_events`
 - `workflow_runs`
 - `workflow_run_items`
+- `workflow_node_runs`
 - `settings`
 
 `artists.latest_downloaded_artwork_id` stores the latest artwork ID reached by incremental artist downloads.
@@ -92,20 +93,35 @@ The old database is read-only during import. The WebUI continues to use `resourc
 
 ## Job And File State
 
-Workflow runs are persisted so the UI can show orchestration history. Workflow
-items store the expanded target/action entries and the job IDs they dispatched.
+Workflow runs are persisted so the UI can show orchestration history. Advanced
+workflow execution is stored as node runs. Each `workflow_node_runs` row records
+one module execution:
+
+```text
+node_id
+node_type
+position
+status
+input_json
+output_json
+job_ids_json
+error_message
+```
+
+Workflow items are retained for older/basic entry points, but they are not the
+primary runtime boundary for advanced workflows.
 
 Jobs are persisted so the UI can show execution history and progress. Jobs
-created by workflows store explicit links:
+created by workflow nodes store workflow links:
 
 ```text
 jobs.workflow_run_id   -> workflow_runs.id
-jobs.workflow_item_id  -> workflow_run_items.id
-jobs.workflow_source   -> source shortcut or batch name
+jobs.workflow_item_id  -> compatibility item for the run
+jobs.workflow_source   -> advanced_workflow or another source label
 ```
 
-The same values are also kept in `jobs.options_json` for compatibility with
-older code paths.
+The canonical advanced node-to-job link is currently
+`workflow_node_runs.job_ids_json`.
 
 Common job statuses:
 
@@ -128,8 +144,9 @@ partial
 skipped
 ```
 
-Workflow run status is derived from linked jobs. A run remains `running` while
-any linked job is inactive, queued, or running.
+Workflow run status is derived from node runs. A run remains `running` while any
+node run is pending or running. Node runs that create jobs remain running until
+their linked jobs become terminal.
 
 Artwork file statuses:
 

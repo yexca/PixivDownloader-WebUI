@@ -73,14 +73,47 @@ The job is linked to the workflow run through `workflow_run_id` and
 ```text
 POST /api/workflows/run
 POST /api/workflows/runs
+POST /api/workflows/advanced/runs
 GET  /api/workflows/runs
 GET  /api/workflows/runs/{run_id}
 ```
 
-Workflow runs represent orchestration. A run expands targets and actions into
-workflow items, then dispatches jobs. Run status is aggregated from linked jobs:
-active jobs keep the run `running`; terminal jobs move the run to `completed`,
-`failed`, `partial`, or `skipped`.
+Workflow runs represent orchestration. Advanced runs execute workflow nodes in
+linear order. A node may transform context locally or create jobs. Run status is
+aggregated from node-run statuses: pending or running nodes keep the run
+`running`; terminal nodes move the run to `completed`, `failed`, `partial`, or
+`skipped`.
+
+`POST /api/workflows/advanced/runs` accepts:
+
+```json
+{
+  "definition": {
+    "name": "Artist download pipeline",
+    "nodes": [
+      {
+        "id": "target",
+        "type": "artist_target",
+        "title": "Target artists",
+        "config": {
+          "artist_ids": ["123456"],
+          "max_artists": 1
+        }
+      },
+      {
+        "id": "actions",
+        "type": "execute_actions",
+        "title": "Execute actions",
+        "config": {
+          "actions": ["download_artist"]
+        }
+      }
+    ]
+  }
+}
+```
+
+Run responses include both compatibility `items` and advanced `node_runs`.
 
 ## Jobs
 
