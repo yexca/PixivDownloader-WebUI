@@ -100,8 +100,9 @@ run-webui.bat
 
 The script runtime uses:
 
-- `%UserProfile%\Miniconda3` as the Miniconda installation.
-- `env/` as the project-local Python environment.
+- `env/conda` as the local Miniconda installation.
+- `env/python` as the project-local Python runtime.
+- `env/node` as the local Node.js runtime used for frontend builds.
 - `frontend/dist` as the built WebUI.
 - `config/` as the local WebUI configuration folder.
 - `resources/` as the local database and resource folder.

@@ -23,7 +23,7 @@ Normal local runtime:
 
 ```text
 run-webui.bat
-  -> env\python.exe -m backend.app
+  -> env\python\python.exe -m backend.app
   -> FastAPI on http://127.0.0.1:7653
   -> serves frontend/dist
   -> opens the browser

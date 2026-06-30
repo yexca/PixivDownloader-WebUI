@@ -58,7 +58,7 @@ Run:
 run-webui.bat
 ```
 
-The script checks that `env\python.exe` and `frontend\dist\index.html` exist, starts the backend, and opens <http://127.0.0.1:7653>.
+The script checks that `env\python\python.exe` and `frontend\dist\index.html` exist, starts the backend, and opens <http://127.0.0.1:7653>.
 
 Set `PIXIVDOWNLOADER_PORT` before running the script if you need a different local port.
 
@@ -96,7 +96,7 @@ config\settings.json
 Legacy `resources\conf\settings.json` is not read automatically. To migrate it explicitly:
 
 ```bat
-env\python.exe tools\migrate_settings_to_config.py
+env\python\python.exe tools\migrate_settings_to_config.py
 ```
 
 Use `--overwrite` if `config\settings.json` already exists.
@@ -106,7 +106,7 @@ Use `--overwrite` if `config\settings.json` already exists.
 Backend dev server:
 
 ```bat
-env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
+env\python\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 Frontend dev server:
@@ -119,9 +119,9 @@ npm run dev
 Manual checks:
 
 ```bat
-env\python.exe -m ruff format --check .
-env\python.exe -m ruff check .
-env\python.exe -m pytest
+env\python\python.exe -m ruff format --check .
+env\python\python.exe -m ruff check .
+env\python\python.exe -m pytest
 ```
 
 ```bat

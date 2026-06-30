@@ -35,7 +35,7 @@ backend/db/migrations/
 Manual run:
 
 ```bat
-env\python.exe -m backend.db.migrate
+env\python\python.exe -m backend.db.migrate
 ```
 
 Startup flow:
@@ -151,13 +151,13 @@ failed
 6. Run:
 
 ```bat
-env\python.exe -m pytest tests\test_database_migrations.py
+env\python\python.exe -m pytest tests\test_database_migrations.py
 ```
 
 Full check:
 
 ```bat
-env\python.exe -m ruff format --check .
-env\python.exe -m ruff check .
-env\python.exe -m pytest
+env\python\python.exe -m ruff format --check .
+env\python\python.exe -m ruff check .
+env\python\python.exe -m pytest
 ```

@@ -8,12 +8,12 @@ Install the local environment:
 run-install.bat
 ```
 
-This creates `env/`, installs Python dependencies, installs frontend dependencies, and builds `frontend/dist`.
+This creates local runtimes under `env/`, installs Python dependencies into `env/python`, installs frontend dependencies with `env/node`, and builds `frontend/dist`.
 
 ## Backend Development
 
 ```bat
-env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
+env\python\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 The backend runs with Uvicorn reload on:
@@ -36,9 +36,9 @@ Vite proxies API and WebSocket traffic to the backend. Keep the backend running 
 Python:
 
 ```bat
-env\python.exe -m ruff format --check .
-env\python.exe -m ruff check .
-env\python.exe -m pytest
+env\python\python.exe -m ruff format --check .
+env\python\python.exe -m ruff check .
+env\python\python.exe -m pytest
 ```
 
 Frontend:
@@ -53,7 +53,7 @@ npm run build
 Database migration tests:
 
 ```bat
-env\python.exe -m pytest tests\test_database_migrations.py
+env\python\python.exe -m pytest tests\test_database_migrations.py
 ```
 
 ## Code Organization
@@ -117,11 +117,7 @@ docker compose down
 
 ## Troubleshooting
 
-If `npm` is missing, install Node.js LTS from:
-
-```text
-https://nodejs.org/
-```
+If frontend installation or build fails, rerun `run-install.bat` to restore the local `env\node` runtime and rebuild the assets.
 
 If Docker Compose cannot connect to the engine, start Docker Desktop first.
 

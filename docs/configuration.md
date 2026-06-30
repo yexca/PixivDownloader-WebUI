@@ -31,7 +31,7 @@ Legacy `resources/conf/settings.json` is not read by the WebUI. Use the explicit
 migration tool if you need to copy old settings:
 
 ```bat
-env\python.exe tools\migrate_settings_to_config.py
+env\python\python.exe tools\migrate_settings_to_config.py
 ```
 
 ## Important Settings

@@ -4,7 +4,7 @@ title PixivDownloader WebUI
 
 set "INSTALL_DIR=%~dp0"
 set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
-set "ENV_PYTHON=%INSTALL_DIR%\env\python.exe"
+set "ENV_PYTHON=%INSTALL_DIR%\env\python\python.exe"
 set "FRONTEND_INDEX=%INSTALL_DIR%\frontend\dist\index.html"
 if "%PIXIVDOWNLOADER_PORT%"=="" set "PIXIVDOWNLOADER_PORT=7653"
 set "APP_URL=http://127.0.0.1:%PIXIVDOWNLOADER_PORT%"

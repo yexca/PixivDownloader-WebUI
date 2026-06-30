@@ -58,7 +58,7 @@ WebUI を起動します:
 run-webui.bat
 ```
 
-スクリプトは `env\python.exe` と `frontend\dist\index.html` を確認し、バックエンドを起動して <http://127.0.0.1:7653> を開きます。
+スクリプトは `env\python\python.exe` と `frontend\dist\index.html` を確認し、バックエンドを起動して <http://127.0.0.1:7653> を開きます。
 
 別のローカルポートを使う場合は、スクリプト実行前に `PIXIVDOWNLOADER_PORT` を設定してください。
 
@@ -96,7 +96,7 @@ config\settings.json
 旧 `resources\conf\settings.json` は自動では読み込まれません。必要な場合は明示的に移行してください:
 
 ```bat
-env\python.exe tools\migrate_settings_to_config.py
+env\python\python.exe tools\migrate_settings_to_config.py
 ```
 
 `config\settings.json` がすでに存在する場合は `--overwrite` を使用できます。
@@ -106,7 +106,7 @@ env\python.exe tools\migrate_settings_to_config.py
 バックエンド開発サーバー:
 
 ```bat
-env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
+env\python\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 フロントエンド開発サーバー:
@@ -119,9 +119,9 @@ npm run dev
 チェックコマンド:
 
 ```bat
-env\python.exe -m ruff format --check .
-env\python.exe -m ruff check .
-env\python.exe -m pytest
+env\python\python.exe -m ruff format --check .
+env\python\python.exe -m ruff check .
+env\python\python.exe -m pytest
 ```
 
 ```bat

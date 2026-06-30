@@ -5,9 +5,9 @@ Use this checklist before handing off changes.
 ## Automated Python Checks
 
 ```bat
-env\python.exe -m ruff format --check .
-env\python.exe -m ruff check .
-env\python.exe -m pytest
+env\python\python.exe -m ruff format --check .
+env\python\python.exe -m ruff check .
+env\python\python.exe -m pytest
 ```
 
 Expected current baseline:
@@ -32,7 +32,7 @@ If `npm` is not available on the machine but `frontend/node_modules` exists, equ
 ## Backend Smoke Test
 
 ```bat
-env\python.exe -m uvicorn backend.app:create_app --factory --host 127.0.0.1 --port 7653
+env\python\python.exe -m uvicorn backend.app:create_app --factory --host 127.0.0.1 --port 7653
 ```
 
 Then check:

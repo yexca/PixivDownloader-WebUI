@@ -51,9 +51,9 @@ For the Windows script workflow:
 
 - Windows.
 - Internet access for Python, frontend, and Pixiv dependencies.
-- Node.js LTS on `PATH` for frontend installation and build.
+- Internet access for the installer to download the local Node.js runtime and frontend dependencies.
 
-`run-install.bat` installs Miniconda if needed and creates the local Python environment under `env/`. It does not use global Python.
+`run-install.bat` installs local runtimes under `env/`, including `env/conda`, `env/python`, and `env/node`. It does not use global Python or Node.js.
 
 ## Windows Script Install
 
@@ -65,10 +65,10 @@ run-install.bat
 
 The installer:
 
-1. Installs Miniconda to `%UserProfile%\Miniconda3` if missing.
-2. Creates `env/` in the project root.
-3. Installs backend dependencies into `env/`.
-4. Installs frontend dependencies with `npm`.
+1. Installs Miniconda to `env/conda` if missing.
+2. Creates `env/python` in the project root.
+3. Installs backend dependencies into `env/python`.
+4. Installs frontend dependencies with the local `env/node/npm.cmd` runtime.
 5. Builds frontend assets into `frontend/dist`.
 
 ## Run The WebUI With Scripts

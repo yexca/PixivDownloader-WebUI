@@ -7,12 +7,18 @@ echo.
 
 set "INSTALL_DIR=%~dp0"
 set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
-set "MINICONDA_DIR=%UserProfile%\Miniconda3"
 set "ENV_DIR=%INSTALL_DIR%\env"
+set "MINICONDA_DIR=%ENV_DIR%\conda"
+set "PYTHON_DIR=%ENV_DIR%\python"
 set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-py312_25.11.1-1-Windows-x86_64.exe"
 set "CONDA_EXE=%MINICONDA_DIR%\Scripts\conda.exe"
 set "CONDA_BAT=%MINICONDA_DIR%\condabin\conda.bat"
-set "ENV_PYTHON=%ENV_DIR%\python.exe"
+set "ENV_PYTHON=%PYTHON_DIR%\python.exe"
+set "NODE_VERSION=v22.12.0"
+set "NODE_DIR=%ENV_DIR%\node"
+set "NODE_ZIP=%ENV_DIR%\node.zip"
+set "NODE_URL=https://nodejs.org/dist/%NODE_VERSION%/node-%NODE_VERSION%-win-x64.zip"
+set "NPM_CMD=%NODE_DIR%\npm.cmd"
 
 set "startTime=%TIME%"
 set "startHour=%TIME:~0,2%"
@@ -24,9 +30,12 @@ set /a startSec=1%startSec% - 100
 set /a startTotal=startHour*3600 + startMin*60 + startSec
 
 cd /d "%INSTALL_DIR%"
+if not exist "%ENV_DIR%" mkdir "%ENV_DIR%"
+call :prepare_env_layout || goto :error
 call :install_miniconda || goto :error
 call :create_conda_env || goto :error
 call :install_backend_dependencies || goto :error
+call :install_node || goto :error
 call :install_frontend_dependencies || goto :error
 call :build_frontend || goto :error
 
@@ -50,6 +59,32 @@ echo PixivDownloader WebUI has been installed successfully.
 echo To start the WebUI, run run-webui.bat.
 echo.
 pause
+exit /b 0
+
+:prepare_env_layout
+if exist "%ENV_DIR%\python.exe" if not exist "%ENV_PYTHON%" (
+    echo A legacy env layout was found at "%ENV_DIR%".
+    echo The installer now uses:
+    echo   env\conda
+    echo   env\python
+    echo   env\node
+    echo.
+    set /p RESET_ENV=Delete the old env folder and reinstall local runtimes? [y/N]:
+    if /i "!RESET_ENV!"=="Y" (
+        echo Removing old env folder...
+        rmdir /s /q "%ENV_DIR%"
+        if exist "%ENV_DIR%" (
+            echo Failed to remove the old env folder. Close terminals or editors using it and try again.
+            exit /b 1
+        )
+        mkdir "%ENV_DIR%"
+        echo Old env folder removed.
+        echo.
+        exit /b 0
+    )
+    echo Installation cancelled. Please remove or rename the old env folder, then run this installer again.
+    exit /b 1
+)
 exit /b 0
 
 :install_miniconda
@@ -80,16 +115,16 @@ exit /b 0
 
 :create_conda_env
 if exist "%ENV_PYTHON%" (
-    echo Local environment already exists at "%ENV_DIR%".
+    echo Local Python environment already exists at "%PYTHON_DIR%".
     echo.
     exit /b 0
 )
 
 echo Creating local Conda environment...
 if exist "%MINICONDA_DIR%\_conda.exe" (
-    call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=3.12
+    call "%MINICONDA_DIR%\_conda.exe" create --no-shortcuts -y -k --prefix "%PYTHON_DIR%" python=3.12
 ) else (
-    call "%CONDA_EXE%" create --no-shortcuts -y -k --prefix "%ENV_DIR%" python=3.12
+    call "%CONDA_EXE%" create --no-shortcuts -y -k --prefix "%PYTHON_DIR%" python=3.12
 )
 if errorlevel 1 (
     echo Failed to create the local Conda environment.
@@ -107,7 +142,7 @@ if not exist "%ENV_PYTHON%" (
     exit /b 1
 )
 
-echo Installing backend dependencies into the local env folder...
+echo Installing backend dependencies into the local Python runtime...
 "%ENV_PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 exit /b 1
 
@@ -118,16 +153,30 @@ echo Backend dependencies installation complete.
 echo.
 exit /b 0
 
-:install_frontend_dependencies
-where npm >nul 2>nul
-if errorlevel 1 (
-    echo npm was not found.
-    echo Please install the current Windows LTS version of Node.js from https://nodejs.org/
-    echo Then run this installer again.
+:install_node
+if exist "%NPM_CMD%" (
+    echo Local Node.js already exists at "%NODE_DIR%".
     echo.
+    exit /b 0
+)
+
+echo Installing local Node.js into "%NODE_DIR%"...
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $ErrorActionPreference = 'Stop'; $zip = '%NODE_ZIP%'; $extract = '%ENV_DIR%\node-extract'; $nodeDir = '%NODE_DIR%'; if (Test-Path $zip) { Remove-Item -LiteralPath $zip -Force }; if (Test-Path $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }; if (Test-Path $nodeDir) { Remove-Item -LiteralPath $nodeDir -Recurse -Force }; Invoke-WebRequest -Uri '%NODE_URL%' -OutFile $zip; Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force; $expanded = Get-ChildItem -LiteralPath $extract -Directory | Select-Object -First 1; if (-not $expanded) { throw 'Node.js archive did not contain an extracted directory.' }; Move-Item -LiteralPath $expanded.FullName -Destination $nodeDir; Remove-Item -LiteralPath $extract -Recurse -Force; Remove-Item -LiteralPath $zip -Force }"
+if errorlevel 1 (
+    echo Node.js installation failed.
     exit /b 1
 )
 
+if not exist "%NPM_CMD%" (
+    echo npm was not found after installing local Node.js.
+    exit /b 1
+)
+
+echo Local Node.js installation complete.
+echo.
+exit /b 0
+
+:install_frontend_dependencies
 if not exist "%INSTALL_DIR%\frontend\package.json" (
     echo Frontend package.json was not found.
     exit /b 1
@@ -136,9 +185,9 @@ if not exist "%INSTALL_DIR%\frontend\package.json" (
 echo Installing frontend dependencies...
 cd /d "%INSTALL_DIR%\frontend"
 if exist "package-lock.json" (
-    call npm ci
+    call "%NPM_CMD%" ci
 ) else (
-    call npm install
+    call "%NPM_CMD%" install
 )
 if errorlevel 1 exit /b 1
 
@@ -150,7 +199,7 @@ exit /b 0
 :build_frontend
 echo Building frontend assets...
 cd /d "%INSTALL_DIR%\frontend"
-call npm run build
+call "%NPM_CMD%" run build
 if errorlevel 1 exit /b 1
 
 cd /d "%INSTALL_DIR%"
