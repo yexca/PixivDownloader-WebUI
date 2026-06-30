@@ -1,86 +1,54 @@
 import * as React from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Copy,
-  DatabaseBackup,
-  Edit3,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  Image,
-  KeyRound,
-  Loader2,
-  Monitor,
-  Moon,
-  Palette,
-  Plus,
-  RefreshCw,
-  Save,
-  ShieldCheck,
-  Sun,
-  Trash2,
-  Undo2
-} from "lucide-react";
+import { Copy, DatabaseBackup } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
-  getSettings,
   completePixivAuth,
   getPixivBrowserAuthServiceStatus,
   getPixivBrowserAuthStatus,
+  getSettings,
   importLegacyDatabase,
   refreshPixivAuth,
-  startPixivBrowserAuth,
   startPixivAuth,
+  startPixivBrowserAuth,
   testPixivConnection,
   updateSettings,
   validatePixivAuth,
-  type PixivBrowserAuthStartResponse,
-  type PixivBrowserAuthServiceStatusResponse,
   type PixivAuthStartResponse,
-  type SettingsResponse,
-  type SettingsUpdateRequest
+  type PixivBrowserAuthStartResponse
 } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { useUiStore } from "@/hooks/useUiStore";
+import { BasicSettingsTab } from "@/pages/settings/BasicSettingsTab";
 import {
-  allThemePresets,
-  type AppearanceSettings,
-  type ColorScheme,
-  type ThemePreset,
-  type ThemePresetIcon
-} from "@/lib/theme";
+  copyCommand,
+  getPixivPostRedirectReturnTo,
+  isPixivAuthStartUrl,
+  notConfiguredAuthStatus,
+  notConfiguredConnectionStatus,
+  resetTestStatuses,
+  toBasicForm,
+  validateBasic,
+  type AuthBrowserDialog,
+  type BasicForm,
+  type SettingsTab,
+  type TestStatus
+} from "@/pages/settings/shared";
 
-type SettingsTab = "basic" | "pixiv" | "appearance" | "advanced";
-type BasicForm = Pick<
-  SettingsUpdateRequest,
-  | "download_path"
-  | "request_base_delay_seconds"
-  | "request_random_delay_seconds"
-  | "file_download_base_delay_seconds"
-  | "file_download_random_delay_seconds"
-  | "max_concurrent_downloads"
-  | "max_active_scheduled_tasks"
-  | "max_active_one_time_tasks"
-  | "min_free_space_gb"
-  | "library_stale_check_days"
-  | "existing_file_behavior"
->;
-type TestStatusState = "unconfigured" | "untested" | "checking" | "valid" | "invalid";
-
-type TestStatus = {
-  state: TestStatusState;
-  message: string;
-  checkedAt?: Date;
-};
+const PixivSettingsTab = React.lazy(() =>
+  import("@/pages/settings/PixivSettingsTab").then((module) => ({ default: module.PixivSettingsTab }))
+);
+const AppearanceSettingsTab = React.lazy(() =>
+  import("@/pages/settings/AppearanceSettingsTab").then((module) => ({ default: module.AppearanceSettingsTab }))
+);
+const AdvancedSettingsTab = React.lazy(() =>
+  import("@/pages/settings/AdvancedSettingsTab").then((module) => ({ default: module.AdvancedSettingsTab }))
+);
 
 class AuthBrowserUnavailableError extends Error {
   constructor(message: string) {
@@ -354,8 +322,7 @@ export function SettingsPage(): JSX.Element {
       void queryClient.invalidateQueries({ queryKey: ["artists"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
     },
-    onError: (error) =>
-      pushToast({ title: "Legacy database import failed", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Legacy database import failed", description: error.message, tone: "error" })
   });
 
   const submitBasic = (event: React.FormEvent<HTMLFormElement>) => {
@@ -416,74 +383,76 @@ export function SettingsPage(): JSX.Element {
               />
             ) : null}
 
-            {activeTab === "pixiv" ? (
-              <PixivSettingsTab
-                authCode={authCode}
-                authFlow={authFlow}
-                browserAuthFlow={browserAuthFlow}
-                completeAuthPending={completeAuthMutation.isPending}
-                hasIntermediatePixivUrl={hasIntermediatePixivUrl}
-                isPixivStartUrl={isPixivStartUrl}
-                pixivReturnToUrl={pixivReturnToUrl}
-                refreshAuthPending={refreshAuthMutation.isPending}
-                refreshToken={refreshToken}
-                saveTokenPending={saveTokenMutation.isPending}
-                settings={settings.data}
-                showToken={showToken}
-                startBrowserAuthPending={startBrowserAuthMutation.isPending}
-                startManualAuthPending={startManualAuthMutation.isPending}
-                authTestStatus={authTestStatus}
-                connectionTestStatus={connectionTestStatus}
-                onAuthCodeChange={setAuthCode}
-                onCancelAuthFlow={() => setAuthFlow(null)}
-                onCompleteAuth={() =>
-                  authFlow
-                    ? completeAuthMutation.mutate({
-                        flow_id: authFlow.flow_id,
-                        code_or_callback_url: authCode.trim()
-                      })
-                    : undefined
-                }
-                onDismissBrowserFlow={() => setBrowserAuthFlow(null)}
-                onOpenBrowserFlow={() =>
-                  browserAuthFlow ? window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer") : undefined
-                }
-                onOpenContinueUrl={() =>
-                  pixivReturnToUrl ? window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer") : undefined
-                }
-                onRefreshAuth={() => refreshAuthMutation.mutate()}
-                onRefreshTokenChange={setRefreshToken}
-                onRunAuthTest={() => void runAuthTest({ notify: true })}
-                onRunConnectionTest={() => void runConnectionTest({ notify: true })}
-                onSaveManualToken={saveManualToken}
-                onStartBrowserAuth={() => startBrowserAuthMutation.mutate()}
-                onToggleToken={() => setShowToken((value) => !value)}
-              />
-            ) : null}
+            <React.Suspense fallback={<DataState title="Loading settings tab" variant="loading" />}>
+              {activeTab === "pixiv" ? (
+                <PixivSettingsTab
+                  authCode={authCode}
+                  authFlow={authFlow}
+                  browserAuthFlow={browserAuthFlow}
+                  completeAuthPending={completeAuthMutation.isPending}
+                  hasIntermediatePixivUrl={hasIntermediatePixivUrl}
+                  isPixivStartUrl={isPixivStartUrl}
+                  pixivReturnToUrl={pixivReturnToUrl}
+                  refreshAuthPending={refreshAuthMutation.isPending}
+                  refreshToken={refreshToken}
+                  saveTokenPending={saveTokenMutation.isPending}
+                  settings={settings.data}
+                  showToken={showToken}
+                  startBrowserAuthPending={startBrowserAuthMutation.isPending}
+                  startManualAuthPending={startManualAuthMutation.isPending}
+                  authTestStatus={authTestStatus}
+                  connectionTestStatus={connectionTestStatus}
+                  onAuthCodeChange={setAuthCode}
+                  onCancelAuthFlow={() => setAuthFlow(null)}
+                  onCompleteAuth={() =>
+                    authFlow
+                      ? completeAuthMutation.mutate({
+                          flow_id: authFlow.flow_id,
+                          code_or_callback_url: authCode.trim()
+                        })
+                      : undefined
+                  }
+                  onDismissBrowserFlow={() => setBrowserAuthFlow(null)}
+                  onOpenBrowserFlow={() =>
+                    browserAuthFlow ? window.open(browserAuthFlow.novnc_url, "_blank", "noopener,noreferrer") : undefined
+                  }
+                  onOpenContinueUrl={() =>
+                    pixivReturnToUrl ? window.open(pixivReturnToUrl, "_blank", "noopener,noreferrer") : undefined
+                  }
+                  onRefreshAuth={() => refreshAuthMutation.mutate()}
+                  onRefreshTokenChange={setRefreshToken}
+                  onRunAuthTest={() => void runAuthTest({ notify: true })}
+                  onRunConnectionTest={() => void runConnectionTest({ notify: true })}
+                  onSaveManualToken={saveManualToken}
+                  onStartBrowserAuth={() => startBrowserAuthMutation.mutate()}
+                  onToggleToken={() => setShowToken((value) => !value)}
+                />
+              ) : null}
 
-            {activeTab === "appearance" ? (
-              <AppearanceSettingsTab
-                activePreset={activeThemePreset}
-                customPresets={customThemePresets}
-                settings={appearanceSettings}
-                onCreatePreset={createThemePreset}
-                onDeletePreset={deleteThemePreset}
-                onSetActivePreset={setActiveThemePreset}
-                onSetFollowSystem={setFollowSystemTheme}
-                onSetSystemPreset={setSystemThemePreset}
-                onUpdatePreset={updateThemePreset}
-              />
-            ) : null}
+              {activeTab === "appearance" ? (
+                <AppearanceSettingsTab
+                  activePreset={activeThemePreset}
+                  customPresets={customThemePresets}
+                  settings={appearanceSettings}
+                  onCreatePreset={createThemePreset}
+                  onDeletePreset={deleteThemePreset}
+                  onSetActivePreset={setActiveThemePreset}
+                  onSetFollowSystem={setFollowSystemTheme}
+                  onSetSystemPreset={setSystemThemePreset}
+                  onUpdatePreset={updateThemePreset}
+                />
+              ) : null}
 
-            {activeTab === "advanced" ? (
-              <AdvancedSettingsTab
-                importLegacyDatabaseData={importLegacyDatabaseMutation.data}
-                isImporting={importLegacyDatabaseMutation.isPending}
-                legacyDatabaseInputId={legacyDatabaseInputId}
-                onImportLegacyDatabase={(file) => importLegacyDatabaseMutation.mutate(file)}
-                onRequestLegacyImport={() => setLegacyImportDialogOpen(true)}
-              />
-            ) : null}
+              {activeTab === "advanced" ? (
+                <AdvancedSettingsTab
+                  importLegacyDatabaseData={importLegacyDatabaseMutation.data}
+                  isImporting={importLegacyDatabaseMutation.isPending}
+                  legacyDatabaseInputId={legacyDatabaseInputId}
+                  onImportLegacyDatabase={(file) => importLegacyDatabaseMutation.mutate(file)}
+                  onRequestLegacyImport={() => setLegacyImportDialogOpen(true)}
+                />
+              ) : null}
+            </React.Suspense>
           </div>
         )}
       </div>
@@ -498,9 +467,7 @@ export function SettingsPage(): JSX.Element {
         onCopy={(command) => {
           void copyCommand(command)
             .then(() => pushToast({ title: "Command copied", tone: "success" }))
-            .catch((error: Error) =>
-              pushToast({ title: "Command copy failed", description: error.message, tone: "error" })
-            );
+            .catch((error: Error) => pushToast({ title: "Command copy failed", description: error.message, tone: "error" }));
         }}
         onUseManual={() => {
           setAuthBrowserDialog(null);
@@ -508,776 +475,6 @@ export function SettingsPage(): JSX.Element {
         }}
       />
     </>
-  );
-}
-
-function AppearanceSettingsTab({
-  activePreset,
-  customPresets,
-  settings,
-  onCreatePreset,
-  onDeletePreset,
-  onSetActivePreset,
-  onSetFollowSystem,
-  onSetSystemPreset,
-  onUpdatePreset
-}: {
-  activePreset: ThemePreset;
-  customPresets: ThemePreset[];
-  settings: AppearanceSettings;
-  onCreatePreset: (basePresetId: string, name?: string) => void;
-  onDeletePreset: (presetId: string) => void;
-  onSetActivePreset: (presetId: string) => void;
-  onSetFollowSystem: (followSystem: boolean) => void;
-  onSetSystemPreset: (scheme: ColorScheme, presetId: string) => void;
-  onUpdatePreset: (preset: ThemePreset) => void;
-}): JSX.Element {
-  const presets = allThemePresets(customPresets);
-  const lightPresets = presets.filter((preset) => preset.scheme === "light");
-  const darkPresets = presets.filter((preset) => preset.scheme === "dark");
-  const [editingPresetId, setEditingPresetId] = React.useState<string | null>(null);
-  const editingPreset = customPresets.find((preset) => preset.id === editingPresetId) ?? null;
-
-  return (
-    <div className="mt-5 divide-y">
-      <SettingsSection title="Mode" description="Choose whether preset selection follows the operating system.">
-        <div className="space-y-3">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-4 rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted"
-            aria-pressed={settings.followSystem}
-            onClick={() => onSetFollowSystem(!settings.followSystem)}
-          >
-            <span className="flex min-w-0 items-start gap-3">
-              <Monitor className="mt-0.5 h-4 w-4 text-primary" aria-hidden="true" />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">Follow system appearance</span>
-                <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                  Switch between the selected light and dark presets with the operating system.
-                </span>
-              </span>
-            </span>
-            <span
-              className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
-                settings.followSystem ? "border-primary bg-primary" : "bg-muted"
-              }`}
-              aria-hidden="true"
-            >
-              <span
-                className={`absolute top-0.5 h-5 w-5 rounded-full bg-background shadow-sm transition-transform ${
-                  settings.followSystem ? "translate-x-5" : "translate-x-0.5"
-                }`}
-              />
-            </span>
-          </button>
-
-          {settings.followSystem ? (
-            <div className="rounded-md border bg-muted/25 p-3">
-              <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-                Current mapping
-              </span>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <Field label="When system is light">
-                  <Select value={settings.systemLightPresetId} onChange={(event) => onSetSystemPreset("light", event.target.value)}>
-                    {lightPresets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="When system is dark">
-                  <Select value={settings.systemDarkPresetId} onChange={(event) => onSetSystemPreset("dark", event.target.value)}>
-                    {darkPresets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.name}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-              </div>
-            </div>
-          ) : (
-            <Field label="Active preset">
-              <Select value={settings.activePresetId} onChange={(event) => onSetActivePreset(event.target.value)}>
-                {presets.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          )}
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Presets" description="Apply, duplicate, edit, or delete local appearance presets.">
-        <div className="space-y-3">
-          <div className="grid gap-2 sm:grid-cols-2">
-            {presets.map((preset) => (
-              <ThemePresetCard
-                key={preset.id}
-                active={activePreset.id === preset.id}
-                preset={preset}
-                onApply={() => onSetActivePreset(preset.id)}
-                onCreate={() => onCreatePreset(preset.id)}
-                onDelete={() => onDeletePreset(preset.id)}
-                onEdit={() => setEditingPresetId(preset.id)}
-              />
-            ))}
-          </div>
-          <Button type="button" variant="outline" onClick={() => onCreatePreset(activePreset.id, `${activePreset.name} Copy`)}>
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            New From Current
-          </Button>
-        </div>
-      </SettingsSection>
-
-      {editingPreset ? (
-        <SettingsSection title="Editor" description="Edit the selected user preset. Built-in presets can be duplicated first.">
-          <ThemePresetEditor preset={editingPreset} onCancel={() => setEditingPresetId(null)} onSave={onUpdatePreset} />
-        </SettingsSection>
-      ) : null}
-    </div>
-  );
-}
-
-function ThemePresetCard({
-  active,
-  preset,
-  onApply,
-  onCreate,
-  onDelete,
-  onEdit
-}: {
-  active: boolean;
-  preset: ThemePreset;
-  onApply: () => void;
-  onCreate: () => void;
-  onDelete: () => void;
-  onEdit: () => void;
-}): JSX.Element {
-  const Icon = themePresetIcon(preset.icon);
-  return (
-    <div className={`rounded-md border p-3 ${active ? "border-primary bg-primary/10" : "bg-background"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <span className="flex items-center gap-2 text-sm font-semibold">
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            <span className="truncate">{preset.name}</span>
-          </span>
-          <span className="mt-1 block text-xs capitalize text-muted-foreground">
-            {preset.scheme} · {preset.source === "system" ? "Built-in" : "User"}
-          </span>
-        </div>
-        {active ? <span className="text-xs font-medium text-primary">Active</span> : null}
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={onApply}>
-          Apply
-        </Button>
-        <Button type="button" variant="outline" size="sm" onClick={onCreate}>
-          <Copy className="h-4 w-4" aria-hidden="true" />
-          Duplicate
-        </Button>
-        {!preset.readonly ? (
-          <>
-            <Button type="button" variant="outline" size="sm" onClick={onEdit}>
-              <Edit3 className="h-4 w-4" aria-hidden="true" />
-              Edit
-            </Button>
-            <Button type="button" variant="outline" size="sm" className="text-destructive" onClick={onDelete}>
-              <Trash2 className="h-4 w-4" aria-hidden="true" />
-              Delete
-            </Button>
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function ThemePresetEditor({
-  preset,
-  onCancel,
-  onSave
-}: {
-  preset: ThemePreset;
-  onCancel: () => void;
-  onSave: (preset: ThemePreset) => void;
-}): JSX.Element {
-  const [draft, setDraft] = React.useState<ThemePreset>(preset);
-
-  React.useEffect(() => {
-    setDraft(preset);
-  }, [preset]);
-
-  return (
-    <div className="space-y-4">
-      <Field label="Name">
-        <Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
-      </Field>
-      <Field label="Scheme">
-        <Select
-          value={draft.scheme}
-          onChange={(event) => setDraft({ ...draft, scheme: event.target.value as ColorScheme })}
-        >
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </Select>
-      </Field>
-      <Field label="Icon">
-        <Select
-          value={draft.icon}
-          onChange={(event) => setDraft({ ...draft, icon: event.target.value as ThemePresetIcon })}
-        >
-          <option value="sun">Sun</option>
-          <option value="moon">Moon</option>
-          <option value="palette">Palette</option>
-          <option value="image">Image</option>
-        </Select>
-      </Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Primary token">
-          <Input
-            value={draft.tokens.primary}
-            onChange={(event) => setDraft({ ...draft, tokens: { ...draft.tokens, primary: event.target.value } })}
-            placeholder="207 80% 40%"
-          />
-        </Field>
-        <Field label="Accent token">
-          <Input
-            value={draft.tokens.accent}
-            onChange={(event) => setDraft({ ...draft, tokens: { ...draft.tokens, accent: event.target.value } })}
-            placeholder="46 88% 88%"
-          />
-        </Field>
-      </div>
-      <Field label="Background URL">
-        <Input
-          value={draft.background.imageUrl}
-          onChange={(event) =>
-            setDraft({
-              ...draft,
-              background: { ...draft.background, type: event.target.value.trim() ? "image" : "none", imageUrl: event.target.value }
-            })
-          }
-          placeholder="https://..."
-        />
-      </Field>
-      <div className="grid gap-3 sm:grid-cols-3">
-        <NumberField
-          label="Opacity"
-          value={draft.background.opacity}
-          min={0}
-          max={1}
-          step={0.05}
-          onChange={(value) => setDraft({ ...draft, background: { ...draft.background, opacity: clamp(value, 0, 1) } })}
-        />
-        <NumberField
-          label="Dim"
-          value={draft.background.dim}
-          min={0}
-          max={1}
-          step={0.05}
-          onChange={(value) => setDraft({ ...draft, background: { ...draft.background, dim: clamp(value, 0, 1) } })}
-        />
-        <NumberField
-          label="Blur"
-          value={draft.background.blur}
-          min={0}
-          step={1}
-          onChange={(value) => setDraft({ ...draft, background: { ...draft.background, blur: Math.max(0, value) } })}
-        />
-      </div>
-      <SettingsActions>
-        <Button
-          type="button"
-          onClick={() =>
-            onSave({
-              ...draft,
-              name: draft.name.trim() || preset.name,
-              background: { ...draft.background, type: draft.background.imageUrl.trim() ? "image" : "none" }
-            })
-          }
-        >
-          <Save className="h-4 w-4" aria-hidden="true" />
-          Save Preset
-        </Button>
-        <Button type="button" variant="outline" onClick={onCancel}>
-          Cancel
-        </Button>
-      </SettingsActions>
-    </div>
-  );
-}
-
-function themePresetIcon(icon: ThemePresetIcon): typeof Palette {
-  if (icon === "sun") {
-    return Sun;
-  }
-  if (icon === "moon") {
-    return Moon;
-  }
-  if (icon === "image") {
-    return Image;
-  }
-  return Palette;
-}
-
-function BasicSettingsTab({
-  form,
-  settings,
-  errors,
-  isSaving,
-  onSubmit,
-  onChange,
-  onReset
-}: {
-  form: BasicForm;
-  settings: SettingsResponse;
-  errors: Record<string, string>;
-  isSaving: boolean;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
-  onChange: (form: BasicForm) => void;
-  onReset: () => void;
-}): JSX.Element {
-  return (
-    <form className="mt-5 divide-y" onSubmit={onSubmit}>
-      <SettingsSection title="Storage" description="Choose where downloaded artwork files are written.">
-        <Field
-          label="Download path"
-          error={errors.download_path}
-          tooltip="Directory where downloaded Pixiv files are stored. Docker runtime fixes this to /app/downloads."
-        >
-          <Input
-            value={form.download_path}
-            disabled={!settings.download_path_editable}
-            onChange={(event) => onChange({ ...form, download_path: event.target.value })}
-          />
-        </Field>
-      </SettingsSection>
-
-      <SettingsSection title="Download behavior" description="Control download concurrency and existing file handling.">
-        <div className="space-y-4">
-          <div className="grid gap-2 rounded-md border bg-muted/30 p-2 sm:grid-cols-3">
-            {[
-              {
-                value: "skip",
-                label: "Skip",
-                title: "Leave existing files untouched and mark them as skipped."
-              },
-              {
-                value: "overwrite",
-                label: "Overwrite",
-                title: "Replace files that already exist at the target path."
-              },
-              {
-                value: "save_duplicate",
-                label: "Save duplicate",
-                title: "Keep existing files and save new downloads with numbered names."
-              }
-            ].map((item) => (
-              <button
-                key={item.value}
-                type="button"
-                className={
-                  form.existing_file_behavior === item.value
-                    ? "rounded-md border border-primary bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-                    : "rounded-md border bg-background px-3 py-2 text-sm font-medium hover:bg-muted"
-                }
-                title={item.title}
-                onClick={() =>
-                  onChange({
-                    ...form,
-                    existing_file_behavior: item.value as SettingsUpdateRequest["existing_file_behavior"]
-                  })
-                }
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Requests and performance" description="Tune Pixiv API pacing, file download pacing, and job concurrency.">
-        <div className="space-y-3">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <NumberField
-              label="API base delay seconds"
-              value={form.request_base_delay_seconds}
-              error={errors.request_base_delay_seconds}
-              tooltip="Fixed minimum wait before each Pixiv metadata API request."
-              onChange={(value) => onChange({ ...form, request_base_delay_seconds: value })}
-            />
-            <NumberField
-              label="API random delay seconds"
-              value={form.request_random_delay_seconds}
-              error={errors.request_random_delay_seconds}
-              tooltip="Extra random wait from 0 up to this many seconds before metadata API requests."
-              onChange={(value) => onChange({ ...form, request_random_delay_seconds: value })}
-            />
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <NumberField
-              label="File base delay seconds"
-              value={form.file_download_base_delay_seconds}
-              error={errors.file_download_base_delay_seconds}
-              tooltip="Fixed minimum wait before each real Pixiv image file download."
-              onChange={(value) => onChange({ ...form, file_download_base_delay_seconds: value })}
-            />
-            <NumberField
-              label="File random delay seconds"
-              value={form.file_download_random_delay_seconds}
-              error={errors.file_download_random_delay_seconds}
-              tooltip="Extra random wait from 0 up to this many seconds before image file downloads."
-              onChange={(value) => onChange({ ...form, file_download_random_delay_seconds: value })}
-            />
-          </div>
-          <p className="text-xs leading-5 text-muted-foreground">
-            Existing local files are skipped without waiting. Retryable 429 and 5xx responses use a separate backoff schedule.
-          </p>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <NumberField
-              label="Max concurrent"
-              value={form.max_concurrent_downloads}
-              error={errors.max_concurrent_downloads}
-              min={1}
-              step={1}
-              tooltip="Maximum number of downloads allowed to run at the same time. Minimum is 1."
-              onChange={(value) => onChange({ ...form, max_concurrent_downloads: Math.max(1, value) })}
-            />
-            <NumberField
-              label="Schedule trigger limit"
-              value={form.max_active_scheduled_tasks}
-              error={errors.max_active_scheduled_tasks}
-              min={1}
-              step={1}
-              tooltip="Legacy compatibility setting. Schedules now act as triggers; run execution capacity is controlled by the run limit."
-              onChange={(value) => onChange({ ...form, max_active_scheduled_tasks: Math.max(1, Math.trunc(value)) })}
-            />
-            <NumberField
-              label="Run limit"
-              value={form.max_active_one_time_tasks}
-              error={errors.max_active_one_time_tasks}
-              min={1}
-              step={1}
-              tooltip="Maximum number of workflow run jobs allowed to wait or run. Extra run jobs stay inactive."
-              onChange={(value) => onChange({ ...form, max_active_one_time_tasks: Math.max(1, Math.trunc(value)) })}
-            />
-            <NumberField
-              label="Minimum free GB"
-              value={form.min_free_space_gb}
-              error={errors.min_free_space_gb}
-              min={0}
-              step={0.5}
-              tooltip="Download jobs are not created when the download disk has less free space than this value."
-              onChange={(value) => onChange({ ...form, min_free_space_gb: Math.max(0, value) })}
-            />
-            <NumberField
-              label="Library stale days"
-              value={form.library_stale_check_days}
-              error={errors.library_stale_check_days}
-              min={1}
-              step={1}
-              tooltip="Artists checked before this many days ago are shown as check due in Library."
-              onChange={(value) => onChange({ ...form, library_stale_check_days: Math.max(1, Math.trunc(value)) })}
-            />
-          </div>
-        </div>
-      </SettingsSection>
-
-      <SettingsActions>
-        <Button type="submit" title="Save basic settings to config/settings.json." disabled={isSaving}>
-          <Save className="h-4 w-4" aria-hidden="true" />
-          Save Basic
-        </Button>
-        <Button type="button" variant="outline" title="Restore basic settings from the last loaded values." onClick={onReset}>
-          <Undo2 className="h-4 w-4" aria-hidden="true" />
-          Reset
-        </Button>
-      </SettingsActions>
-    </form>
-  );
-}
-
-function PixivSettingsTab({
-  authCode,
-  authFlow,
-  authTestStatus,
-  browserAuthFlow,
-  connectionTestStatus,
-  completeAuthPending,
-  hasIntermediatePixivUrl,
-  isPixivStartUrl,
-  pixivReturnToUrl,
-  refreshAuthPending,
-  refreshToken,
-  saveTokenPending,
-  settings,
-  showToken,
-  startBrowserAuthPending,
-  startManualAuthPending,
-  onAuthCodeChange,
-  onCancelAuthFlow,
-  onCompleteAuth,
-  onDismissBrowserFlow,
-  onOpenBrowserFlow,
-  onOpenContinueUrl,
-  onRefreshAuth,
-  onRefreshTokenChange,
-  onRunAuthTest,
-  onRunConnectionTest,
-  onSaveManualToken,
-  onStartBrowserAuth,
-  onToggleToken
-}: {
-  authCode: string;
-  authFlow: PixivAuthStartResponse | null;
-  authTestStatus: TestStatus;
-  browserAuthFlow: PixivBrowserAuthStartResponse | null;
-  connectionTestStatus: TestStatus;
-  completeAuthPending: boolean;
-  hasIntermediatePixivUrl: boolean;
-  isPixivStartUrl: boolean;
-  pixivReturnToUrl: string | null;
-  refreshAuthPending: boolean;
-  refreshToken: string;
-  saveTokenPending: boolean;
-  settings: SettingsResponse;
-  showToken: boolean;
-  startBrowserAuthPending: boolean;
-  startManualAuthPending: boolean;
-  onAuthCodeChange: (value: string) => void;
-  onCancelAuthFlow: () => void;
-  onCompleteAuth: () => void;
-  onDismissBrowserFlow: () => void;
-  onOpenBrowserFlow: () => void;
-  onOpenContinueUrl: () => void;
-  onRefreshAuth: () => void;
-  onRefreshTokenChange: (value: string) => void;
-  onRunAuthTest: () => void;
-  onRunConnectionTest: () => void;
-  onSaveManualToken: () => void;
-  onStartBrowserAuth: () => void;
-  onToggleToken: () => void;
-}): JSX.Element {
-  return (
-    <div className="mt-5 divide-y">
-      <SettingsSection title="Pixiv authentication" description="Sign in, renew, or replace the saved Pixiv refresh token.">
-        <div className="space-y-4">
-          <Field
-            label="New refresh token"
-            tooltip="Paste a new Pixiv OAuth refresh token. Saved tokens are masked in normal settings responses."
-            help={
-              settings.refresh_token_configured
-                ? `Saved token: ${settings.refresh_token_preview}`
-                : "No saved token"
-            }
-          >
-            <div className="flex gap-2">
-              <Input
-                type={showToken ? "text" : "password"}
-                value={refreshToken}
-                onChange={(event) => onRefreshTokenChange(event.target.value)}
-                placeholder="Paste a new refresh token"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label={showToken ? "Hide refresh token" : "Show refresh token"}
-                title={showToken ? "Hide token" : "Show token"}
-                onClick={onToggleToken}
-              >
-                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-              </Button>
-            </div>
-          </Field>
-
-          <div className="rounded-md border bg-muted/20 p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                title="Save the pasted refresh token."
-                disabled={saveTokenPending || !refreshToken.trim()}
-                onClick={onSaveManualToken}
-              >
-                <KeyRound className="h-4 w-4" aria-hidden="true" />
-                Save Token
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                title="Open the Pixiv login flow and save a refresh token after sign-in."
-                disabled={startBrowserAuthPending || startManualAuthPending}
-                onClick={onStartBrowserAuth}
-              >
-                <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                Sign in with Pixiv
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                title="Exchange the saved refresh token for a fresh Pixiv token pair."
-                disabled={refreshAuthPending || !settings.refresh_token_configured}
-                onClick={onRefreshAuth}
-              >
-                <RefreshCw className="h-4 w-4" aria-hidden="true" />
-                Refresh Token
-              </Button>
-            </div>
-            <span className="mt-2 block text-xs leading-5 text-muted-foreground">
-              Refresh Token asks Pixiv for a fresh token pair and saves the returned refresh token. Use it when the saved token works but you want to renew it without signing in again.
-            </span>
-
-            {browserAuthFlow ? (
-              <div className="mt-3 space-y-2 rounded-md border bg-background p-3">
-                <span className="block text-sm font-medium">Waiting for Pixiv browser sign-in</span>
-                <span className="block text-xs text-muted-foreground">
-                  Complete Pixiv login in the remote browser window. The token is saved automatically after Pixiv redirects back.
-                </span>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    title="Reopen the remote browser for the current Pixiv sign-in flow."
-                    onClick={onOpenBrowserFlow}
-                  >
-                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                    Open Browser
-                  </Button>
-                  <Button type="button" variant="outline" onClick={onDismissBrowserFlow}>
-                    Dismiss
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-
-            {authFlow ? (
-              <div className="mt-3 space-y-2">
-                <textarea
-                  className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={authCode}
-                  onChange={(event) => onAuthCodeChange(event.target.value)}
-                  placeholder="Paste Pixiv callback URL, copied request, cURL, HAR snippet, or authorization code"
-                />
-                {pixivReturnToUrl ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    title="Open the next Pixiv URL from the pasted intermediate login response."
-                    onClick={onOpenContinueUrl}
-                  >
-                    <ExternalLink className="h-4 w-4" aria-hidden="true" />
-                    Continue Pixiv Sign-in
-                  </Button>
-                ) : null}
-                {isPixivStartUrl ? (
-                  <span className="block text-xs text-muted-foreground">
-                    This Pixiv URL is an intermediate auth endpoint. Copy the callback request that contains code= from the browser network log.
-                  </span>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    title="Exchange the pasted callback URL or authorization code and save the resulting refresh token."
-                    disabled={completeAuthPending || !authCode.trim() || hasIntermediatePixivUrl}
-                    onClick={onCompleteAuth}
-                  >
-                    <KeyRound className="h-4 w-4" aria-hidden="true" />
-                    Save Pixiv Token
-                  </Button>
-                  <Button type="button" variant="outline" onClick={onCancelAuthFlow}>
-                    Cancel
-                  </Button>
-                </div>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      </SettingsSection>
-
-      <SettingsSection title="Test Auth" description="Manually verify that the saved refresh token can authenticate.">
-        <PixivTestStatus
-          status={authTestStatus}
-          preview={settings.refresh_token_preview}
-          actionLabel="Test Auth"
-          actionTitle="Verify that the configured Pixiv refresh token can authenticate."
-          disabled={!settings.refresh_token_configured || authTestStatus.state === "checking"}
-          icon="shield"
-          onAction={onRunAuthTest}
-        />
-      </SettingsSection>
-
-      <SettingsSection title="Test Connection" description="Manually call Pixiv user_detail with the authenticated account.">
-        <PixivTestStatus
-          status={connectionTestStatus}
-          preview=""
-          actionLabel="Test Connection"
-          actionTitle="Run one real Pixiv API request to check restrictions, rate limits, or API availability."
-          disabled={!settings.refresh_token_configured || connectionTestStatus.state === "checking"}
-          icon="refresh"
-          onAction={onRunConnectionTest}
-        />
-      </SettingsSection>
-    </div>
-  );
-}
-
-function AdvancedSettingsTab({
-  importLegacyDatabaseData,
-  isImporting,
-  legacyDatabaseInputId,
-  onImportLegacyDatabase,
-  onRequestLegacyImport
-}: {
-  importLegacyDatabaseData?: { imported_artists: number; total_rows: number };
-  isImporting: boolean;
-  legacyDatabaseInputId: string;
-  onImportLegacyDatabase: (file: File) => void;
-  onRequestLegacyImport: () => void;
-}): JSX.Element {
-  return (
-    <div className="mt-5 divide-y">
-      <SettingsSection title="Data maintenance" description="Run one-off maintenance tasks for local library data.">
-        <div className="rounded-md border bg-muted/20 p-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <input
-              id={legacyDatabaseInputId}
-              className="hidden"
-              type="file"
-              accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/octet-stream"
-              disabled={isImporting}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.target.value = "";
-                if (file) {
-                  onImportLegacyDatabase(file);
-                }
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              title="Import artists and artwork metadata from an old PyQt pixiv.db or SQLite database."
-              disabled={isImporting}
-              onClick={onRequestLegacyImport}
-            >
-              <DatabaseBackup className="h-4 w-4" aria-hidden="true" />
-              Import Legacy Database
-            </Button>
-            {importLegacyDatabaseData ? (
-              <span className="text-xs text-muted-foreground">
-                {importLegacyDatabaseData.imported_artists} of {importLegacyDatabaseData.total_rows} rows imported.
-              </span>
-            ) : null}
-          </div>
-        </div>
-      </SettingsSection>
-    </div>
   );
 }
 
@@ -1316,11 +513,6 @@ function LegacyImportConfirmDialog({
     />
   );
 }
-
-type AuthBrowserDialog = {
-  type: "start" | "stop";
-  status: PixivBrowserAuthServiceStatusResponse;
-};
 
 function AuthBrowserCommandDialog({
   dialog,
@@ -1381,273 +573,4 @@ function CommandBlock({ command, onCopy }: { command: string; onCopy: () => void
       </Button>
     </div>
   );
-}
-
-function PixivTestStatus({
-  status,
-  preview,
-  actionLabel,
-  actionTitle,
-  disabled,
-  icon,
-  onAction
-}: {
-  status: TestStatus;
-  preview: string;
-  actionLabel: string;
-  actionTitle: string;
-  disabled: boolean;
-  icon: "shield" | "refresh";
-  onAction: () => void;
-}): JSX.Element {
-  const Icon = status.state === "checking" ? Loader2 : status.state === "valid" ? CheckCircle2 : AlertTriangle;
-  const ActionIcon = icon === "shield" ? ShieldCheck : RefreshCw;
-  const label =
-    status.state === "valid"
-      ? "Verified"
-      : status.state === "checking"
-        ? "Checking"
-        : status.state === "invalid"
-          ? "Needs attention"
-          : status.state === "untested"
-            ? "Not tested"
-            : "Token not configured";
-  const className =
-    status.state === "valid"
-      ? "status-success"
-      : status.state === "checking"
-        ? "border-border bg-muted/30 text-foreground"
-        : "status-warning";
-
-  return (
-    <div className={`rounded-md border p-3 ${className}`}>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-start gap-3">
-          <Icon
-            className={`mt-0.5 h-5 w-5 shrink-0 ${status.state === "checking" ? "animate-spin" : ""}`}
-            aria-hidden="true"
-          />
-          <div className="min-w-0">
-            <span className="block text-sm font-semibold">{label}</span>
-            <span className="mt-1 block text-sm leading-5">{status.message}</span>
-            {preview ? <span className="mt-1 block text-xs opacity-75">Saved token: {preview}</span> : null}
-            {status.checkedAt ? (
-              <span className="mt-1 block text-xs opacity-75">Last checked: {formatCheckedAt(status.checkedAt)}</span>
-            ) : null}
-          </div>
-        </div>
-        <Button type="button" variant="outline" title={actionTitle} disabled={disabled} onClick={onAction}>
-          <ActionIcon className="h-4 w-4" aria-hidden="true" />
-          {actionLabel}
-        </Button>
-      </div>
-    </div>
-  );
-}
-
-function notConfiguredAuthStatus(): TestStatus {
-  return { state: "unconfigured", message: "No Pixiv refresh token is configured." };
-}
-
-function untestedAuthStatus(): TestStatus {
-  return { state: "untested", message: "A Pixiv refresh token is saved. Run Test Auth when you want to verify it." };
-}
-
-function notConfiguredConnectionStatus(): TestStatus {
-  return { state: "unconfigured", message: "No Pixiv refresh token is configured." };
-}
-
-function untestedConnectionStatus(): TestStatus {
-  return {
-    state: "untested",
-    message: "A real Pixiv API request has not been tested in this session."
-  };
-}
-
-function resetTestStatuses(
-  configured: boolean,
-  setAuthTestStatus: (status: TestStatus) => void,
-  setConnectionTestStatus: (status: TestStatus) => void
-): void {
-  if (configured) {
-    setAuthTestStatus(untestedAuthStatus());
-    setConnectionTestStatus(untestedConnectionStatus());
-  } else {
-    setAuthTestStatus(notConfiguredAuthStatus());
-    setConnectionTestStatus(notConfiguredConnectionStatus());
-  }
-}
-
-function formatCheckedAt(value: Date): string {
-  return value.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-function toBasicForm(settings: SettingsResponse): BasicForm {
-  return {
-    download_path: settings.download_path,
-    request_base_delay_seconds: settings.request_base_delay_seconds,
-    request_random_delay_seconds: settings.request_random_delay_seconds,
-    file_download_base_delay_seconds: settings.file_download_base_delay_seconds,
-    file_download_random_delay_seconds: settings.file_download_random_delay_seconds,
-    max_concurrent_downloads: settings.max_concurrent_downloads,
-    max_active_scheduled_tasks: settings.max_active_scheduled_tasks,
-    max_active_one_time_tasks: settings.max_active_one_time_tasks,
-    min_free_space_gb: settings.min_free_space_gb,
-    library_stale_check_days: settings.library_stale_check_days,
-    existing_file_behavior: settings.existing_file_behavior
-  };
-}
-
-function validateBasic(form: BasicForm, downloadPathEditable: boolean): Record<string, string> {
-  const errors: Record<string, string> = {};
-  if (downloadPathEditable && !form.download_path.trim()) {
-    errors.download_path = "Download path is required.";
-  }
-  if (form.request_base_delay_seconds < 0) {
-    errors.request_base_delay_seconds = "Must be zero or greater.";
-  }
-  if (form.request_random_delay_seconds < 0) {
-    errors.request_random_delay_seconds = "Must be zero or greater.";
-  }
-  if (form.file_download_base_delay_seconds < 0) {
-    errors.file_download_base_delay_seconds = "Must be zero or greater.";
-  }
-  if (form.file_download_random_delay_seconds < 0) {
-    errors.file_download_random_delay_seconds = "Must be zero or greater.";
-  }
-  if (form.max_concurrent_downloads < 1 || !Number.isInteger(form.max_concurrent_downloads)) {
-    errors.max_concurrent_downloads = "Must be a whole number of at least 1.";
-  }
-  if (form.max_active_scheduled_tasks < 1 || !Number.isInteger(form.max_active_scheduled_tasks)) {
-    errors.max_active_scheduled_tasks = "Must be a whole number of at least 1.";
-  }
-  if (form.max_active_one_time_tasks < 1 || !Number.isInteger(form.max_active_one_time_tasks)) {
-    errors.max_active_one_time_tasks = "Must be a whole number of at least 1.";
-  }
-  if (form.min_free_space_gb < 0) {
-    errors.min_free_space_gb = "Must be zero or greater.";
-  }
-  if (form.library_stale_check_days < 1 || !Number.isInteger(form.library_stale_check_days)) {
-    errors.library_stale_check_days = "Must be a whole number of at least 1.";
-  }
-  return errors;
-}
-
-async function copyCommand(command: string): Promise<void> {
-  await navigator.clipboard.writeText(command);
-}
-
-function getPixivPostRedirectReturnTo(value: string): string | null {
-  const input = value.trim();
-  if (!input) {
-    return null;
-  }
-
-  try {
-    const url = new URL(input);
-    if (url.hostname !== "accounts.pixiv.net" || url.pathname !== "/post-redirect") {
-      return null;
-    }
-    return url.searchParams.get("return_to");
-  } catch {
-    return null;
-  }
-}
-
-function isPixivAuthStartUrl(value: string): boolean {
-  const input = value.trim();
-  if (!input) {
-    return false;
-  }
-
-  try {
-    const url = new URL(input);
-    return url.hostname === "app-api.pixiv.net" && url.pathname === "/web/v1/users/auth/pixiv/start";
-  } catch {
-    return false;
-  }
-}
-
-function Field({
-  label,
-  children,
-  error,
-  help,
-  tooltip
-}: {
-  label: string;
-  children: React.ReactNode;
-  error?: string;
-  help?: string;
-  tooltip?: string;
-}): JSX.Element {
-  return (
-    <label className="block" title={tooltip}>
-      <span className="mb-2 block text-sm font-medium">{label}</span>
-      {children}
-      {help ? <span className="mt-1 block text-xs text-muted-foreground">{help}</span> : null}
-      {error ? <span className="mt-1 block text-sm text-destructive">{error}</span> : null}
-    </label>
-  );
-}
-
-function SettingsSection({
-  title,
-  description,
-  children
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <section className="grid gap-4 py-5 first:pt-0 sm:grid-cols-[180px_1fr]">
-      <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-      </div>
-      <div className="min-w-0">{children}</div>
-    </section>
-  );
-}
-
-function SettingsActions({ children }: { children: React.ReactNode }): JSX.Element {
-  return <div className="flex flex-wrap gap-2 pt-5">{children}</div>;
-}
-
-function NumberField({
-  label,
-  value,
-  error,
-  onChange,
-  min = 0,
-  max,
-  step = 0.1,
-  tooltip
-}: {
-  label: string;
-  value: number;
-  error?: string;
-  onChange: (value: number) => void;
-  min?: number;
-  max?: number;
-  step?: number;
-  tooltip?: string;
-}): JSX.Element {
-  return (
-    <Field label={label} error={error} tooltip={tooltip}>
-      <Input
-        type="number"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
-    </Field>
-  );
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
