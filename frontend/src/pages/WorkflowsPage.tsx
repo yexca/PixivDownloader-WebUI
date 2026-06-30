@@ -43,6 +43,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
+import { AdvancedWorkflowBuilder } from "@/components/workflows/AdvancedWorkflowBuilder";
 import {
   Detail,
   loadRunJobs,
@@ -69,6 +70,7 @@ import { cn, formatDate } from "@/lib/utils";
 
 type WorkflowStatusTab = "active" | "failed" | "completed";
 type ArchiveFilter = "normal" | "include" | "archived";
+type BuilderMode = "basic" | "advanced";
 type ModuleKey = "schedule" | "target" | "filters" | "actions" | "options" | "naming" | "rule";
 type WorkflowTarget =
   | "artists"
@@ -210,6 +212,11 @@ const workflowStatusItems: Array<{ value: WorkflowStatusTab; label: string }> = 
   { value: "completed", label: "Complete" }
 ];
 
+const builderModeItems: Array<{ value: BuilderMode; label: string }> = [
+  { value: "basic", label: "Basic" },
+  { value: "advanced", label: "Advanced" }
+];
+
 const moduleLabels: Record<ModuleKey, string> = {
   schedule: "Schedule",
   target: "Target",
@@ -254,6 +261,7 @@ export function WorkflowsPage(): JSX.Element {
   const [drafts, setDrafts] = React.useState<DraftWorkflow[]>([]);
   const [selectedDraftId, setSelectedDraftId] = React.useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [builderMode, setBuilderMode] = React.useState<BuilderMode>("basic");
   const [editingDraftId, setEditingDraftId] = React.useState<string | null>(null);
   const [form, setForm] = React.useState<WorkflowForm>(initialForm);
   const [submitted, setSubmitted] = React.useState(false);
@@ -369,6 +377,7 @@ export function WorkflowsPage(): JSX.Element {
   function openNewBuilder() {
     setEditingDraftId(null);
     setForm(initialForm);
+    setBuilderMode("basic");
     setSubmitted(false);
     setDialogOpen(true);
   }
@@ -376,6 +385,7 @@ export function WorkflowsPage(): JSX.Element {
   function openEditBuilder(draft: DraftWorkflow) {
     setEditingDraftId(draft.id);
     setForm(draft.form);
+    setBuilderMode("basic");
     setSubmitted(false);
     setDialogOpen(true);
   }
@@ -649,22 +659,31 @@ export function WorkflowsPage(): JSX.Element {
 
       <Dialog
         open={dialogOpen}
-        title={editingDraftId ? "Edit workflow draft" : "Add workflow draft"}
-        description="Select modules to insert their cards into the workflow."
+        title={editingDraftId ? "Edit workflow draft" : "Add workflow"}
+        description="Use Basic for draft queue setup or Advanced for real workflow nodes."
         className="flex h-[92vh] max-w-5xl flex-col overflow-hidden"
         bodyClassName="min-h-0 flex-1 overflow-hidden"
         onOpenChange={(open) => (open ? setDialogOpen(true) : closeBuilder())}
         footer={
-          <>
+          builderMode === "basic" ? (
+            <>
             <Button type="button" variant="outline" onClick={closeBuilder}>Cancel</Button>
             <Button type="submit" form="workflow-builder" disabled={!canSubmit}>
               <ListPlus className="h-4 w-4" aria-hidden="true" />
               {editingDraftId ? "Update Draft" : "Add To Queue"}
             </Button>
-          </>
+            </>
+          ) : null
         }
       >
-        <form id="workflow-builder" className="flex h-full min-h-0 flex-col gap-4" onSubmit={saveDraft}>
+        <div className="flex h-full min-h-0 flex-col gap-4">
+          <div className="shrink-0">
+            <Tabs value={builderMode} onValueChange={setBuilderMode} items={builderModeItems} />
+          </div>
+          {builderMode === "advanced" ? (
+            <AdvancedWorkflowBuilder onSubmitted={closeBuilder} />
+          ) : (
+        <form id="workflow-builder" className="flex min-h-0 flex-1 flex-col gap-4" onSubmit={saveDraft}>
           <div className="shrink-0 space-y-4">
             <ModuleToggleBar form={form} setForm={setForm} />
             {submitted && firstError ? (
@@ -712,6 +731,8 @@ export function WorkflowsPage(): JSX.Element {
             </aside>
           </div>
         </form>
+          )}
+        </div>
       </Dialog>
       <RunDetailDialog
         run={selectedRun}
@@ -1868,18 +1889,6 @@ function normalizeNumericIds(ids: string[]): string[] {
     seen.add(id);
   }
   return normalized;
-}
-
-function activeArtistTargetIds(form: WorkflowForm): string[] {
-  return form.artist_source === "artist_ids" ? form.artist_ids : form.artwork_ids;
-}
-
-function activeArtistTargetInput(form: WorkflowForm): string {
-  return form.artist_source === "artist_ids" ? form.artist_id_input : form.artwork_id_input;
-}
-
-function artistTargetIds(form: WorkflowForm): string[] {
-  return appendNumericIds(activeArtistTargetIds(form), activeArtistTargetInput(form));
 }
 
 function queuedArtistIds(form: WorkflowForm): string[] {

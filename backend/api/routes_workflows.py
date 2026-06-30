@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.workflows import (
+    AdvancedWorkflowRunRequest,
     WorkflowBatchItemRequest,
     WorkflowBatchRunListResponse,
     WorkflowBatchRunRequest,
@@ -12,6 +13,7 @@ from backend.schemas.workflows import (
     WorkflowRunResponse,
     workflow_run_response,
 )
+from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.workflow_run_service import WorkflowRunService
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
@@ -61,6 +63,23 @@ def create_workflow_run(
     return workflow_run_response(run)
 
 
+@router.post("/advanced/runs", response_model=WorkflowBatchRunResponse)
+def create_advanced_workflow_run(
+    request: AdvancedWorkflowRunRequest,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+    queue: Queue,
+) -> WorkflowBatchRunResponse:
+    runner = AdvancedWorkflowRunner(db_path, settings_json_path=settings_json_path)
+    try:
+        run = runner.create_run(request.definition)
+    finally:
+        runner.close()
+    if any(node.job_ids for node in run.node_runs):
+        queue.wake()
+    return workflow_run_response(run)
+
+
 @router.get("/runs", response_model=WorkflowBatchRunListResponse)
 def list_workflow_runs(
     db_path: DbPath,
@@ -87,4 +106,10 @@ def get_workflow_run(run_id: str, db_path: DbPath) -> WorkflowBatchRunResponse:
         service.close()
     if run is None:
         raise HTTPException(status_code=404, detail="Workflow run not found")
+    if run.source == "advanced":
+        runner = AdvancedWorkflowRunner(db_path)
+        try:
+            run = runner.process_run(run.id)
+        finally:
+            runner.close()
     return workflow_run_response(run)

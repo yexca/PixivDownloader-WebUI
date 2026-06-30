@@ -25,6 +25,24 @@ export type WorkflowBatchRunItem = {
   finished_at: string | null;
 };
 
+export type WorkflowNodeRun = {
+  id: number | null;
+  workflow_run_id: string;
+  node_id: string;
+  node_type: string;
+  title: string;
+  position: number;
+  status: "pending" | "completed" | "failed" | "skipped" | "running";
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  job_ids: string[];
+  error_message: string | null;
+  failure_reason: FailureReason;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
 export type WorkflowBatchRun = {
   id: string;
   status: "running" | "completed" | "failed" | "partial" | "skipped";
@@ -39,6 +57,7 @@ export type WorkflowBatchRun = {
   created_at: string | null;
   finished_at: string | null;
   items: WorkflowBatchRunItem[];
+  node_runs: WorkflowNodeRun[];
 };
 
 export type WorkflowBatchRunListResponse = {
@@ -61,6 +80,26 @@ export type WorkflowBatchRunRequest = {
   }>;
 };
 
+export type AdvancedWorkflowNode = {
+  id: string;
+  type:
+    | "artist_target"
+    | "sync_metadata"
+    | "collect_artworks"
+    | "filter_artworks"
+    | "execute_actions"
+    | "file_output";
+  title?: string;
+  config: Record<string, unknown>;
+};
+
+export type AdvancedWorkflowRunRequest = {
+  definition: {
+    name?: string;
+    nodes: AdvancedWorkflowNode[];
+  };
+};
+
 export function runWorkflow(request: WorkflowRunRequest): Promise<WorkflowRunResponse> {
   return apiRequest<WorkflowRunResponse>("/workflows/run", {
     method: "POST",
@@ -70,6 +109,13 @@ export function runWorkflow(request: WorkflowRunRequest): Promise<WorkflowRunRes
 
 export function createWorkflowRun(request: WorkflowBatchRunRequest): Promise<WorkflowBatchRun> {
   return apiRequest<WorkflowBatchRun>("/workflows/runs", {
+    method: "POST",
+    body: request
+  });
+}
+
+export function createAdvancedWorkflowRun(request: AdvancedWorkflowRunRequest): Promise<WorkflowBatchRun> {
+  return apiRequest<WorkflowBatchRun>("/workflows/advanced/runs", {
     method: "POST",
     body: request
   });

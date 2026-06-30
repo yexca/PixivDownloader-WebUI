@@ -27,9 +27,11 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "007",
         "008",
         "009",
-        "010",
-        "011",
-        "012",
+            "010",
+            "011",
+            "012",
+            "013",
+            "014",
     ]
     assert {
         "schema_migrations",
@@ -44,6 +46,7 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "scheduled_tasks",
         "workflow_runs",
         "workflow_run_items",
+        "workflow_node_runs",
         "artist_name_history",
     }.issubset(table_names(db_path))
     assert "pic" not in table_names(db_path)
@@ -61,6 +64,6 @@ def test_migration_is_idempotent(tmp_path):
     finally:
         conn.close()
 
-    assert len(first_applied) == 12
+    assert len(first_applied) == 14
     assert second_applied == []
-    assert migration_count == 12
+    assert migration_count == 14

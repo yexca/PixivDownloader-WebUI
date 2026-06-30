@@ -57,8 +57,8 @@ export function RunWorkflowCard({ run, onInspect }: { run: WorkflowBatchRun; onI
         </div>
       </div>
       <div className="mt-3 space-y-2">
-        {run.items.map((item) => (
-          <div key={item.id ?? item.draft_id} className="rounded-md border bg-muted/20 p-3 text-sm">
+        {(run.node_runs.length ? run.node_runs : run.items).map((item) => (
+          <div key={item.id ?? item.title} className="rounded-md border bg-muted/20 p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="truncate font-medium">{item.title}</span>
               <Badge tone={workflowItemTone(item.status)}>{item.status}</Badge>
@@ -168,6 +168,29 @@ export function RunDetailDialog({
               <Badge tone={run.skipped ? "warning" : "muted"}>{run.skipped} skipped</Badge>
             </div>
           </section>
+          {run.node_runs.length ? (
+            <section className="space-y-3">
+              <h3 className="text-sm font-semibold">Node Runs</h3>
+              {run.node_runs.map((node) => (
+                <div key={node.id ?? node.node_id} className="rounded-md border bg-card p-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{node.title}</span>
+                    <Badge tone={workflowItemTone(node.status)}>{node.status}</Badge>
+                  </div>
+                  <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <Detail label="Node" value={`${node.position + 1}. ${node.node_type}`} />
+                    <Detail label="Jobs" value={node.job_ids.length ? node.job_ids.join(", ") : "-"} />
+                    <Detail label="Finished" value={formatDate(node.finished_at)} />
+                  </dl>
+                  {node.error_message ? (
+                    <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+                      {node.error_message}
+                    </p>
+                  ) : null}
+                </div>
+              ))}
+            </section>
+          ) : null}
           <section className="space-y-3">
             <h3 className="text-sm font-semibold">Items</h3>
             {run.items.map((item) => (
@@ -525,6 +548,11 @@ export function loadRunJobs(run: WorkflowBatchRun | null): Promise<JobDetail[]> 
   if (!run) {
     return Promise.resolve([]);
   }
-  const ids = Array.from(new Set(run.items.flatMap((item) => item.job_ids)));
+  const ids = Array.from(
+    new Set([
+      ...run.items.flatMap((item) => item.job_ids),
+      ...run.node_runs.flatMap((node) => node.job_ids)
+    ])
+  );
   return Promise.all(ids.map((jobId) => getJob(jobId)));
 }
