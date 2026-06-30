@@ -653,7 +653,6 @@ export function WorkflowsPage(): JSX.Element {
         description="Select modules to insert their cards into the workflow."
         className="flex h-[92vh] max-w-5xl flex-col overflow-hidden"
         bodyClassName="min-h-0 flex-1 overflow-hidden"
-        overlayClassName="bg-transparent"
         onOpenChange={(open) => (open ? setDialogOpen(true) : closeBuilder())}
         footer={
           <>

@@ -49,7 +49,7 @@ export function Dialog({
       <button
         type="button"
         aria-label="Close dialog"
-        className={cn("absolute inset-0 bg-foreground/30", overlayClassName)}
+        className={cn("absolute inset-0 bg-transparent", overlayClassName)}
         onClick={() => onOpenChange(false)}
       />
       <section
