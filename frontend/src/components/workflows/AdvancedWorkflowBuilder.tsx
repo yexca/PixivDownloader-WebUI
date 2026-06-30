@@ -54,7 +54,6 @@ type WorkflowDraft = {
   maxArtworkId: string;
   collectSortOrder: CollectSortOrder;
   filterAi: "include" | "exclude" | "only";
-  minBookmarks: string;
   requiredTags: string;
   blockedTags: string;
   downloadEnabled: boolean;
@@ -89,7 +88,6 @@ const initialDraft: WorkflowDraft = {
   maxArtworkId: "",
   collectSortOrder: "newest_first",
   filterAi: "include",
-  minBookmarks: "",
   requiredTags: "",
   blockedTags: "",
   downloadEnabled: true,
@@ -432,14 +430,11 @@ function StageEditor({
               <option value="only">Only AI</option>
             </Select>
           </Field>
-          <Field label="Minimum bookmarks">
-            <Input value={draft.minBookmarks} inputMode="numeric" onChange={(event) => update("minBookmarks", event.target.value)} />
-          </Field>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Required tags">
             <Input value={draft.requiredTags} onChange={(event) => update("requiredTags", event.target.value)} />
           </Field>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Blocked tags">
             <Input value={draft.blockedTags} onChange={(event) => update("blockedTags", event.target.value)} />
           </Field>
@@ -686,9 +681,6 @@ function filtersDetail(draft: WorkflowDraft): string {
   if (draft.filterAi !== "include") {
     parts.push(draft.filterAi === "exclude" ? "exclude AI" : "AI only");
   }
-  if (draft.minBookmarks) {
-    parts.push(`${draft.minBookmarks}+ bookmarks`);
-  }
   if (draft.requiredTags) {
     parts.push(`require ${draft.requiredTags}`);
   }
@@ -793,7 +785,6 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       title: "Filter candidates",
       config: {
         ai: draft.filterAi,
-        min_bookmarks: numberOrNull(draft.minBookmarks),
         required_tags: commaList(draft.requiredTags),
         blocked_tags: commaList(draft.blockedTags),
         stop_above_limit: draft.stopAboveLimit ? numberOrNull(draft.stopLimit) : null

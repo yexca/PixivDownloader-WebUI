@@ -261,6 +261,117 @@ def test_advanced_workflow_collect_node_materializes_candidate_set(tmp_path):
         repository.close()
 
 
+def test_advanced_workflow_filter_node_materializes_filtered_candidate_set(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    seed_collect_library(db_path)
+
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Advanced filter workflow",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {"artist_ids": ["123"], "max_artists": 10},
+                },
+                {
+                    "id": "collect",
+                    "type": "collect_artworks",
+                    "title": "Collect candidates",
+                    "config": {
+                        "mode": "all_synced",
+                        "sort_order": "oldest_first",
+                    },
+                },
+                {
+                    "id": "filters",
+                    "type": "filter_artworks",
+                    "title": "Filter candidates",
+                    "config": {
+                        "ai": "exclude",
+                        "required_tags": ["cat"],
+                        "blocked_tags": ["blocked"],
+                    },
+                },
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(db_path)
+    try:
+        run = runner.create_run(definition)
+        worker = DownloadWorker(
+            db_path=db_path,
+            pixiv_client_factory=WorkflowTargetPixivClient,
+        )
+        worker.run_job(run.node_runs[0].job_ids[0])
+        run = runner.process_run(run.id, item_id=run.items[0].id)
+    finally:
+        runner.close()
+
+    assert run.status == "completed"
+    assert run.node_runs[1].output["candidate_count"] == 4
+    assert run.node_runs[2].output["source_candidate_count"] == 4
+    assert run.node_runs[2].output["candidate_count"] == 1
+
+    repository = WorkflowCandidateRepository(db_path)
+    try:
+        assert repository.list_artwork_ids(run.node_runs[2].output["candidate_set_id"]) == ["101"]
+    finally:
+        repository.close()
+
+
+def test_advanced_workflow_filter_node_stops_above_limit(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    seed_collect_library(db_path)
+
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Advanced filter stop workflow",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {"artist_ids": ["123"], "max_artists": 10},
+                },
+                {
+                    "id": "collect",
+                    "type": "collect_artworks",
+                    "title": "Collect candidates",
+                    "config": {"mode": "all_synced"},
+                },
+                {
+                    "id": "filters",
+                    "type": "filter_artworks",
+                    "title": "Filter candidates",
+                    "config": {"stop_above_limit": 2},
+                },
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(db_path)
+    try:
+        run = runner.create_run(definition)
+        worker = DownloadWorker(
+            db_path=db_path,
+            pixiv_client_factory=WorkflowTargetPixivClient,
+        )
+        worker.run_job(run.node_runs[0].job_ids[0])
+        run = runner.process_run(run.id, item_id=run.items[0].id)
+    finally:
+        runner.close()
+
+    assert run.status == "completed"
+    assert run.node_runs[2].output["source_candidate_count"] == 4
+    assert run.node_runs[2].output["candidate_count"] == 0
+    assert run.node_runs[2].output["stopped_by_rule"] is True
+
+
 def test_collect_candidate_sources_separate_new_and_pending(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path)
@@ -317,17 +428,18 @@ def seed_collect_library(db_path) -> None:
     file_repository = ArtworkFileRepository(db_path)
     try:
         artist_repository.upsert(Artist(id="123", name="Artist", last_download_id="100"))
-        for artwork_id, status in [
-            ("090", "remote_only"),
-            ("101", "downloaded"),
-            ("102", "remote_only"),
-            ("103", "remote_only"),
+        for artwork_id, status, tags in [
+            ("090", "remote_only", ("old",)),
+            ("101", "downloaded", ("cat",)),
+            ("102", "remote_only", ("cat", "AI生成")),
+            ("103", "remote_only", ("cat", "blocked")),
         ]:
             artwork_repository.upsert(
                 Artwork(
                     id=artwork_id,
                     artist_id="123",
                     title=f"Artwork {artwork_id}",
+                    tags=tags,
                     files=(
                         ArtworkFile(
                             artwork_id=artwork_id,
