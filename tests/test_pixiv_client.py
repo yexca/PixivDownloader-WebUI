@@ -52,6 +52,50 @@ class FakePixivApi:
         return None
 
 
+def make_illust(illust_id: str, user_id: str = "123"):
+    return SimpleNamespace(
+        id=illust_id,
+        user=SimpleNamespace(id=user_id),
+        title=f"Artwork {illust_id}",
+        type="illust",
+        caption="",
+        page_count=1,
+        width=100,
+        height=100,
+        sanity_level=2,
+        restrict=0,
+        tags=[],
+        create_date="2026-01-01T00:00:00+09:00",
+        meta_single_page=SimpleNamespace(
+            original_image_url=f"https://i.pximg.net/img-original/img/{illust_id}_p0.jpg"
+        ),
+        meta_pages=[],
+    )
+
+
+class PagingPixivApi(FakePixivApi):
+    def __init__(self):
+        super().__init__()
+        self.pages = [
+            SimpleNamespace(
+                illusts=[make_illust("254"), make_illust("253")],
+                next_url="next-page",
+            ),
+            SimpleNamespace(
+                illusts=[make_illust("252")],
+                next_url=None,
+            ),
+        ]
+
+    def user_illusts(self, *args, **kwargs):
+        self.calls.append(("user_illusts", args, kwargs))
+        return self.pages.pop(0)
+
+    def parse_qs(self, next_url: str | None):
+        self.calls.append(("parse_qs", next_url))
+        return {"user_id": "123", "offset": 30} if next_url else None
+
+
 def test_pixiv_client_sleeps_before_metadata_api_requests():
     api = FakePixivApi()
     sleeps = []
@@ -66,6 +110,17 @@ def test_pixiv_client_sleeps_before_metadata_api_requests():
     ]
     assert request_calls == ["user_detail", "illust_detail", "user_illusts"]
     assert sleeps == ["sleep", "sleep", "sleep"]
+
+
+def test_pixiv_client_stops_artwork_pages_at_known_artwork_id():
+    api = PagingPixivApi()
+    client = PixivClient(refresh_token="token", api=api)
+
+    artworks = client.get_artworks_by_user_id("123", stop_at_artwork_id="253")
+
+    assert [artwork.id for artwork in artworks] == ["254"]
+    assert [call[0] for call in api.calls].count("user_illusts") == 1
+    assert not any(call[0] == "parse_qs" for call in api.calls)
 
 
 def test_pixiv_client_marks_japanese_user_not_found_as_unavailable():

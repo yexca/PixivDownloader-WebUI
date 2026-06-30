@@ -101,9 +101,15 @@ class PixivClient:
     def get_authenticated_user_detail(self) -> Any:
         return self._request(lambda: self.api.user_detail(self.api.user_id))
 
-    def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
         illusts: list[Any] = []
         next_qs: dict[str, Any] | None = {}
+        stop_at = _optional_int(stop_at_artwork_id)
 
         while next_qs is not None:
             try:
@@ -121,7 +127,18 @@ class PixivClient:
                 self.api.auth(refresh_token=self.refresh_token)
                 continue
 
-            illusts.extend(_get_value(json_result, "illusts", []))
+            page_illusts = list(_get_value(json_result, "illusts", []))
+            if stop_at is not None:
+                fresh_illusts = [
+                    illust
+                    for illust in page_illusts
+                    if (_optional_int(_get_value(illust, "id", None)) or 0) > stop_at
+                ]
+                illusts.extend(fresh_illusts)
+                if len(fresh_illusts) != len(page_illusts):
+                    break
+            else:
+                illusts.extend(page_illusts)
             next_url = _get_value(json_result, "next_url", None)
             next_qs = self.api.parse_qs(next_url)
 
@@ -293,4 +310,9 @@ class PixivClientProtocol(Protocol):
 
     def get_authenticated_user_detail(self) -> Any: ...
 
-    def get_artworks_by_user_id(self, user_id: str) -> Iterable[Artwork]: ...
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> Iterable[Artwork]: ...

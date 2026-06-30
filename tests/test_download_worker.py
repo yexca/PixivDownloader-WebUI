@@ -22,7 +22,12 @@ class FakePixivClient:
     def get_artist_by_artwork_id(self, _artwork_id: str) -> Artist:
         return Artist(id="123", name="Artist")
 
-    def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
         return [
             Artwork(
                 id="200",
@@ -51,7 +56,12 @@ class ResolvingPixivClient:
         }
         return artists[artwork_id]
 
-    def get_artworks_by_user_id(self, _user_id: str) -> list[Artwork]:
+    def get_artworks_by_user_id(
+        self,
+        _user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
         return []
 
 
@@ -66,7 +76,12 @@ class FakeLegacyPixivClient:
             )
         return Artist(id=user_id, name="Legacy Artist")
 
-    def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
         if user_id == "closed":
             return []
         return [
@@ -104,7 +119,12 @@ class FakeUnavailablePixivClient:
     def get_artist_by_artwork_id(self, _artwork_id: str) -> Artist:
         raise NotImplementedError
 
-    def get_artworks_by_user_id(self, _user_id: str) -> list[Artwork]:
+    def get_artworks_by_user_id(
+        self,
+        _user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
         return []
 
 

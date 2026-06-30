@@ -109,6 +109,35 @@ class ArtworkRepository:
             raise DatabaseError(f"failed to count artworks for artist {artist_id}") from exc
         return int(row["total"])
 
+    def max_artwork_id_by_artist(self, artist_id: str) -> str | None:
+        try:
+            row = self.conn.execute(
+                """
+                SELECT MAX(CAST(id AS INTEGER)) AS latest
+                FROM artworks
+                WHERE artist_id = ?
+                  AND id GLOB '[0-9]*'
+                """,
+                (artist_id,),
+            ).fetchone()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to fetch latest artwork for artist {artist_id}") from exc
+        return str(row["latest"]) if row is not None and row["latest"] is not None else None
+
+    def list_all_by_artist(self, artist_id: str) -> list[Artwork]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM artworks
+                WHERE artist_id = ?
+                ORDER BY CAST(id AS INTEGER) DESC, id DESC
+                """,
+                (artist_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list artworks for artist {artist_id}") from exc
+        return [artwork_from_row(row) for row in rows]
+
     def get_file_counts(self, artwork_id: str) -> dict[str, int]:
         try:
             row = self.conn.execute(

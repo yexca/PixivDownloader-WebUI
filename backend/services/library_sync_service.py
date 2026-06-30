@@ -18,6 +18,7 @@ class LibrarySyncSummary:
     artist: Artist
     artwork_count: int
     file_count: int
+    full_sync: bool = False
 
 
 class LibrarySyncService:
@@ -43,6 +44,7 @@ class LibrarySyncService:
         artist_id: str,
         *,
         source: str | None = "library_shortcut",
+        full_sync: bool = False,
     ) -> LibrarySyncSummary:
         existing_artist = self.artist_repository.get_by_id(artist_id)
         now = utc_now()
@@ -55,7 +57,14 @@ class LibrarySyncService:
         artworks = (
             []
             if artist.account_status == "unavailable"
-            else list(self.pixiv_client.get_artworks_by_user_id(artist.id))
+            else list(
+                self.pixiv_client.get_artworks_by_user_id(
+                    artist.id,
+                    stop_at_artwork_id=None
+                    if full_sync
+                    else self.artwork_repository.max_artwork_id_by_artist(artist.id),
+                )
+            )
         )
         remote_latest_artwork_id = latest_artwork_id(artworks)
         record_name_change(
@@ -109,6 +118,7 @@ class LibrarySyncService:
             artist=synced_artist,
             artwork_count=len(artworks),
             file_count=file_count,
+            full_sync=full_sync,
         )
 
     def close(self) -> None:

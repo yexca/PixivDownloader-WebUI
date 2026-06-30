@@ -26,9 +26,14 @@ class FakePixivClient:
         self.artwork_requests.append(artwork_id)
         return Artist(id="999", name="Artwork Artist")
 
-    def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
-        self.artist_artworks_requests.append(user_id)
-        return [
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
+        self.artist_artworks_requests.append((user_id, stop_at_artwork_id))
+        artworks = [
             Artwork(
                 id="100",
                 artist_id=user_id,
@@ -54,6 +59,10 @@ class FakePixivClient:
                 ),
             ),
         ]
+        if stop_at_artwork_id is None:
+            return artworks
+        stop_at = int(stop_at_artwork_id)
+        return [artwork for artwork in artworks if int(artwork.id) > stop_at]
 
 
 class FakeFileDownloader:
@@ -115,10 +124,10 @@ def test_download_user_id_path_downloads_and_updates_artist(tmp_path):
     assert summary.downloaded_files == 2
     assert summary.last_download_id == "101"
     assert pixiv_client.user_requests == ["123"]
-    assert pixiv_client.artist_artworks_requests == ["123"]
+    assert pixiv_client.artist_artworks_requests == [("123", None)]
     assert len(file_downloader.calls) == 2
     assert repository.get_by_id("123").last_download_id == "101"
-    assert progress_messages[0] == "Getting user info..."
+    assert progress_messages[0] == "Syncing Pixiv metadata..."
 
 
 def test_download_uses_naming_rule_with_ai_token(tmp_path):
@@ -134,7 +143,7 @@ def test_download_uses_naming_rule_with_ai_token(tmp_path):
         name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
         Artwork(
             id="100",
             artist_id=user_id,
@@ -173,7 +182,7 @@ def test_download_uses_tag_variant_naming_rule(tmp_path):
         name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
         Artwork(
             id="100",
             artist_id=user_id,
@@ -221,7 +230,7 @@ def test_download_uses_tag_variant_behavior_skip(tmp_path):
         file_repository=ArtworkFileRepository(db_path),
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
         Artwork(
             id="100",
             artist_id=user_id,
@@ -307,7 +316,7 @@ def test_download_uses_tag_variant_behavior_retry_failed_only(tmp_path):
         file_repository=file_repository,
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id: [
+    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
         Artwork(
             id="100",
             artist_id=user_id,
@@ -404,7 +413,7 @@ def test_download_artwork_id_path_resolves_artist_then_downloads_artist(tmp_path
     assert summary.artist.id == "999"
     assert summary.downloaded_files == 2
     assert pixiv_client.artwork_requests == ["555"]
-    assert pixiv_client.artist_artworks_requests == ["999"]
+    assert pixiv_client.artist_artworks_requests == [("999", None)]
     assert {call[1] for call in file_downloader.calls} == {"999"}
 
 
@@ -522,6 +531,92 @@ def test_library_sync_persists_remote_only_files_and_preserves_download_cursor(t
     assert file_repository.list_by_artwork("101")[0].status == "remote_only"
 
 
+def test_incremental_sync_stops_at_local_max_artwork_id_but_downloads_after_cursor(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Existing", last_download_id="252"))
+    artwork_repository.upsert(Artwork(id="253", artist_id="123"))
+    file_repository.upsert(
+        ArtworkFile(
+            artwork_id="253",
+            page_index=0,
+            original_url="https://i.pximg.net/img-original/img/253_p0.jpg",
+            file_name="253_p0.jpg",
+            status="remote_only",
+        )
+    )
+    pixiv_client = FakePixivClient()
+    sync_requests = []
+
+    def get_artworks(user_id, *, stop_at_artwork_id=None):
+        sync_requests.append((user_id, stop_at_artwork_id))
+        return [
+            Artwork(
+                id="254",
+                artist_id=user_id,
+                files=(
+                    ArtworkFile(
+                        artwork_id="254",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/254_p0.jpg",
+                        file_name="254_p0.jpg",
+                    ),
+                ),
+            )
+        ]
+
+    pixiv_client.get_artworks_by_user_id = get_artworks
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=artist_repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+        sleeper=lambda: None,
+    )
+
+    summary = service.download(user_id="123", options=DownloadOptions(only_new_artworks=True))
+
+    assert summary.downloaded_files == 2
+    assert sync_requests == [("123", "253")]
+    assert artwork_repository.count_by_artist("123") == 2
+    assert {call[2].split("/")[-1] for call in file_downloader.calls} == {
+        "253_p0.jpg",
+        "254_p0.jpg",
+    }
+    assert artist_repository.get_by_id("123").last_download_id == "254"
+
+
+def test_full_download_requests_full_metadata_sync(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    artist_repository.upsert(Artist(id="123", name="Existing", last_download_id="252"))
+    artwork_repository.upsert(Artwork(id="253", artist_id="123"))
+    pixiv_client = FakePixivClient()
+    file_downloader = FakeFileDownloader(tmp_path)
+    service = DownloadService(
+        pixiv_client=pixiv_client,
+        file_downloader=file_downloader,
+        artist_repository=artist_repository,
+        name_history_repository=ArtistNameHistoryRepository(db_path),
+        artwork_repository=artwork_repository,
+        file_repository=file_repository,
+        sleeper=lambda: None,
+    )
+
+    service.download(user_id="123", options=DownloadOptions(full_download=True))
+
+    assert pixiv_client.artist_artworks_requests == [("123", None)]
+
+
 def test_pending_only_downloads_known_pending_files(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
@@ -608,6 +703,11 @@ def test_cancellation_marks_active_file_failed(tmp_path):
     with pytest.raises(JobCancelledError):
         service.download(user_id="123", cancel_callback=cancel_after_file_selected)
 
-    files = file_repository.list_by_artwork("100")
-    assert files[0].status == "failed"
-    assert files[0].error_message == "Download cancelled before this file completed."
+    files = [
+        file
+        for artwork_id in ("100", "101")
+        for file in file_repository.list_by_artwork(artwork_id)
+    ]
+    failed_files = [file for file in files if file.status == "failed"]
+    assert len(failed_files) == 1
+    assert failed_files[0].error_message == "Download cancelled before this file completed."

@@ -86,7 +86,12 @@ class FakePixivClient:
     def get_artist_by_artwork_id(self, _artwork_id: str) -> Artist:
         raise NotImplementedError
 
-    def get_artworks_by_user_id(self, user_id: str) -> list[Artwork]:
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
         return self.artworks.get(user_id, [])
 
 
