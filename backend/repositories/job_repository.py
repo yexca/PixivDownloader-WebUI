@@ -120,7 +120,6 @@ class JobRepository:
         self,
         job_id: str,
         *,
-        options: dict[str, object],
         workflow_run_id: str,
         workflow_item_id: int,
         workflow_source: str,
@@ -130,14 +129,12 @@ class JobRepository:
                 self.conn.execute(
                     """
                     UPDATE jobs
-                    SET options_json = ?,
-                        workflow_run_id = ?,
+                    SET workflow_run_id = ?,
                         workflow_item_id = ?,
                         workflow_source = ?
                     WHERE id = ?
                     """,
                     (
-                        json.dumps(options),
                         workflow_run_id,
                         workflow_item_id,
                         workflow_source,
@@ -242,8 +239,6 @@ class JobRepository:
                 WHERE status IN ('inactive', 'queued', 'running')
                   AND workflow_run_id IS NULL
                   AND workflow_item_id IS NULL
-                  AND json_extract(options_json, '$.workflow_run_id') IS NULL
-                  AND json_extract(options_json, '$.workflow_item_id') IS NULL
                 ORDER BY created_at
                 """
             ).fetchall()
@@ -437,15 +432,6 @@ def job_from_row(row: sqlite3.Row) -> Job:
     except IndexError:
         options_json = None
     options = json.loads(options_json) if options_json else {}
-    workflow_run_id = optional_row_str(row, "workflow_run_id") or string_option(
-        options.get("workflow_run_id")
-    )
-    workflow_item_id = optional_row_int(row, "workflow_item_id") or int_option(
-        options.get("workflow_item_id")
-    )
-    workflow_source = optional_row_str(row, "workflow_source") or string_option(
-        options.get("workflow_source")
-    )
     return Job(
         id=str(row["id"]),
         type=row["type"],
@@ -453,9 +439,9 @@ def job_from_row(row: sqlite3.Row) -> Job:
         input_user_id=str(row["input_user_id"]) if row["input_user_id"] else None,
         input_artwork_id=str(row["input_artwork_id"]) if row["input_artwork_id"] else None,
         options=options,
-        workflow_run_id=workflow_run_id,
-        workflow_item_id=workflow_item_id,
-        workflow_source=workflow_source,
+        workflow_run_id=optional_row_str(row, "workflow_run_id"),
+        workflow_item_id=optional_row_int(row, "workflow_item_id"),
+        workflow_source=optional_row_str(row, "workflow_source"),
         artist_id=str(row["artist_id"]) if row["artist_id"] else None,
         total_files=int(row["total_files"]),
         completed_files=int(row["completed_files"]),
@@ -483,19 +469,6 @@ def optional_row_int(row: sqlite3.Row, key: str) -> int | None:
     except IndexError:
         return None
     return int(value) if value is not None else None
-
-
-def string_option(value: object) -> str | None:
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
-def int_option(value: object) -> int | None:
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
 
 
 def job_event_from_row(row: sqlite3.Row) -> JobEvent:

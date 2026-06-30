@@ -509,7 +509,7 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert job.workflow_run_id is not None
     assert job.workflow_item_id is not None
     assert job.workflow_source == "legacy_import"
-    assert job.options["workflow_source"] == "legacy_import"
+    assert "workflow_source" not in job.options
     assert job.options["source"] == "legacy_database"
     assert job.options["artist_ids"] == ["100058387", "101013492"]
     assert job.options["legacy_latest_download_id_by_artist"]["100058387"] == "113381074"
@@ -548,7 +548,7 @@ def test_create_download_job(tmp_path):
         assert job is not None
         assert job.input_user_id == "123"
         assert job.workflow_source == "download_api"
-        assert job.options["workflow_source"] == "download_api"
+        assert "workflow_source" not in job.options
         run_id = job.workflow_run_id
     finally:
         repository.close()
@@ -591,10 +591,10 @@ def test_create_download_job_persists_workflow_options(tmp_path):
             "max_artworks": 12,
             "min_artwork_id": "100",
             "max_artwork_id": "200",
-            "workflow_run_id": job.options["workflow_run_id"],
-            "workflow_item_id": job.options["workflow_item_id"],
-            "workflow_source": "download_api",
         }
+        assert "workflow_run_id" not in job.options
+        assert "workflow_item_id" not in job.options
+        assert "workflow_source" not in job.options
     finally:
         repository.close()
 
@@ -736,6 +736,7 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     assert job is not None
     assert job.workflow_run_id == body["workflow_run_id"]
     assert job.workflow_source == "manual_schedule"
+    assert "workflow_source" not in job.options
 
 
 def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
@@ -1371,8 +1372,8 @@ def test_workflow_batch_run_persists_items_and_jobs(tmp_path):
     assert batch_job is not None
     assert batch_job.workflow_run_id == body["id"]
     assert batch_job.workflow_source == "workflow_batch"
-    assert batch_job.options["workflow_run_id"] == body["id"]
-    assert batch_job.options["workflow_source"] == "workflow_batch"
+    assert "workflow_run_id" not in batch_job.options
+    assert "workflow_source" not in batch_job.options
 
     list_response = client.get("/api/workflows/runs")
 
@@ -1685,7 +1686,7 @@ def test_create_artist_queues_sync_job(tmp_path):
         assert job.type == "sync_artist"
         assert job.input_user_id == "123"
         assert job.workflow_source == "library_shortcut"
-        assert job.options["workflow_source"] == "library_shortcut"
+        assert "workflow_source" not in job.options
     finally:
         repository.close()
 
@@ -1916,7 +1917,7 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
     assert retry.workflow_source == "job_retry"
     assert retry.options["artist_ids"] == ["222"]
     assert retry.options["legacy_latest_download_id_by_artist"] == {"222": "2000"}
-    assert retry.options["workflow_source"] == "job_retry"
+    assert "workflow_source" not in retry.options
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
     try:
         run = workflow_repository.get_run(str(retry.workflow_run_id))
@@ -1961,7 +1962,7 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert rerun.options["source_job_id"] == "job-1"
     assert rerun.workflow_run_id is not None
     assert rerun.workflow_source == "job_rerun"
-    assert rerun.options["workflow_source"] == "job_rerun"
+    assert "workflow_source" not in rerun.options
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
     try:
         run = workflow_repository.get_run(str(rerun.workflow_run_id))

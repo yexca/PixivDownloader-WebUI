@@ -301,7 +301,6 @@ def test_worker_requires_confirmation_for_new_manual_unavailable_artist(tmp_path
                 type="download_artist",
                 status="queued",
                 input_user_id="missing",
-                options={"workflow_source": "download_api"},
                 workflow_source="download_api",
             )
         )
@@ -335,7 +334,6 @@ def test_worker_accepts_library_shortcut_unavailable_artist(tmp_path):
                 type="sync_artist",
                 status="queued",
                 input_user_id="missing",
-                options={"workflow_source": "library_shortcut"},
                 workflow_source="library_shortcut",
             )
         )
@@ -400,9 +398,6 @@ def test_worker_resolves_artwork_targets_and_appends_artist_jobs(tmp_path):
                     "actions": ["sync_artist", "retry_failed_artist"],
                     "download_options": {"only_new_artworks": True},
                     "max_targets_per_run": 25,
-                    "workflow_run_id": "run-1",
-                    "workflow_item_id": 1,
-                    "workflow_source": "workflow_batch",
                 },
             )
         )

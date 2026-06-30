@@ -195,6 +195,9 @@ def test_job_repository_crud(tmp_path):
     assert job.workflow_run_id == "run-1"
     assert job.workflow_item_id == 7
     assert job.workflow_source == "test"
+    assert "workflow_run_id" not in job.options
+    assert "workflow_item_id" not in job.options
+    assert "workflow_source" not in job.options
     assert job.completed_files == 1
     assert repository.list(status="running")[0].id == "job-1"
     assert events[0].id == event_id

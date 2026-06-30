@@ -16,7 +16,7 @@ from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import WorkflowRunRepository
 from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
-from backend.services.job_service import JobService, workflow_metadata_from_job
+from backend.services.job_service import JobService, workflow_link_from_job
 from backend.services.legacy_import_hydration_service import (
     LegacyImportHydrationArtistResult,
     LegacyImportHydrationRetryableError,
@@ -284,7 +284,7 @@ class DownloadWorker:
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
             jobs: list[Job] = []
-            metadata = workflow_metadata_from_job(source_job)
+            workflow_link = workflow_link_from_job(source_job)
             for artist_id in artist_ids:
                 for action in actions:
                     job = service.create_download_job(
@@ -292,7 +292,8 @@ class DownloadWorker:
                         artwork_id=None,
                         sync_only=action == "sync_artist",
                         retry_failed_artist=action == "retry_failed_artist",
-                        options={**download_options, **metadata},
+                        options=download_options,
+                        workflow_link=workflow_link,
                     )
                     jobs.append(job)
             return jobs

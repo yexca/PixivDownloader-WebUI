@@ -36,6 +36,7 @@ class JobService:
         sync_only: bool = False,
         retry_failed_artist: bool = False,
         options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
         gate_one_time: bool = True,
     ) -> Job:
         if bool(user_id) == bool(artwork_id):
@@ -54,7 +55,7 @@ class JobService:
         if job_type in DOWNLOAD_JOB_TYPES:
             self._ensure_download_space()
         cleaned_options = clean_job_options(options or {})
-        workflow_link = workflow_link_from_options(cleaned_options)
+        link = workflow_link or WorkflowJobLink()
         status: JobStatus = "queued"
         if gate_one_time:
             cleaned_options["activation_scope"] = "one_time"
@@ -66,9 +67,9 @@ class JobService:
             input_user_id=user_id,
             input_artwork_id=artwork_id,
             options=cleaned_options,
-            workflow_run_id=workflow_link.run_id,
-            workflow_item_id=workflow_link.item_id,
-            workflow_source=workflow_link.source,
+            workflow_run_id=link.run_id,
+            workflow_item_id=link.item_id,
+            workflow_source=link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -95,10 +96,11 @@ class JobService:
         artist_ids: tuple[str, ...],
         legacy_latest_download_id_by_artist: dict[str, str | None],
         options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
     ) -> Job | None:
         if not artist_ids:
             return None
-        metadata = options or {}
+        metadata = without_workflow_options(options or {})
         job_options = {
             "source": "legacy_database",
             "artist_ids": list(artist_ids),
@@ -106,7 +108,7 @@ class JobService:
             "activation_scope": "one_time",
             **metadata,
         }
-        workflow_link = workflow_link_from_options(job_options)
+        link = workflow_link or WorkflowJobLink()
         status: JobStatus = self._next_one_time_status()
         job = Job(
             id=str(uuid4()),
@@ -114,9 +116,9 @@ class JobService:
             status=status,
             total_files=len(artist_ids),
             options=job_options,
-            workflow_run_id=workflow_link.run_id,
-            workflow_item_id=workflow_link.item_id,
-            workflow_source=workflow_link.source,
+            workflow_run_id=link.run_id,
+            workflow_item_id=link.item_id,
+            workflow_source=link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -140,6 +142,7 @@ class JobService:
         download_options: dict[str, object],
         max_targets_per_run: int,
         options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
         gate_one_time: bool = True,
     ) -> Job | None:
         if not artist_ids and not artwork_ids:
@@ -153,7 +156,7 @@ class JobService:
             "max_targets_per_run": max_targets_per_run,
             **metadata,
         }
-        workflow_link = workflow_link_from_options(job_options)
+        link = workflow_link or WorkflowJobLink()
         status: JobStatus = "queued"
         if gate_one_time:
             job_options["activation_scope"] = "one_time"
@@ -164,9 +167,9 @@ class JobService:
             status=status,
             total_files=len(artist_ids) + len(artwork_ids),
             options=job_options,
-            workflow_run_id=workflow_link.run_id,
-            workflow_item_id=workflow_link.item_id,
-            workflow_source=workflow_link.source,
+            workflow_run_id=link.run_id,
+            workflow_item_id=link.item_id,
+            workflow_source=link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -181,13 +184,18 @@ class JobService:
         )
         return self.repository.get_by_id(job.id) or job
 
-    def rerun_job(self, job_id: str) -> Job:
+    def rerun_job(self, job_id: str, *, workflow_link: WorkflowJobLink | None = None) -> Job:
         source = self.repository.get_by_id(job_id)
         if source is None:
             raise JobNotFoundError(f"job {job_id} was not found")
-        return self._create_from_source(source, action="rerun", options=source.options)
+        return self._create_from_source(
+            source,
+            action="rerun",
+            options=source.options,
+            workflow_link=workflow_link,
+        )
 
-    def retry_job(self, job_id: str) -> Job:
+    def retry_job(self, job_id: str, *, workflow_link: WorkflowJobLink | None = None) -> Job:
         source = self.repository.get_by_id(job_id)
         if source is None:
             raise JobNotFoundError(f"job {job_id} was not found")
@@ -197,8 +205,14 @@ class JobService:
                 source,
                 action="retry_failed_artists",
                 options=retry_options,
+                workflow_link=workflow_link,
             )
-        return self._create_from_source(source, action="retry", options=source.options)
+        return self._create_from_source(
+            source,
+            action="retry",
+            options=source.options,
+            workflow_link=workflow_link,
+        )
 
     def list_jobs(
         self,
@@ -214,32 +228,6 @@ class JobService:
 
     def get_job(self, job_id: str) -> Job | None:
         return self.repository.get_by_id(job_id)
-
-    def relink_job_to_workflow(
-        self,
-        job_id: str,
-        *,
-        workflow_run_id: str,
-        workflow_item_id: int,
-        workflow_source: str,
-    ) -> Job:
-        job = self.repository.get_by_id(job_id)
-        if job is None:
-            raise JobNotFoundError(f"job {job_id} was not found")
-        options = {
-            **job.options,
-            "workflow_run_id": workflow_run_id,
-            "workflow_item_id": workflow_item_id,
-            "workflow_source": workflow_source,
-        }
-        self.repository.update_workflow_link(
-            job.id,
-            options=options,
-            workflow_run_id=workflow_run_id,
-            workflow_item_id=workflow_item_id,
-            workflow_source=workflow_source,
-        )
-        return self.repository.get_by_id(job_id) or job
 
     def list_child_jobs(self, job_id: str, *, limit: int = 20) -> list[Job]:
         return self.repository.list_child_jobs(job_id, limit=limit)
@@ -398,14 +386,15 @@ class JobService:
         *,
         action: str,
         options: dict[str, object],
+        workflow_link: WorkflowJobLink | None = None,
     ) -> Job:
         if source.type in DOWNLOAD_JOB_TYPES:
             self._ensure_download_space()
-        cleaned_options = dict(options)
+        cleaned_options = without_workflow_options(options)
         cleaned_options["activation_scope"] = "one_time"
         cleaned_options["source_job_id"] = source.id
         cleaned_options["job_action"] = action
-        workflow_link = workflow_link_from_options(cleaned_options)
+        link = workflow_link or WorkflowJobLink()
         status: JobStatus = self._next_one_time_status()
         job = Job(
             id=str(uuid4()),
@@ -415,9 +404,9 @@ class JobService:
             input_artwork_id=source.input_artwork_id,
             artist_id=source.artist_id,
             options=cleaned_options,
-            workflow_run_id=workflow_link.run_id,
-            workflow_item_id=workflow_link.item_id,
-            workflow_source=workflow_link.source,
+            workflow_run_id=link.run_id,
+            workflow_item_id=link.item_id,
+            workflow_source=link.source,
         )
         self.repository.create(job)
         self.repository.add_event(
@@ -458,7 +447,6 @@ class JobService:
             "legacy_latest_download_id_by_artist": {
                 artist_id: legacy_latest_by_artist.get(artist_id) for artist_id in failed_artist_ids
             },
-            **workflow_metadata_from_job(source),
         }
 
     def _failed_legacy_hydration_artist_ids(self, job_id: str, *, limit: int) -> list[str]:
@@ -515,36 +503,20 @@ class WorkflowJobLink:
     source: str | None = None
 
 
-def workflow_link_from_options(options: dict[str, object]) -> WorkflowJobLink:
+def workflow_link_from_job(job: Job) -> WorkflowJobLink:
     return WorkflowJobLink(
-        run_id=string_metadata_option(options.get("workflow_run_id")),
-        item_id=int_metadata_option(options.get("workflow_item_id")),
-        source=string_metadata_option(options.get("workflow_source")),
+        run_id=job.workflow_run_id,
+        item_id=job.workflow_item_id,
+        source=job.workflow_source,
     )
 
 
-def workflow_metadata_from_job(job: Job) -> dict[str, object]:
-    metadata: dict[str, object] = {}
-    if job.workflow_run_id:
-        metadata["workflow_run_id"] = job.workflow_run_id
-    if job.workflow_item_id is not None:
-        metadata["workflow_item_id"] = job.workflow_item_id
-    if job.workflow_source:
-        metadata["workflow_source"] = job.workflow_source
-    return metadata
-
-
-def string_metadata_option(value: object) -> str | None:
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
-def int_metadata_option(value: object) -> int | None:
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
+def without_workflow_options(options: dict[str, object]) -> dict[str, object]:
+    return {
+        key: value
+        for key, value in options.items()
+        if key not in {"workflow_run_id", "workflow_item_id", "workflow_source"}
+    }
 
 
 def clean_job_options(options: dict[str, object]) -> dict[str, object]:
@@ -588,10 +560,6 @@ def clean_job_options(options: dict[str, object]) -> dict[str, object]:
         tag_variants = legacy_tag_variants(options)
     if tag_variants:
         cleaned["tag_variants"] = tag_variants
-    for key in ("workflow_run_id", "workflow_item_id", "workflow_source"):
-        value = options.get(key)
-        if isinstance(value, str | int) and str(value):
-            cleaned[key] = value
     return cleaned
 
 

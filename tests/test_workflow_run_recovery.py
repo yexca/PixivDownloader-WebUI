@@ -170,11 +170,6 @@ def test_startup_recovery_requeues_linked_running_job(tmp_path):
                 total_files=10,
                 completed_files=3,
                 started_at="2026-01-01T00:00:00Z",
-                options={
-                    "workflow_run_id": "run-1",
-                    "workflow_item_id": item_id,
-                    "workflow_source": "workflow_batch",
-                },
             )
         )
     finally:
@@ -262,7 +257,6 @@ def test_startup_recovery_wraps_active_orphan_jobs(tmp_path):
     assert running.workflow_run_id == run.id
     assert running.workflow_item_id == run.items[0].id
     assert running.workflow_source == "startup_recovery"
-    assert running.options["workflow_source"] == "startup_recovery"
     assert queued is not None
     assert queued.status == "queued"
     assert queued.workflow_run_id == run.id

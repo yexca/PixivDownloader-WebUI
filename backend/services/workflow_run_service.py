@@ -19,7 +19,7 @@ from backend.schemas.scheduled_tasks import (
     scheduled_task_config_to_dict,
 )
 from backend.schemas.workflows import WorkflowBatchItemRequest
-from backend.services.job_service import JobService
+from backend.services.job_service import JobService, WorkflowJobLink
 from backend.services.scheduled_task_service import ScheduledTaskService
 
 ACTIVE_JOB_STATUSES = {"inactive", "queued", "running"}
@@ -57,14 +57,15 @@ class WorkflowRunService:
             title=title,
             draft_id=draft_id,
             config=config,
-            create_jobs=lambda metadata: self._create_download_jobs(
+            create_jobs=lambda workflow_link: self._create_download_jobs(
                 user_id=user_id,
                 artwork_id=artwork_id,
                 force_rescan=force_rescan,
                 retry_failed=retry_failed,
                 sync_only=sync_only,
                 retry_failed_artist=retry_failed_artist,
-                options={**(options or {}), **metadata},
+                options=options,
+                workflow_link=workflow_link,
             ),
         )
 
@@ -140,22 +141,20 @@ class WorkflowRunService:
                 created_at=utc_now(),
             )
         )
-        config = replace(
-            config,
-            download_options={
-                **config.download_options,
-                "workflow_run_id": run.id,
-                "workflow_item_id": item_id,
-                "workflow_source": source,
-            },
-        )
         item = self.repository.list_items(run.id)[0]
         task_service = ScheduledTaskService(
             self.db_path,
             settings_json_path=self.settings_json_path,
         )
         try:
-            jobs = task_service.run_config(config)
+            jobs = task_service.run_config(
+                config,
+                workflow_link=WorkflowJobLink(
+                    run_id=run.id,
+                    item_id=item_id,
+                    source=source,
+                ),
+            )
         except Exception as exc:
             failed_item = replace(
                 item,
@@ -240,11 +239,11 @@ class WorkflowRunService:
             job = service.create_legacy_import_hydration_job(
                 artist_ids=artist_ids,
                 legacy_latest_download_id_by_artist=legacy_latest_download_id_by_artist,
-                options={
-                    "workflow_run_id": run.id,
-                    "workflow_item_id": item_id,
-                    "workflow_source": "legacy_import",
-                },
+                workflow_link=WorkflowJobLink(
+                    run_id=run.id,
+                    item_id=item_id,
+                    source="legacy_import",
+                ),
             )
         finally:
             service.close()
@@ -299,12 +298,15 @@ class WorkflowRunService:
         )
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
-            job = service.retry_job(job_id) if action == "retry" else service.rerun_job(job_id)
-            job = service.relink_job_to_workflow(
-                job.id,
-                workflow_run_id=run.id,
-                workflow_item_id=item_id,
-                workflow_source=source,
+            workflow_link = WorkflowJobLink(
+                run_id=run.id,
+                item_id=item_id,
+                source=source,
+            )
+            job = (
+                service.retry_job(job_id, workflow_link=workflow_link)
+                if action == "retry"
+                else service.rerun_job(job_id, workflow_link=workflow_link)
             )
         finally:
             service.close()
@@ -385,16 +387,14 @@ class WorkflowRunService:
                     )
                     jobs = []
                 else:
-                    config = replace(
+                    jobs = task_service.run_config(
                         config,
-                        download_options={
-                            **config.download_options,
-                            "workflow_run_id": run.id,
-                            "workflow_item_id": item.id,
-                            "workflow_source": "workflow_batch",
-                        },
+                        workflow_link=WorkflowJobLink(
+                            run_id=run.id,
+                            item_id=item.id,
+                            source="workflow_batch",
+                        ),
                     )
-                    jobs = task_service.run_config(config)
             except Exception as exc:
                 previous_failed.add(request.draft_id)
                 self.repository.update_item(
@@ -484,7 +484,7 @@ class WorkflowRunService:
         title: str,
         draft_id: str,
         config: ScheduledTaskConfig,
-        create_jobs: Callable[[dict[str, object]], list[Job]],
+        create_jobs: Callable[[WorkflowJobLink], list[Job]],
     ) -> WorkflowRun:
         now = utc_now()
         run = WorkflowRun(
@@ -515,13 +515,9 @@ class WorkflowRunService:
             )
         )
         item = self.repository.list_items(run.id)[0]
-        metadata = {
-            "workflow_run_id": run.id,
-            "workflow_item_id": item_id,
-            "workflow_source": source,
-        }
+        workflow_link = WorkflowJobLink(run_id=run.id, item_id=item_id, source=source)
         try:
-            jobs = create_jobs(metadata)
+            jobs = create_jobs(workflow_link)
         except Exception as exc:
             failed_item = replace(
                 item,
@@ -659,14 +655,18 @@ class WorkflowRunService:
         )
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
+            running_job_ids: list[str] = []
             for job in orphan_jobs:
-                service.relink_job_to_workflow(
-                    job.id,
-                    workflow_run_id=run.id,
-                    workflow_item_id=item_id,
-                    workflow_source="startup_recovery",
-                )
-            running_job_ids = [job.id for job in orphan_jobs if job.status == "running"]
+                if job.workflow_run_id is None or job.workflow_item_id is None:
+                    updated = replace(
+                        job,
+                        workflow_run_id=run.id,
+                        workflow_item_id=item_id,
+                        workflow_source="startup_recovery",
+                    )
+                    service.repository.update(updated)
+                if job.status == "running":
+                    running_job_ids.append(job.id)
             service.requeue_interrupted_jobs(running_job_ids)
         finally:
             service.close()
@@ -686,6 +686,7 @@ class WorkflowRunService:
         sync_only: bool,
         retry_failed_artist: bool,
         options: dict[str, object],
+        workflow_link: WorkflowJobLink,
     ) -> list[Job]:
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
         try:
@@ -697,6 +698,7 @@ class WorkflowRunService:
                 sync_only=sync_only,
                 retry_failed_artist=retry_failed_artist,
                 options=options,
+                workflow_link=workflow_link,
             )
             return [job]
         finally:

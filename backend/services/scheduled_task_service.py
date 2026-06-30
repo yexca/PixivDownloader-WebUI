@@ -21,7 +21,7 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.scheduled_task_repository import ScheduledTaskRepository
 from backend.repositories.workflow_run_repository import WorkflowRun
-from backend.services.job_service import JobService
+from backend.services.job_service import JobService, WorkflowJobLink
 
 
 class ScheduledTaskService:
@@ -117,7 +117,12 @@ class ScheduledTaskService:
     def activate_inactive_tasks(self) -> list[ScheduledTask]:
         return []
 
-    def run_config(self, config: ScheduledTaskConfig) -> list[Job]:
+    def run_config(
+        self,
+        config: ScheduledTaskConfig,
+        *,
+        workflow_link: WorkflowJobLink | None = None,
+    ) -> list[Job]:
         action = config.actions[0] if config.actions else "download_artist"
         target_artist_id = config.target.artist_id or ""
         task = ScheduledTask(
@@ -129,7 +134,7 @@ class ScheduledTaskService:
             interval_days=1,
             config=config,
         )
-        return self._create_jobs(task, gate_one_time=True)
+        return self._create_jobs(task, gate_one_time=True, workflow_link=workflow_link)
 
     def run_due_tasks(self, *, startup_scan: bool = False) -> list[ScheduledTaskRunResult]:
         now = utc_now()
@@ -233,7 +238,13 @@ class ScheduledTaskService:
         finally:
             repository.close()
 
-    def _create_jobs(self, task: ScheduledTask, *, gate_one_time: bool) -> list[Job]:
+    def _create_jobs(
+        self,
+        task: ScheduledTask,
+        *,
+        gate_one_time: bool,
+        workflow_link: WorkflowJobLink | None = None,
+    ) -> list[Job]:
         config = task.config or legacy_config(task)
         if config.target.type == "artists" and config.target.artwork_ids:
             service = JobService(self.db_path, settings_json_path=self.settings_json_path)
@@ -245,6 +256,7 @@ class ScheduledTaskService:
                     download_options=config.download_options,
                     max_targets_per_run=config.max_artists_per_run,
                     options=config.download_options,
+                    workflow_link=workflow_link,
                     gate_one_time=gate_one_time,
                 )
                 return [] if job is None else [job]
@@ -266,6 +278,7 @@ class ScheduledTaskService:
                     None,
                     artwork_id=config.target.artwork_id,
                     options=config.download_options,
+                    workflow_link=workflow_link,
                     gate_one_time=gate_one_time,
                 )
             ]
@@ -281,6 +294,7 @@ class ScheduledTaskService:
                         action,
                         artist.id,
                         options=config.download_options,
+                        workflow_link=workflow_link,
                         gate_one_time=gate_one_time,
                     )
                 )
@@ -293,6 +307,7 @@ class ScheduledTaskService:
         *,
         artwork_id: str | None = None,
         options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
         gate_one_time: bool,
     ) -> Job:
         service = JobService(self.db_path, settings_json_path=self.settings_json_path)
@@ -305,6 +320,7 @@ class ScheduledTaskService:
                     artwork_id=None,
                     sync_only=True,
                     options=options,
+                    workflow_link=workflow_link,
                     gate_one_time=gate_one_time,
                 )
             if action == "retry_failed_artist":
@@ -315,12 +331,14 @@ class ScheduledTaskService:
                     artwork_id=None,
                     retry_failed_artist=True,
                     options=options,
+                    workflow_link=workflow_link,
                     gate_one_time=gate_one_time,
                 )
             return service.create_download_job(
                 user_id=artist_id,
                 artwork_id=artwork_id,
                 options=options,
+                workflow_link=workflow_link,
                 gate_one_time=gate_one_time,
             )
         finally:
