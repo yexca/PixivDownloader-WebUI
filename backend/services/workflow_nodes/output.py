@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
-from backend.services.workflow_nodes.base import WorkflowNodeContext, WorkflowNodeResult
+from backend.services.workflow_nodes.base import (
+    WorkflowNodeContext,
+    WorkflowNodeExecutorBase,
+    WorkflowNodeResult,
+)
 from backend.services.workflow_nodes.utils import string_or_none
 
 
-class FileOutputNodeExecutor:
+class FileOutputNodeExecutor(WorkflowNodeExecutorBase):
     node_type = "file_output"
 
     def execute(

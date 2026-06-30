@@ -184,6 +184,53 @@ class JobService:
         )
         return self.repository.get_by_id(job.id) or job
 
+    def create_resolve_workflow_targets_job(
+        self,
+        *,
+        artist_ids: tuple[str, ...],
+        artwork_ids: tuple[str, ...],
+        max_targets_per_run: int,
+        options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
+        gate_one_time: bool = True,
+    ) -> Job | None:
+        if not artist_ids and not artwork_ids:
+            return None
+        metadata = clean_job_options(options or {})
+        job_options = {
+            "artist_ids": list(artist_ids),
+            "artwork_ids": list(artwork_ids),
+            "max_targets_per_run": max_targets_per_run,
+            **metadata,
+        }
+        link = workflow_link or WorkflowJobLink()
+        status: JobStatus = "queued"
+        if gate_one_time:
+            job_options["activation_scope"] = "one_time"
+            status = self._next_one_time_status()
+        job = Job(
+            id=str(uuid4()),
+            type="resolve_workflow_targets",
+            status=status,
+            total_files=len(artist_ids) + len(artwork_ids),
+            options=job_options,
+            workflow_run_id=link.run_id,
+            workflow_item_id=link.item_id,
+            workflow_source=link.source,
+        )
+        self.repository.create(job)
+        self.repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Workflow target resolver queued"
+                if status == "queued"
+                else "Workflow target resolver waiting for one-time task capacity",
+                payload=job_options,
+            )
+        )
+        return self.repository.get_by_id(job.id) or job
+
     def rerun_job(self, job_id: str, *, workflow_link: WorkflowJobLink | None = None) -> Job:
         source = self.repository.get_by_id(job_id)
         if source is None:

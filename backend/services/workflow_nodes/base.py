@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from backend.domain.entities import Job
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
 
 
@@ -31,3 +32,27 @@ class WorkflowNodeExecutor(Protocol):
         context: WorkflowNodeContext,
     ) -> WorkflowNodeResult:
         ...
+
+    def complete_from_jobs(
+        self,
+        node_run: WorkflowNodeRun,
+        jobs: list[Job],
+        context: WorkflowNodeContext,
+    ) -> WorkflowNodeResult:
+        ...
+
+
+class WorkflowNodeExecutorBase:
+    def complete_from_jobs(
+        self,
+        node_run: WorkflowNodeRun,
+        jobs: list[Job],
+        context: WorkflowNodeContext,
+    ) -> WorkflowNodeResult:
+        del context
+        return WorkflowNodeResult(
+            output={
+                **node_run.output,
+                "completed_jobs": [job.id for job in jobs],
+            }
+        )

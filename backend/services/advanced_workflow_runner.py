@@ -96,7 +96,7 @@ class AdvancedWorkflowRunner:
             if node_run.status == "failed":
                 break
             if node_run.status == "running" and node_run.job_ids:
-                refreshed = self._refresh_node_jobs(node_run)
+                refreshed = self._refresh_node_jobs(node_run, context, item_id=item_id)
                 if refreshed.status != "completed":
                     break
                 node_run = refreshed
@@ -164,7 +164,13 @@ class AdvancedWorkflowRunner:
         self._sync_item_jobs(node_run.workflow_run_id, item_id, result.job_ids)
         return running
 
-    def _refresh_node_jobs(self, node_run: WorkflowNodeRun) -> WorkflowNodeRun:
+    def _refresh_node_jobs(
+        self,
+        node_run: WorkflowNodeRun,
+        context: dict[str, object],
+        *,
+        item_id: int | None,
+    ) -> WorkflowNodeRun:
         repository = JobRepository(self.db_path)
         try:
             jobs = repository.list_by_ids(node_run.job_ids)
@@ -191,11 +197,26 @@ class AdvancedWorkflowRunner:
             )
             self.repository.update_node_run(failed)
             return failed
-        output = {
-            **node_run.output,
-            "completed_jobs": [job.id for job in jobs],
-        }
-        return self._complete(node_run, output)
+        executor = self.node_registry.get(node_run.node_type)
+        if executor is None:
+            return self._complete(
+                node_run,
+                {
+                    **node_run.output,
+                    "completed_jobs": [job.id for job in jobs],
+                },
+            )
+        result = executor.complete_from_jobs(
+            node_run,
+            jobs,
+            WorkflowNodeContext(
+                db_path=self.db_path,
+                settings_json_path=self.settings_json_path,
+                workflow_item_id=item_id,
+                values=context,
+            ),
+        )
+        return self._complete(node_run, result.output)
 
     def _complete(self, node_run: WorkflowNodeRun, output: dict[str, object]) -> WorkflowNodeRun:
         completed = replace(

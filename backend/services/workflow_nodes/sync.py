@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
-from backend.services.workflow_nodes.base import WorkflowNodeContext, WorkflowNodeResult
+from backend.services.workflow_nodes.base import (
+    WorkflowNodeContext,
+    WorkflowNodeExecutorBase,
+    WorkflowNodeResult,
+)
 
 
-class SyncMetadataNodeExecutor:
+class SyncMetadataNodeExecutor(WorkflowNodeExecutorBase):
     node_type = "sync_metadata"
 
     def execute(

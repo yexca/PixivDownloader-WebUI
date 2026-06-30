@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
@@ -43,6 +43,13 @@ class FileDownloaderFactory(Protocol):
     def __call__(self) -> FileDownloader: ...
 
 
+@dataclass(frozen=True)
+class ResolvedTargetArtists:
+    artist_ids: list[str]
+    from_artworks: list[dict[str, str]]
+    skipped_count: int
+
+
 class DownloadWorker:
     def __init__(
         self,
@@ -69,6 +76,8 @@ class DownloadWorker:
             job = self._start(repository, job)
             if job.type == "hydrate_legacy_import":
                 return self._run_legacy_import_hydration_job(repository, job)
+            if job.type == "resolve_workflow_targets":
+                return self._run_resolve_workflow_targets_job(repository, job)
             if job.type == "resolve_artist_targets":
                 return self._run_resolve_artist_targets_job(repository, job)
             if job.type == "sync_artist":
@@ -226,7 +235,76 @@ class DownloadWorker:
         artwork_ids = string_list_option(job.options.get("artwork_ids"))
         actions = action_list_option(job.options.get("actions"))
         download_options = dict_option(job.options.get("download_options"))
-        max_targets = positive_int_option(job.options.get("max_targets_per_run")) or max(
+        resolved = self._resolve_target_artists(artist_ids, artwork_ids, job.options)
+        finished = replace(
+            repository.get_by_id(job.id) or job,
+            status="completed",
+            total_files=len(artist_ids) + len(artwork_ids),
+            completed_files=len(resolved.artist_ids),
+            skipped_files=resolved.skipped_count,
+            failed_files=0,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message=f"Resolved {len(resolved.artist_ids)} artist target(s)",
+                payload={
+                    "artist_ids": resolved.artist_ids,
+                    "resolved_artist_ids": resolved.artist_ids,
+                    "resolved_from_artworks": resolved.from_artworks,
+                },
+            )
+        )
+
+        created_jobs = self._create_resolved_artist_jobs(
+            source_job=finished,
+            artist_ids=resolved.artist_ids,
+            actions=actions,
+            download_options=download_options,
+        )
+        if created_jobs:
+            self._append_workflow_item_jobs(finished, [created.id for created in created_jobs])
+        return repository.get_by_id(job.id) or finished
+
+    def _run_resolve_workflow_targets_job(self, repository: JobRepository, job: Job) -> Job:
+        artist_ids = string_list_option(job.options.get("artist_ids"))
+        artwork_ids = string_list_option(job.options.get("artwork_ids"))
+        resolved = self._resolve_target_artists(artist_ids, artwork_ids, job.options)
+        finished = replace(
+            repository.get_by_id(job.id) or job,
+            status="completed",
+            total_files=len(artist_ids) + len(artwork_ids),
+            completed_files=len(resolved.artist_ids),
+            skipped_files=resolved.skipped_count,
+            failed_files=0,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message=f"Resolved {len(resolved.artist_ids)} workflow artist target(s)",
+                payload={
+                    "artist_ids": resolved.artist_ids,
+                    "resolved_artist_ids": resolved.artist_ids,
+                    "resolved_from_artworks": resolved.from_artworks,
+                    "skipped_count": resolved.skipped_count,
+                },
+            )
+        )
+        return repository.get_by_id(job.id) or finished
+
+    def _resolve_target_artists(
+        self,
+        artist_ids: list[str],
+        artwork_ids: list[str],
+        options: dict[str, object],
+    ) -> ResolvedTargetArtists:
+        max_targets = positive_int_option(options.get("max_targets_per_run")) or max(
             1,
             len(artist_ids) + len(artwork_ids),
         )
@@ -241,37 +319,11 @@ class DownloadWorker:
             )
 
         deduped_artist_ids = dedupe_preserve_order(resolved_artist_ids)[:max_targets]
-        finished = replace(
-            repository.get_by_id(job.id) or job,
-            status="completed",
-            total_files=len(artist_ids) + len(artwork_ids),
-            completed_files=len(deduped_artist_ids),
-            skipped_files=max(0, len(resolved_artist_ids) - len(deduped_artist_ids)),
-            failed_files=0,
-            finished_at=utc_now(),
-        )
-        repository.update(finished)
-        repository.add_event(
-            JobEvent(
-                job_id=job.id,
-                level="info",
-                message=f"Resolved {len(deduped_artist_ids)} artist target(s)",
-                payload={
-                    "resolved_artist_ids": deduped_artist_ids,
-                    "resolved_from_artworks": resolved_from_artworks,
-                },
-            )
-        )
-
-        created_jobs = self._create_resolved_artist_jobs(
-            source_job=finished,
+        return ResolvedTargetArtists(
             artist_ids=deduped_artist_ids,
-            actions=actions,
-            download_options=download_options,
+            from_artworks=resolved_from_artworks,
+            skipped_count=max(0, len(resolved_artist_ids) - len(deduped_artist_ids)),
         )
-        if created_jobs:
-            self._append_workflow_item_jobs(finished, [created.id for created in created_jobs])
-        return repository.get_by_id(job.id) or finished
 
     def _create_resolved_artist_jobs(
         self,

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
-from backend.services.workflow_nodes.base import WorkflowNodeContext, WorkflowNodeResult
+from backend.services.workflow_nodes.base import (
+    WorkflowNodeContext,
+    WorkflowNodeExecutorBase,
+    WorkflowNodeResult,
+)
 from backend.services.workflow_nodes.utils import positive_int, string_or_none
 
 
-class CollectArtworksNodeExecutor:
+class CollectArtworksNodeExecutor(WorkflowNodeExecutorBase):
     node_type = "collect_artworks"
 
     def execute(

@@ -28,6 +28,7 @@ class FakePixivClient:
         *,
         stop_at_artwork_id: str | None = None,
     ) -> list[Artwork]:
+        del stop_at_artwork_id
         return [
             Artwork(
                 id="200",
@@ -62,6 +63,7 @@ class ResolvingPixivClient:
         *,
         stop_at_artwork_id: str | None = None,
     ) -> list[Artwork]:
+        del stop_at_artwork_id
         return []
 
 
@@ -82,6 +84,7 @@ class FakeLegacyPixivClient:
         *,
         stop_at_artwork_id: str | None = None,
     ) -> list[Artwork]:
+        del stop_at_artwork_id
         if user_id == "closed":
             return []
         return [
@@ -125,6 +128,7 @@ class FakeUnavailablePixivClient:
         *,
         stop_at_artwork_id: str | None = None,
     ) -> list[Artwork]:
+        del stop_at_artwork_id
         return []
 
 
@@ -453,3 +457,51 @@ def test_worker_resolves_artwork_targets_and_appends_artist_jobs(tmp_path):
     assert item.status == "running"
     assert run is not None
     assert run.status == "running"
+
+
+def test_worker_resolves_workflow_targets_without_creating_action_jobs(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    job_repository = JobRepository(db_path)
+    try:
+        job_repository.create(
+            Job(
+                id="target-resolver-1",
+                type="resolve_workflow_targets",
+                status="queued",
+                workflow_source="advanced_workflow",
+                options={
+                    "artist_ids": ["123"],
+                    "artwork_ids": ["111", "222"],
+                    "max_targets_per_run": 25,
+                },
+            )
+        )
+    finally:
+        job_repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=ResolvingPixivClient,
+        file_downloader_factory=lambda: FakeFileDownloader(tmp_path),
+    )
+
+    job = worker.run_job("target-resolver-1")
+
+    assert job.status == "completed"
+    assert job.completed_files == 2
+    job_repository = JobRepository(db_path)
+    try:
+        jobs = job_repository.list(limit=20)
+        events = job_repository.list_events("target-resolver-1")
+    finally:
+        job_repository.close()
+    assert [item.id for item in jobs] == ["target-resolver-1"]
+    assert events[-1].payload == {
+        "artist_ids": ["123", "456"],
+        "resolved_artist_ids": ["123", "456"],
+        "resolved_from_artworks": [
+            {"artwork_id": "111", "artist_id": "456", "artist_name": "Resolved Artist"},
+            {"artwork_id": "222", "artist_id": "123", "artist_name": "Duplicate Artist"},
+        ],
+        "skipped_count": 1,
+    }

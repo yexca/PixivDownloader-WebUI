@@ -14,6 +14,7 @@ JobType = Literal[
     "retry_failed",
     "retry_failed_artist",
     "hydrate_legacy_import",
+    "resolve_workflow_targets",
     "resolve_artist_targets",
 ]
 ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]

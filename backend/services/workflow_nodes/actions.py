@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
 from backend.services.job_service import JobService, WorkflowJobLink
-from backend.services.workflow_nodes.base import WorkflowNodeContext, WorkflowNodeResult
+from backend.services.workflow_nodes.base import (
+    WorkflowNodeContext,
+    WorkflowNodeExecutorBase,
+    WorkflowNodeResult,
+)
 from backend.services.workflow_nodes.utils import (
     action_list,
     dict_option,
@@ -11,7 +15,7 @@ from backend.services.workflow_nodes.utils import (
 )
 
 
-class ExecuteActionsNodeExecutor:
+class ExecuteActionsNodeExecutor(WorkflowNodeExecutorBase):
     node_type = "execute_actions"
 
     def execute(
@@ -21,9 +25,8 @@ class ExecuteActionsNodeExecutor:
         context: WorkflowNodeContext,
     ) -> WorkflowNodeResult:
         artist_ids = tuple(string_list(context.values.get("artist_ids")))
-        artwork_ids = tuple(string_list(context.values.get("artwork_ids")))
         actions = tuple(action_list(config.get("actions")))
-        if not artist_ids and not artwork_ids:
+        if not artist_ids:
             return WorkflowNodeResult(output={"job_ids": [], "message": "No artist targets."})
 
         download_options = {
@@ -44,11 +47,11 @@ class ExecuteActionsNodeExecutor:
         try:
             job = service.create_resolve_artist_targets_job(
                 artist_ids=artist_ids,
-                artwork_ids=artwork_ids,
+                artwork_ids=(),
                 actions=actions,
                 download_options=download_options,
                 max_targets_per_run=positive_int(context.values.get("max_artists"))
-                or max(1, len(artist_ids) + len(artwork_ids)),
+                or max(1, len(artist_ids)),
                 options=download_options,
                 workflow_link=WorkflowJobLink(
                     run_id=node_run.workflow_run_id,
