@@ -112,112 +112,7 @@ export function DashboardPage(): JSX.Element {
           <Metric label="Artist updates" value={summary.data?.library.artists_with_updates ?? 0} loading={summary.isLoading} tone="warning" />
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.8fr)]">
-          <section className="space-y-4">
-            <SectionHeader
-              icon={<Workflow className="h-4 w-4" aria-hidden="true" />}
-              title="Active Work"
-              action={<Button asChild size="sm" variant="outline"><Link to="/workflows">Open Workflows</Link></Button>}
-            />
-            {loading ? (
-              <DataState title="Loading workflow state" variant="loading" />
-            ) : runGroups.active.length || waitingJobs.length ? (
-              <div className="space-y-4">
-                <WorkflowGroupSection title="Running Runs" count={runGroups.active.length}>
-                  {runGroups.active.slice(0, 3).map((run) => (
-                    <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
-                  ))}
-                </WorkflowGroupSection>
-                <WorkflowGroupSection title="Waiting Queue" count={waitingJobs.length}>
-                  {waitingJobs.slice(0, 3).map((job) => (
-                    <WaitingJobCard key={job.id} job={job} />
-                  ))}
-                </WorkflowGroupSection>
-              </div>
-            ) : activeJob ? (
-              <JobProgress job={activeJob} message={stream.lastMessage?.message} />
-            ) : (
-              <DataState
-                title="No active workflow"
-                description="Stage a workflow when you are ready."
-                actionLabel="Open Workflows"
-                onAction={() => navigate("/workflows")}
-              />
-            )}
-          </section>
-
-          <section className="space-y-4">
-            <SectionHeader
-              icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
-              title="Schedules"
-              action={<Button asChild size="sm" variant="outline"><Link to="/workflows">Manage</Link></Button>}
-            />
-            {loading ? (
-              <DataState title="Loading schedules" variant="loading" />
-            ) : scheduleGroups.blocked.length ? (
-              <WorkflowGroupSection title="Blocked Schedules" count={scheduleGroups.blocked.length}>
-                {scheduleGroups.blocked.slice(0, 3).map((task) => (
-                  <ScheduleWorkflowCard
-                    key={task.id}
-                    task={task}
-                    lastRun={latestScheduleRun(task, allRuns)}
-                    onRuntimeChanged={refetchAll}
-                  />
-                ))}
-              </WorkflowGroupSection>
-            ) : scheduleGroups.active.length ? (
-              <WorkflowGroupSection title="Active Schedules" count={scheduleGroups.active.length}>
-                {scheduleGroups.active.slice(0, 3).map((task) => (
-                  <ScheduleWorkflowCard
-                    key={task.id}
-                    task={task}
-                    lastRun={latestScheduleRun(task, allRuns)}
-                    onRuntimeChanged={refetchAll}
-                  />
-                ))}
-              </WorkflowGroupSection>
-            ) : (
-              <DataState title="No active schedules" description="Scheduled workflows will appear here." />
-            )}
-          </section>
-        </div>
-
-        <div className="grid gap-4 xl:grid-cols-2">
-          <section className="space-y-4">
-            <SectionHeader
-              icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
-              title="Failures"
-              action={<Button asChild size="sm" variant="outline"><Link to="/jobs">Open Jobs</Link></Button>}
-            />
-            {loading ? (
-              <DataState title="Loading failures" variant="loading" />
-            ) : runGroups.failed.length || scheduleGroups.blocked.length ? (
-              <div className="space-y-4">
-                {failedRunReasonGroups.slice(0, 2).map((group) => (
-                  <WorkflowGroupSection key={`runs-${group.reason}`} title={`Failed Runs · ${group.reason}`} count={group.items.length}>
-                    {group.items.slice(0, 2).map((run) => (
-                      <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
-                    ))}
-                  </WorkflowGroupSection>
-                ))}
-                {blockedScheduleReasonGroups.slice(0, 2).map((group) => (
-                  <WorkflowGroupSection key={`schedules-${group.reason}`} title={`Blocked Schedules · ${group.reason}`} count={group.items.length}>
-                    {group.items.slice(0, 2).map((task) => (
-                      <ScheduleWorkflowCard
-                        key={task.id}
-                        task={task}
-                        lastRun={latestScheduleRun(task, allRuns)}
-                        onRuntimeChanged={refetchAll}
-                      />
-                    ))}
-                  </WorkflowGroupSection>
-                ))}
-              </div>
-            ) : (
-              <DataState title="No workflow failures" description="Failed runs and blocked schedules will appear here." />
-            )}
-          </section>
-
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.35fr)_minmax(0,0.95fr)] xl:items-start">
           <section className="space-y-4">
             <SectionHeader
               icon={<Library className="h-4 w-4" aria-hidden="true" />}
@@ -251,6 +146,111 @@ export function DashboardPage(): JSX.Element {
               </div>
             </div>
           </section>
+
+          <div className="space-y-4">
+            <section className="space-y-4">
+              <SectionHeader
+                icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
+                title="Schedules"
+                action={<Button asChild size="sm" variant="outline"><Link to="/workflows">Manage</Link></Button>}
+              />
+              {loading ? (
+                <DataState title="Loading schedules" variant="loading" />
+              ) : scheduleGroups.blocked.length ? (
+                <WorkflowGroupSection title="Blocked Schedules" count={scheduleGroups.blocked.length}>
+                  {scheduleGroups.blocked.slice(0, 3).map((task) => (
+                    <ScheduleWorkflowCard
+                      key={task.id}
+                      task={task}
+                      lastRun={latestScheduleRun(task, allRuns)}
+                      onRuntimeChanged={refetchAll}
+                    />
+                  ))}
+                </WorkflowGroupSection>
+              ) : scheduleGroups.active.length ? (
+                <WorkflowGroupSection title="Active Schedules" count={scheduleGroups.active.length}>
+                  {scheduleGroups.active.slice(0, 3).map((task) => (
+                    <ScheduleWorkflowCard
+                      key={task.id}
+                      task={task}
+                      lastRun={latestScheduleRun(task, allRuns)}
+                      onRuntimeChanged={refetchAll}
+                    />
+                  ))}
+                </WorkflowGroupSection>
+              ) : (
+                <DataState title="No active schedules" description="Scheduled workflows will appear here." />
+              )}
+            </section>
+
+            <section className="space-y-4">
+              <SectionHeader
+                icon={<Workflow className="h-4 w-4" aria-hidden="true" />}
+                title="Active Works"
+                action={<Button asChild size="sm" variant="outline"><Link to="/workflows">Open Workflows</Link></Button>}
+              />
+              {loading ? (
+                <DataState title="Loading workflow state" variant="loading" />
+              ) : runGroups.active.length || waitingJobs.length ? (
+                <div className="space-y-4">
+                  <WorkflowGroupSection title="Running Runs" count={runGroups.active.length}>
+                    {runGroups.active.slice(0, 3).map((run) => (
+                      <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
+                    ))}
+                  </WorkflowGroupSection>
+                  <WorkflowGroupSection title="Waiting Queue" count={waitingJobs.length}>
+                    {waitingJobs.slice(0, 3).map((job) => (
+                      <WaitingJobCard key={job.id} job={job} />
+                    ))}
+                  </WorkflowGroupSection>
+                </div>
+              ) : activeJob ? (
+                <JobProgress job={activeJob} message={stream.lastMessage?.message} />
+              ) : (
+                <DataState
+                  title="No active workflow"
+                  description="Stage a workflow when you are ready."
+                  actionLabel="Open Workflows"
+                  onAction={() => navigate("/workflows")}
+                />
+              )}
+            </section>
+
+            <section className="space-y-4">
+              <SectionHeader
+                icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
+                title="Failures"
+                action={<Button asChild size="sm" variant="outline"><Link to="/jobs">Open Jobs</Link></Button>}
+              />
+              {loading ? (
+                <DataState title="Loading failures" variant="loading" />
+              ) : runGroups.failed.length || scheduleGroups.blocked.length ? (
+                <div className="space-y-4">
+                  {failedRunReasonGroups.slice(0, 2).map((group) => (
+                    <WorkflowGroupSection key={`runs-${group.reason}`} title={`Failed Runs · ${group.reason}`} count={group.items.length}>
+                      {group.items.slice(0, 2).map((run) => (
+                        <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
+                      ))}
+                    </WorkflowGroupSection>
+                  ))}
+                  {blockedScheduleReasonGroups.slice(0, 2).map((group) => (
+                    <WorkflowGroupSection key={`schedules-${group.reason}`} title={`Blocked Schedules · ${group.reason}`} count={group.items.length}>
+                      {group.items.slice(0, 2).map((task) => (
+                        <ScheduleWorkflowCard
+                          key={task.id}
+                          task={task}
+                          lastRun={latestScheduleRun(task, allRuns)}
+                          onRuntimeChanged={refetchAll}
+                        />
+                      ))}
+                    </WorkflowGroupSection>
+                  ))}
+                </div>
+              ) : (
+                <DataState title="No workflow failures" description="Failed runs and blocked schedules will appear here." />
+              )}
+            </section>
+          </div>
         </div>
 
         <section>
