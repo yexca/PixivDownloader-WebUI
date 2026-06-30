@@ -517,7 +517,7 @@ export function WorkflowsPage(): JSX.Element {
                 onClick={() =>
                   runAllMutation.mutate({
                     items: drafts,
-                    concurrency: clampConcurrency(settings.data?.max_active_one_time_tasks ?? 1)
+                    concurrency: clampConcurrency(settings.data?.max_active_run_jobs ?? 1)
                   })
                 }
               >

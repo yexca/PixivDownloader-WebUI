@@ -23,7 +23,7 @@ class Settings:
     file_download_random_delay_seconds: float = 0.5
     max_concurrent_downloads: int = 1
     max_active_scheduled_tasks: int = 1
-    max_active_one_time_tasks: int = 1
+    max_active_run_jobs: int = 1
     min_free_space_gb: float = 10.0
     existing_file_behavior: ExistingFileBehavior = "skip"
     library_stale_check_days: int = 30
@@ -42,9 +42,9 @@ class Settings:
         if max_active_scheduled_tasks < 1:
             raise ConfigError("max_active_scheduled_tasks must be at least 1")
 
-        max_active_one_time_tasks = int(data.get("max_active_one_time_tasks", 1))
-        if max_active_one_time_tasks < 1:
-            raise ConfigError("max_active_one_time_tasks must be at least 1")
+        max_active_run_jobs = int(data.get("max_active_run_jobs", 1))
+        if max_active_run_jobs < 1:
+            raise ConfigError("max_active_run_jobs must be at least 1")
 
         request_base_delay_seconds = float(data.get("request_base_delay_seconds", 0.0))
         request_random_delay_seconds = float(data.get("request_random_delay_seconds", 2.0))
@@ -84,7 +84,7 @@ class Settings:
             file_download_random_delay_seconds=file_download_random_delay_seconds,
             max_concurrent_downloads=max_concurrent_downloads,
             max_active_scheduled_tasks=max_active_scheduled_tasks,
-            max_active_one_time_tasks=max_active_one_time_tasks,
+            max_active_run_jobs=max_active_run_jobs,
             min_free_space_gb=min_free_space_gb,
             existing_file_behavior=existing_file_behavior,
             library_stale_check_days=library_stale_check_days,
@@ -100,7 +100,7 @@ class Settings:
             "file_download_random_delay_seconds": self.file_download_random_delay_seconds,
             "max_concurrent_downloads": self.max_concurrent_downloads,
             "max_active_scheduled_tasks": self.max_active_scheduled_tasks,
-            "max_active_one_time_tasks": self.max_active_one_time_tasks,
+            "max_active_run_jobs": self.max_active_run_jobs,
             "min_free_space_gb": self.min_free_space_gb,
             "existing_file_behavior": self.existing_file_behavior,
             "overwrite_existing_files": self.existing_file_behavior == "overwrite",
@@ -177,7 +177,7 @@ class SettingsService:
             "file_download_random_delay_seconds": settings.file_download_random_delay_seconds,
             "max_concurrent_downloads": settings.max_concurrent_downloads,
             "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
-            "max_active_one_time_tasks": settings.max_active_one_time_tasks,
+            "max_active_run_jobs": settings.max_active_run_jobs,
             "min_free_space_gb": settings.min_free_space_gb,
             "existing_file_behavior": settings.existing_file_behavior,
             "overwrite_existing_files": settings.existing_file_behavior == "overwrite",

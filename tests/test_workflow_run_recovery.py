@@ -435,7 +435,7 @@ def write_settings(tmp_path):
             "request_random_delay_seconds": 0,
             "max_concurrent_downloads": 1,
             "max_active_scheduled_tasks": 1,
-            "max_active_one_time_tasks": 1,
+            "max_active_run_jobs": 1,
             "min_free_space_gb": 0,
             "existing_file_behavior": "skip",
             "library_stale_check_days": 30

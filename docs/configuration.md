@@ -43,6 +43,7 @@ env\python\python.exe tools\migrate_settings_to_config.py
 - `file_download_base_delay_seconds`: minimum delay before real image file downloads.
 - `file_download_random_delay_seconds`: random delay range for image file downloads.
 - `max_concurrent_downloads`: configured concurrency limit.
+- `max_active_run_jobs`: workflow run job activation limit.
 - `overwrite_existing_files`: whether existing files should be overwritten.
 - `skip_existing_files`: whether existing files should be skipped.
 

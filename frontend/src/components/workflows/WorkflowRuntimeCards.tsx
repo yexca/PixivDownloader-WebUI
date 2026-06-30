@@ -368,7 +368,7 @@ export function WorkflowLimitPanel({
   jobs: Job[];
   settings?: SettingsResponse;
   disabled: boolean;
-  onSync: (key: "max_active_one_time_tasks", value: number) => void;
+  onSync: (key: "max_active_run_jobs", value: number) => void;
 }): JSX.Element {
   const runStats = workflowJobStats(jobs);
 
@@ -376,11 +376,11 @@ export function WorkflowLimitPanel({
     <div className="min-w-0">
       <WorkflowLimitControl
         label="Run limit"
-        value={settings?.max_active_one_time_tasks ?? 1}
+        value={settings?.max_active_run_jobs ?? 1}
         disabled={disabled || !settings}
         active={runStats.active}
         waiting={runStats.waiting}
-        onSync={(value) => onSync("max_active_one_time_tasks", value)}
+        onSync={(value) => onSync("max_active_run_jobs", value)}
       />
     </div>
   );

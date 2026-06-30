@@ -14,7 +14,7 @@ export type SettingsResponse = {
   file_download_random_delay_seconds: number;
   max_concurrent_downloads: number;
   max_active_scheduled_tasks: number;
-  max_active_one_time_tasks: number;
+  max_active_run_jobs: number;
   min_free_space_gb: number;
   existing_file_behavior: ExistingFileBehavior;
   library_stale_check_days: number;
@@ -31,7 +31,7 @@ export type SettingsUpdateRequest = {
   file_download_random_delay_seconds?: number;
   max_concurrent_downloads?: number;
   max_active_scheduled_tasks?: number;
-  max_active_one_time_tasks?: number;
+  max_active_run_jobs?: number;
   min_free_space_gb?: number;
   existing_file_behavior?: ExistingFileBehavior;
   library_stale_check_days?: number;

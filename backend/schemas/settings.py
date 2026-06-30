@@ -17,7 +17,7 @@ class SettingsResponse(BaseModel):
     file_download_random_delay_seconds: float
     max_concurrent_downloads: int
     max_active_scheduled_tasks: int
-    max_active_one_time_tasks: int
+    max_active_run_jobs: int
     min_free_space_gb: float
     existing_file_behavior: ExistingFileBehavior
     overwrite_existing_files: bool
@@ -34,7 +34,7 @@ class SettingsUpdateRequest(BaseModel):
     file_download_random_delay_seconds: float | None = Field(default=None, ge=0)
     max_concurrent_downloads: int | None = Field(default=None, ge=1)
     max_active_scheduled_tasks: int | None = Field(default=None, ge=1)
-    max_active_one_time_tasks: int | None = Field(default=None, ge=1)
+    max_active_run_jobs: int | None = Field(default=None, ge=1)
     min_free_space_gb: float | None = Field(default=None, ge=0)
     existing_file_behavior: ExistingFileBehavior | None = None
     overwrite_existing_files: bool | None = None

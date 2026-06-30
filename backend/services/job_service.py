@@ -357,15 +357,15 @@ class JobService:
         return "queued" if self._one_time_activation_capacity() > 0 else "inactive"
 
     def _one_time_activation_capacity(self) -> int:
-        return max(0, self._max_active_one_time_tasks() - self.repository.count_active_one_time())
+        return max(0, self._max_active_run_jobs() - self.repository.count_active_one_time())
 
-    def _max_active_one_time_tasks(self) -> int:
+    def _max_active_run_jobs(self) -> int:
         settings_service = AppSettingsService(
             db_path=self.db_path,
             settings_json_path=self.settings_json_path,
         )
         try:
-            return settings_service.load().max_active_one_time_tasks
+            return settings_service.load().max_active_run_jobs
         finally:
             settings_service.close()
 

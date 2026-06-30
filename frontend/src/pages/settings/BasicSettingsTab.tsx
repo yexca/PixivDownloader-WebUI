@@ -134,12 +134,12 @@ export function BasicSettingsTab({
             />
             <NumberField
               label="Run limit"
-              value={form.max_active_one_time_tasks}
-              error={errors.max_active_one_time_tasks}
+              value={form.max_active_run_jobs}
+              error={errors.max_active_run_jobs}
               min={1}
               step={1}
               tooltip="Maximum number of workflow run jobs allowed to wait or run. Extra run jobs stay inactive."
-              onChange={(value) => onChange({ ...form, max_active_one_time_tasks: Math.max(1, Math.trunc(value)) })}
+              onChange={(value) => onChange({ ...form, max_active_run_jobs: Math.max(1, Math.trunc(value)) })}
             />
             <NumberField
               label="Minimum free GB"

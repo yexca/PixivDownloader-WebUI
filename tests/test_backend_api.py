@@ -189,7 +189,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
             "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 2,
             "max_active_scheduled_tasks": 3,
-            "max_active_one_time_tasks": 4,
+            "max_active_run_jobs": 4,
             "min_free_space_gb": 10.0,
             "library_stale_check_days": 14,
             "existing_file_behavior": "save_duplicate",
@@ -202,7 +202,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["download_path_editable"] is True
     assert body["runtime_mode"] == "local"
     assert body["max_active_scheduled_tasks"] == 3
-    assert body["max_active_one_time_tasks"] == 4
+    assert body["max_active_run_jobs"] == 4
     assert body["file_download_base_delay_seconds"] == 0.4
     assert body["file_download_random_delay_seconds"] == 0.5
     assert body["min_free_space_gb"] == 10.0
@@ -2057,7 +2057,7 @@ def make_config(tmp_path):
             "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 1,
             "max_active_scheduled_tasks": 1,
-            "max_active_one_time_tasks": 1,
+            "max_active_run_jobs": 1,
             "min_free_space_gb": 10.0,
             "existing_file_behavior": "skip",
             "library_stale_check_days": 30

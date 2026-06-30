@@ -119,7 +119,7 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         "file_download_random_delay_seconds": settings.file_download_random_delay_seconds,
         "max_concurrent_downloads": settings.max_concurrent_downloads,
         "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
-        "max_active_one_time_tasks": settings.max_active_one_time_tasks,
+        "max_active_run_jobs": settings.max_active_run_jobs,
         "min_free_space_gb": settings.min_free_space_gb,
         "existing_file_behavior": settings.existing_file_behavior,
         "overwrite_existing_files": settings.existing_file_behavior == "overwrite",
