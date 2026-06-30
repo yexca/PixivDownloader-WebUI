@@ -16,7 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "httpx",
+    "httpx2",
     "pytest",
     "ruff",
     "websockets",
