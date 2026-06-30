@@ -5,6 +5,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from backend.domain.types import FailureReason
+from backend.repositories.workflow_definition_repository import (
+    WorkflowDefinition,
+    WorkflowDefinitionWithTriggers,
+    WorkflowTrigger,
+)
 from backend.repositories.workflow_run_repository import (
     WorkflowNodeRun,
     WorkflowRun,
@@ -66,6 +71,46 @@ class AdvancedWorkflowRunRequest(BaseModel):
     definition: AdvancedWorkflowDefinitionRequest
 
 
+class WorkflowTriggerRequest(BaseModel):
+    enabled: bool = True
+    schedule: dict[str, object] = Field(default_factory=dict)
+    run_now: bool = False
+
+
+class WorkflowDefinitionSaveRequest(BaseModel):
+    definition_id: str | None = None
+    definition: AdvancedWorkflowDefinitionRequest
+    trigger: WorkflowTriggerRequest | None = None
+
+
+class WorkflowTriggerResponse(BaseModel):
+    id: int
+    workflow_definition_id: str
+    status: str
+    schedule: dict[str, object]
+    next_run_at: str | None
+    last_run_at: str | None
+    last_success_at: str | None
+    last_error_code: str | None
+    last_error_message: str | None
+    created_at: str | None
+    updated_at: str | None
+
+
+class WorkflowDefinitionResponse(BaseModel):
+    id: str
+    name: str
+    definition: dict[str, object]
+    triggers: list[WorkflowTriggerResponse] = Field(default_factory=list)
+    created_at: str | None
+    updated_at: str | None
+
+
+class WorkflowDefinitionListResponse(BaseModel):
+    items: list[WorkflowDefinitionResponse]
+    total: int
+
+
 class WorkflowRunItemResponse(BaseModel):
     id: int | None
     run_id: str
@@ -121,6 +166,12 @@ class WorkflowBatchRunListResponse(BaseModel):
     total: int
 
 
+class WorkflowDefinitionSaveResponse(BaseModel):
+    definition: WorkflowDefinitionResponse
+    trigger: WorkflowTriggerResponse | None = None
+    run: WorkflowBatchRunResponse | None = None
+
+
 def workflow_run_response(run: WorkflowRun) -> WorkflowBatchRunResponse:
     items = [workflow_run_item_response(item) for item in run.items]
     node_runs = [workflow_node_run_response(node_run) for node_run in run.node_runs]
@@ -139,6 +190,43 @@ def workflow_run_response(run: WorkflowRun) -> WorkflowBatchRunResponse:
         finished_at=run.finished_at,
         items=items,
         node_runs=node_runs,
+    )
+
+
+def workflow_definition_response(
+    item: WorkflowDefinitionWithTriggers | WorkflowDefinition,
+) -> WorkflowDefinitionResponse:
+    if isinstance(item, WorkflowDefinitionWithTriggers):
+        definition = item.definition
+        triggers = item.triggers
+    else:
+        definition = item
+        triggers = []
+    return WorkflowDefinitionResponse(
+        id=definition.id,
+        name=definition.name,
+        definition=definition.definition,
+        triggers=[workflow_trigger_response(trigger) for trigger in triggers],
+        created_at=definition.created_at,
+        updated_at=definition.updated_at,
+    )
+
+
+def workflow_trigger_response(trigger: WorkflowTrigger) -> WorkflowTriggerResponse:
+    if trigger.id is None:
+        raise ValueError("workflow trigger id is required")
+    return WorkflowTriggerResponse(
+        id=trigger.id,
+        workflow_definition_id=trigger.workflow_definition_id,
+        status=trigger.status,
+        schedule=trigger.schedule,
+        next_run_at=trigger.next_run_at,
+        last_run_at=trigger.last_run_at,
+        last_success_at=trigger.last_success_at,
+        last_error_code=trigger.last_error_code,
+        last_error_message=trigger.last_error_message,
+        created_at=trigger.created_at,
+        updated_at=trigger.updated_at,
     )
 
 

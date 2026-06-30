@@ -20,10 +20,18 @@ import { Select } from "@/components/ui/select";
 import { Tabs } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ToastProvider";
-import { createAdvancedWorkflowRun, type AdvancedWorkflowRunRequest } from "@/api/workflows";
+import {
+  createAdvancedWorkflowRun,
+  saveWorkflowDefinition,
+  type AdvancedWorkflowRunRequest,
+  type WorkflowScheduleRule
+} from "@/api/workflows";
 import { cn } from "@/lib/utils";
 
 type TriggerMode = "manual" | "schedule";
+type SaveIntent = "run_now" | "save_only" | "save_and_schedule" | "run_and_schedule";
+type ScheduleType = "interval" | "daily" | "weekly" | "monthly";
+type IntervalUnit = "minutes" | "hours" | "days";
 type TargetScope = "selected" | "all" | "tagged" | "stale";
 type SyncMode = "none" | "incremental" | "full";
 type CollectMode =
@@ -40,8 +48,13 @@ type PreviewTab = "summary" | "json";
 type WorkflowDraft = {
   name: string;
   triggerMode: TriggerMode;
-  intervalDays: string;
-  runAfterStartup: boolean;
+  saveIntent: SaveIntent;
+  scheduleType: ScheduleType;
+  intervalEvery: string;
+  intervalUnit: IntervalUnit;
+  scheduleTime: string;
+  weeklyDays: number[];
+  monthlyDay: string;
   targetScope: TargetScope;
   artistIds: string;
   artistTag: string;
@@ -73,8 +86,13 @@ type StageKey = "trigger" | "target" | "sync" | "collect" | "filters" | "actions
 const initialDraft: WorkflowDraft = {
   name: "Artist download pipeline",
   triggerMode: "manual",
-  intervalDays: "7",
-  runAfterStartup: false,
+  saveIntent: "run_now",
+  scheduleType: "interval",
+  intervalEvery: "6",
+  intervalUnit: "hours",
+  scheduleTime: "03:00",
+  weeklyDays: [1, 3, 5],
+  monthlyDay: "1",
   targetScope: "selected",
   artistIds: "123456\n234567",
   artistTag: "",
@@ -141,6 +159,44 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
       pushToast({ title: "Advanced workflow failed", description: error.message, tone: "error" });
     }
   });
+  const saveMutation = useMutation({
+    mutationFn: saveWorkflowDefinition,
+    onSuccess: (response) => {
+      const runId = response.run?.id;
+      const triggerLabel = response.trigger ? " with trigger" : "";
+      pushToast({
+        title: runId ? "Workflow saved and started" : `Workflow saved${triggerLabel}`,
+        description: runId ?? response.definition.id,
+        tone: "success"
+      });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      onSubmitted?.();
+    },
+    onError: (error) => {
+      pushToast({ title: "Workflow could not be saved", description: error.message, tone: "error" });
+    }
+  });
+
+  const submitting = runMutation.isPending || saveMutation.isPending;
+  const submitAdvanced = () => {
+    if (draft.saveIntent === "run_now") {
+      runMutation.mutate(workflowJson);
+      return;
+    }
+    const shouldSchedule = draft.saveIntent === "save_and_schedule" || draft.saveIntent === "run_and_schedule";
+    saveMutation.mutate({
+      definition: workflowJson.definition,
+      trigger: shouldSchedule
+        ? {
+            enabled: true,
+            schedule: buildScheduleRule(draft),
+            run_now: draft.saveIntent === "run_and_schedule"
+          }
+        : null
+    });
+  };
 
   return (
     <div className="grid min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[minmax(0,1fr)_340px]">
@@ -160,11 +216,11 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
             </Button>
             <Button
               type="button"
-              disabled={runMutation.isPending}
-              onClick={() => runMutation.mutate(workflowJson)}
+              disabled={submitting}
+              onClick={submitAdvanced}
             >
               <Save className="h-4 w-4" aria-hidden="true" />
-              Run Workflow
+              {submitLabel(draft)}
             </Button>
             </div>
           </div>
@@ -278,20 +334,89 @@ function StageEditor({
             { value: "manual", label: "Manual" },
             { value: "schedule", label: "Schedule" }
           ]}
-          onChange={(value) => update("triggerMode", value)}
+          onChange={(value) => {
+            update("triggerMode", value);
+            update("saveIntent", value === "manual" ? "run_now" : "save_and_schedule");
+          }}
         />
         {draft.triggerMode === "schedule" ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Interval days">
-              <Input value={draft.intervalDays} inputMode="numeric" onChange={(event) => update("intervalDays", event.target.value)} />
+          <div className="space-y-4">
+            <Field label="On save">
+              <Segmented
+                value={draft.saveIntent}
+                items={[
+                  { value: "save_and_schedule", label: "Save schedule" },
+                  { value: "run_and_schedule", label: "Run + schedule" },
+                  { value: "save_only", label: "Save only" }
+                ]}
+                onChange={(value) => update("saveIntent", value)}
+              />
             </Field>
-            <Toggle
-              label="Run after startup"
-              checked={draft.runAfterStartup}
-              onChange={(checked) => update("runAfterStartup", checked)}
-            />
+            <Field label="Schedule type">
+              <Select value={draft.scheduleType} onChange={(event) => update("scheduleType", event.target.value as ScheduleType)} className="w-full">
+                <option value="interval">Interval</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </Select>
+            </Field>
+            {draft.scheduleType === "interval" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Every">
+                  <Input value={draft.intervalEvery} inputMode="numeric" onChange={(event) => update("intervalEvery", event.target.value)} />
+                </Field>
+                <Field label="Unit">
+                  <Select value={draft.intervalUnit} onChange={(event) => update("intervalUnit", event.target.value as IntervalUnit)} className="w-full">
+                    <option value="minutes">Minutes</option>
+                    <option value="hours">Hours</option>
+                    <option value="days">Days</option>
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
+            {draft.scheduleType === "daily" ? (
+              <Field label="Time">
+                <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
+              </Field>
+            ) : null}
+            {draft.scheduleType === "weekly" ? (
+              <div className="space-y-3">
+                <Field label="Days">
+                  <WeekdayPicker value={draft.weeklyDays} onChange={(value) => update("weeklyDays", value)} />
+                </Field>
+                <Field label="Time">
+                  <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
+                </Field>
+              </div>
+            ) : null}
+            {draft.scheduleType === "monthly" ? (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Day">
+                  <Select value={draft.monthlyDay} onChange={(event) => update("monthlyDay", event.target.value)} className="w-full">
+                    {Array.from({ length: 31 }, (_, index) => String(index + 1)).map((day) => (
+                      <option key={day} value={day}>{day}</option>
+                    ))}
+                    <option value="last">Last day</option>
+                  </Select>
+                </Field>
+                <Field label="Time">
+                  <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
+                </Field>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        ) : (
+          <Field label="On submit">
+            <Segmented
+              value={draft.saveIntent}
+              items={[
+                { value: "run_now", label: "Run now" },
+                { value: "save_only", label: "Save only" }
+              ]}
+              onChange={(value) => update("saveIntent", value)}
+            />
+          </Field>
+        )}
       </EditorPanel>
     );
   }
@@ -607,6 +732,43 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   );
 }
 
+function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (value: number[]) => void }): JSX.Element {
+  const days = [
+    { value: 1, label: "Mon" },
+    { value: 2, label: "Tue" },
+    { value: 3, label: "Wed" },
+    { value: 4, label: "Thu" },
+    { value: 5, label: "Fri" },
+    { value: 6, label: "Sat" },
+    { value: 7, label: "Sun" }
+  ];
+  return (
+    <div className="flex flex-wrap gap-2">
+      {days.map((day) => {
+        const selected = value.includes(day.value);
+        return (
+          <button
+            key={day.value}
+            type="button"
+            className={cn(
+              "h-8 rounded-md border px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted",
+              selected && "border-primary bg-primary/10 text-primary"
+            )}
+            onClick={() => {
+              const next = selected
+                ? value.filter((item) => item !== day.value)
+                : [...value, day.value].sort((left, right) => left - right);
+              onChange(next.length ? next : [day.value]);
+            }}
+          >
+            {day.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Field({ label, children }: { label: string; children: React.ReactNode }): JSX.Element {
   return (
     <label className="block text-sm">
@@ -649,7 +811,43 @@ function stageDetail(stage: StageKey, draft: WorkflowDraft): string {
 }
 
 function triggerDetail(draft: WorkflowDraft): string {
-  return draft.triggerMode === "schedule" ? `Every ${draft.intervalDays || "-"} day(s)` : "Manual run";
+  if (draft.triggerMode !== "schedule") {
+    return draft.saveIntent === "save_only" ? "Saved definition" : "Manual run";
+  }
+  return `${scheduleRuleText(draft)}, ${saveIntentText(draft.saveIntent)}`;
+}
+
+function submitLabel(draft: WorkflowDraft): string {
+  const labels: Record<SaveIntent, string> = {
+    run_now: "Run Workflow",
+    save_only: "Save Workflow",
+    save_and_schedule: "Save Schedule",
+    run_and_schedule: "Run + Schedule"
+  };
+  return labels[draft.saveIntent];
+}
+
+function saveIntentText(intent: SaveIntent): string {
+  const labels: Record<SaveIntent, string> = {
+    run_now: "run now",
+    save_only: "save only",
+    save_and_schedule: "scheduled",
+    run_and_schedule: "run now and schedule"
+  };
+  return labels[intent];
+}
+
+function scheduleRuleText(draft: WorkflowDraft): string {
+  if (draft.scheduleType === "daily") {
+    return `Daily at ${draft.scheduleTime || "--:--"}`;
+  }
+  if (draft.scheduleType === "weekly") {
+    return `Weekly at ${draft.scheduleTime || "--:--"}`;
+  }
+  if (draft.scheduleType === "monthly") {
+    return `Monthly day ${draft.monthlyDay || "-"} at ${draft.scheduleTime || "--:--"}`;
+  }
+  return `Every ${draft.intervalEvery || "-"} ${draft.intervalUnit}`;
 }
 
 function targetDetail(draft: WorkflowDraft): string {
@@ -813,6 +1011,31 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       name: draft.name,
       nodes
     }
+  };
+}
+
+function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
+  if (draft.scheduleType === "daily") {
+    return { type: "daily", time: draft.scheduleTime || "00:00" };
+  }
+  if (draft.scheduleType === "weekly") {
+    return {
+      type: "weekly",
+      days_of_week: draft.weeklyDays.length ? draft.weeklyDays : [1],
+      time: draft.scheduleTime || "00:00"
+    };
+  }
+  if (draft.scheduleType === "monthly") {
+    return {
+      type: "monthly",
+      day: draft.monthlyDay === "last" ? "last" : Math.max(1, Number(draft.monthlyDay) || 1),
+      time: draft.scheduleTime || "00:00"
+    };
+  }
+  return {
+    type: "interval",
+    every: Math.max(1, Number(draft.intervalEvery) || 1),
+    unit: draft.intervalUnit
   };
 }
 

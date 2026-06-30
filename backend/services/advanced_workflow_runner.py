@@ -34,7 +34,13 @@ class AdvancedWorkflowRunner:
         self.repository = WorkflowRunRepository(db_path)
         self.node_registry = node_registry or default_node_registry()
 
-    def create_run(self, definition: AdvancedWorkflowDefinitionRequest) -> WorkflowRun:
+    def create_run(
+        self,
+        definition: AdvancedWorkflowDefinitionRequest,
+        *,
+        source: str = "advanced",
+        schedule_id: int | None = None,
+    ) -> WorkflowRun:
         if not definition.nodes:
             raise ValueError("advanced workflow requires at least one node")
         now = utc_now()
@@ -46,7 +52,8 @@ class AdvancedWorkflowRunner:
             failed=0,
             skipped=0,
             concurrency=1,
-            source="advanced",
+            source=source,
+            schedule_id=schedule_id,
             created_at=now,
         )
         self.repository.create_run(run)
@@ -58,7 +65,11 @@ class AdvancedWorkflowRunner:
                 title=definition.name or "Advanced workflow",
                 status="running",
                 config=definition.model_dump(mode="json"),
-                request={"source": "advanced", "definition": definition.model_dump(mode="json")},
+                request={
+                    "source": source,
+                    "schedule_id": schedule_id,
+                    "definition": definition.model_dump(mode="json"),
+                },
                 created_at=now,
             )
         )
@@ -83,7 +94,7 @@ class AdvancedWorkflowRunner:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
-        if run.source != "advanced":
+        if run.source not in {"advanced", "advanced_manual", "workflow_trigger"}:
             return run
 
         context: dict[str, object] = {}

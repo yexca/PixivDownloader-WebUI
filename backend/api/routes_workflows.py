@@ -9,12 +9,18 @@ from backend.schemas.workflows import (
     WorkflowBatchRunListResponse,
     WorkflowBatchRunRequest,
     WorkflowBatchRunResponse,
+    WorkflowDefinitionListResponse,
+    WorkflowDefinitionSaveRequest,
+    WorkflowDefinitionSaveResponse,
     WorkflowRunRequest,
     WorkflowRunResponse,
+    workflow_definition_response,
     workflow_run_response,
+    workflow_trigger_response,
 )
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.workflow_run_service import WorkflowRunService
+from backend.services.workflow_schedule_service import WorkflowScheduleService
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
@@ -78,6 +84,61 @@ def create_advanced_workflow_run(
     if any(node.job_ids for node in run.node_runs):
         queue.wake()
     return workflow_run_response(run)
+
+
+@router.get("/definitions", response_model=WorkflowDefinitionListResponse)
+def list_workflow_definitions(
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> WorkflowDefinitionListResponse:
+    _ = settings_json_path
+    service = WorkflowScheduleService(db_path)
+    try:
+        items = service.list_definitions()
+    finally:
+        service.close()
+    return WorkflowDefinitionListResponse(
+        items=[workflow_definition_response(item) for item in items],
+        total=len(items),
+    )
+
+
+@router.post("/definitions", response_model=WorkflowDefinitionSaveResponse)
+def save_workflow_definition(
+    request: WorkflowDefinitionSaveRequest,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+    queue: Queue,
+) -> WorkflowDefinitionSaveResponse:
+    service = WorkflowScheduleService(db_path, settings_json_path=settings_json_path)
+    try:
+        trigger = None
+        if request.trigger is None:
+            definition = service.save_definition(
+                request.definition,
+                definition_id=request.definition_id,
+            )
+        else:
+            definition, trigger = service.save_with_trigger(
+                request.definition,
+                definition_id=request.definition_id,
+                enabled=request.trigger.enabled,
+                schedule=request.trigger.schedule,
+            )
+        run = (
+            service.run_definition(definition.id, source="advanced_manual")
+            if request.trigger is not None and request.trigger.run_now
+            else None
+        )
+    finally:
+        service.close()
+    if run is not None and any(node.job_ids for node in run.node_runs):
+        queue.wake()
+    return WorkflowDefinitionSaveResponse(
+        definition=workflow_definition_response(definition),
+        trigger=workflow_trigger_response(trigger) if trigger is not None else None,
+        run=workflow_run_response(run) if run is not None else None,
+    )
 
 
 @router.get("/runs", response_model=WorkflowBatchRunListResponse)

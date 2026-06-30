@@ -100,6 +100,56 @@ export type AdvancedWorkflowRunRequest = {
   };
 };
 
+export type WorkflowScheduleRule =
+  | { type: "interval"; every: number; unit: "minutes" | "hours" | "days" }
+  | { type: "daily"; time: string }
+  | { type: "weekly"; days_of_week: number[]; time: string }
+  | { type: "monthly"; day: number | "last"; time: string };
+
+export type WorkflowTrigger = {
+  id: number;
+  workflow_definition_id: string;
+  status: string;
+  schedule: Record<string, unknown>;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  last_error_code: string | null;
+  last_error_message: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type WorkflowDefinition = {
+  id: string;
+  name: string;
+  definition: Record<string, unknown>;
+  triggers: WorkflowTrigger[];
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type WorkflowDefinitionSaveRequest = {
+  definition_id?: string | null;
+  definition: AdvancedWorkflowRunRequest["definition"];
+  trigger?: {
+    enabled: boolean;
+    schedule: WorkflowScheduleRule;
+    run_now: boolean;
+  } | null;
+};
+
+export type WorkflowDefinitionSaveResponse = {
+  definition: WorkflowDefinition;
+  trigger: WorkflowTrigger | null;
+  run: WorkflowBatchRun | null;
+};
+
+export type WorkflowDefinitionListResponse = {
+  items: WorkflowDefinition[];
+  total: number;
+};
+
 export function runWorkflow(request: WorkflowRunRequest): Promise<WorkflowRunResponse> {
   return apiRequest<WorkflowRunResponse>("/workflows/run", {
     method: "POST",
@@ -119,6 +169,17 @@ export function createAdvancedWorkflowRun(request: AdvancedWorkflowRunRequest): 
     method: "POST",
     body: request
   });
+}
+
+export function saveWorkflowDefinition(request: WorkflowDefinitionSaveRequest): Promise<WorkflowDefinitionSaveResponse> {
+  return apiRequest<WorkflowDefinitionSaveResponse>("/workflows/definitions", {
+    method: "POST",
+    body: request
+  });
+}
+
+export function listWorkflowDefinitions(): Promise<WorkflowDefinitionListResponse> {
+  return apiRequest<WorkflowDefinitionListResponse>("/workflows/definitions");
 }
 
 export function listWorkflowRuns(limit = 5): Promise<WorkflowBatchRunListResponse> {
