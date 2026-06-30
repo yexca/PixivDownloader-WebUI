@@ -90,9 +90,10 @@ def test_advanced_workflow_creates_node_runs_and_action_job(tmp_path):
     assert job.workflow_source == "advanced_workflow"
 
 
-def test_advanced_workflow_resolves_target_job_before_action_job(tmp_path):
+def test_advanced_workflow_actions_node_creates_candidate_artist_jobs(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path)
+    seed_collect_library(db_path)
 
     definition = AdvancedWorkflowDefinitionRequest.model_validate(
         {
@@ -104,15 +105,20 @@ def test_advanced_workflow_resolves_target_job_before_action_job(tmp_path):
                     "title": "Target artists",
                     "config": {
                         "artist_ids": ["123"],
-                        "artwork_ids": ["999"],
                         "max_artists": 10,
                     },
+                },
+                {
+                    "id": "collect",
+                    "type": "collect_artworks",
+                    "title": "Collect candidates",
+                    "config": {"mode": "pending_files"},
                 },
                 {
                     "id": "actions",
                     "type": "execute_actions",
                     "title": "Execute actions",
-                    "config": {"actions": ["sync_artist"]},
+                    "config": {"download": True, "execution_unit": "artist"},
                 },
             ],
         }
@@ -133,20 +139,77 @@ def test_advanced_workflow_resolves_target_job_before_action_job(tmp_path):
 
     assert run.status == "running"
     assert run.node_runs[0].status == "completed"
-    assert run.node_runs[0].output["artist_ids"] == ["123", "456"]
-    assert run.node_runs[0].output["resolved_count"] == 2
-    assert run.node_runs[1].status == "running"
+    assert run.node_runs[1].status == "completed"
+    assert run.node_runs[2].status == "running"
 
     repository = JobRepository(db_path)
     try:
-        action_job = repository.get_by_id(run.node_runs[1].job_ids[0])
+        action_job = repository.get_by_id(run.node_runs[2].job_ids[0])
     finally:
         repository.close()
 
     assert action_job is not None
-    assert action_job.type == "resolve_artist_targets"
-    assert action_job.options["artist_ids"] == ["123", "456"]
-    assert action_job.options["artwork_ids"] == []
+    assert action_job.type == "download_candidate_artist"
+    assert action_job.input_user_id == "123"
+    assert action_job.options["candidate_set_id"] == run.node_runs[1].output["candidate_set_id"]
+
+
+def test_advanced_workflow_actions_node_creates_candidate_set_job(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    seed_collect_library(db_path)
+
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Advanced set action workflow",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {"artist_ids": ["123"], "max_artists": 10},
+                },
+                {
+                    "id": "collect",
+                    "type": "collect_artworks",
+                    "title": "Collect candidates",
+                    "config": {"mode": "pending_files"},
+                },
+                {
+                    "id": "actions",
+                    "type": "execute_actions",
+                    "title": "Execute actions",
+                    "config": {"download": True, "execution_unit": "set"},
+                },
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(db_path)
+    try:
+        run = runner.create_run(definition)
+        worker = DownloadWorker(
+            db_path=db_path,
+            pixiv_client_factory=WorkflowTargetPixivClient,
+        )
+        worker.run_job(run.node_runs[0].job_ids[0])
+        run = runner.process_run(run.id, item_id=run.items[0].id)
+    finally:
+        runner.close()
+
+    assert run.status == "running"
+    assert run.node_runs[2].status == "running"
+    assert len(run.node_runs[2].job_ids) == 1
+
+    repository = JobRepository(db_path)
+    try:
+        action_job = repository.get_by_id(run.node_runs[2].job_ids[0])
+    finally:
+        repository.close()
+
+    assert action_job is not None
+    assert action_job.type == "download_candidate_set"
+    assert action_job.input_user_id is None
 
 
 def test_advanced_workflow_sync_node_creates_artist_sync_jobs(tmp_path):

@@ -231,6 +231,51 @@ class JobService:
         )
         return self.repository.get_by_id(job.id) or job
 
+    def create_candidate_download_job(
+        self,
+        *,
+        candidate_set_id: str,
+        artist_id: str | None = None,
+        options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
+        gate_one_time: bool = True,
+    ) -> Job:
+        self._ensure_download_space()
+        metadata = clean_job_options(options or {})
+        job_options = {
+            "candidate_set_id": candidate_set_id,
+            **metadata,
+        }
+        if artist_id is not None:
+            job_options["artist_id"] = artist_id
+        link = workflow_link or WorkflowJobLink()
+        status: JobStatus = "queued"
+        if gate_one_time:
+            job_options["activation_scope"] = "one_time"
+            status = self._next_one_time_status()
+        job = Job(
+            id=str(uuid4()),
+            type="download_candidate_artist" if artist_id is not None else "download_candidate_set",
+            status=status,
+            input_user_id=artist_id,
+            options=job_options,
+            workflow_run_id=link.run_id,
+            workflow_item_id=link.item_id,
+            workflow_source=link.source,
+        )
+        self.repository.create(job)
+        self.repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Candidate download queued"
+                if status == "queued"
+                else "Candidate download waiting for one-time task capacity",
+                payload=job_options,
+            )
+        )
+        return self.repository.get_by_id(job.id) or job
+
     def rerun_job(self, job_id: str, *, workflow_link: WorkflowJobLink | None = None) -> Job:
         source = self.repository.get_by_id(job_id)
         if source is None:
@@ -540,6 +585,8 @@ DOWNLOAD_JOB_TYPES = {
     "rescan_artist",
     "retry_failed",
     "retry_failed_artist",
+    "download_candidate_artist",
+    "download_candidate_set",
 }
 
 
@@ -568,7 +615,16 @@ def without_workflow_options(options: dict[str, object]) -> dict[str, object]:
 
 def clean_job_options(options: dict[str, object]) -> dict[str, object]:
     cleaned: dict[str, object] = {}
-    for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
+    for key in (
+        "max_artworks",
+        "min_artwork_id",
+        "max_artwork_id",
+        "candidate_set_id",
+        "artist_id",
+        "candidate_source",
+        "execution_unit",
+        "conflict_mode",
+    ):
         value = options.get(key)
         if value is None or value == "":
             continue

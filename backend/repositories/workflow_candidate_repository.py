@@ -8,7 +8,10 @@ from pathlib import Path
 
 from backend.core.errors import DatabaseError
 from backend.db.connection import connect
+from backend.domain.entities import Artwork, ArtworkFile
 from backend.repositories._time import utc_now
+from backend.repositories.artwork_repository import artwork_from_row
+from backend.repositories.file_repository import artwork_file_from_row
 
 
 @dataclass(frozen=True)
@@ -139,6 +142,11 @@ class WorkflowCandidateRepository:
         request: FilterArtworkCandidatesRequest,
     ) -> FilterArtworkCandidatesResult:
         source_set = self.get_candidate_set(request.source_set_id)
+        candidate_source = (
+            str(source_set.config.get("candidate_source") or source_set.config.get("collect_mode"))
+            if source_set is not None
+            else "filtered_artworks"
+        )
         source_count = self.count_artworks(request.source_set_id)
         stopped_by_rule = (
             request.stop_above_limit is not None and source_count > request.stop_above_limit
@@ -149,7 +157,7 @@ class WorkflowCandidateRepository:
             workflow_node_run_id=request.workflow_node_run_id,
             source="filtered_artworks",
             sort_order=source_set.sort_order if source_set is not None else "source_order",
-            config=request.config,
+            config={**request.config, "candidate_source": candidate_source},
             rows=rows,
         )
         return FilterArtworkCandidatesResult(
@@ -201,6 +209,76 @@ class WorkflowCandidateRepository:
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to list workflow candidate ids for {set_id}") from exc
         return [str(row["artwork_id"]) for row in rows]
+
+    def list_artist_ids(self, set_id: str) -> list[str]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT artist_id
+                FROM workflow_candidate_artworks
+                WHERE set_id = ?
+                GROUP BY artist_id
+                ORDER BY MIN(position)
+                """,
+                (set_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list workflow candidate artists for {set_id}") from exc
+        return [str(row["artist_id"]) for row in rows]
+
+    def list_artworks(
+        self,
+        set_id: str,
+        *,
+        artist_id: str | None = None,
+    ) -> list[Artwork]:
+        params: list[object] = [set_id]
+        artist_filter = ""
+        if artist_id is not None:
+            artist_filter = "AND candidates.artist_id = ?"
+            params.append(artist_id)
+        try:
+            rows = self.conn.execute(
+                f"""
+                SELECT artworks.*
+                FROM workflow_candidate_artworks AS candidates
+                JOIN artworks ON artworks.id = candidates.artwork_id
+                WHERE candidates.set_id = ?
+                  {artist_filter}
+                ORDER BY candidates.position
+                """,
+                params,
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list workflow candidate artworks for {set_id}") from exc
+        return [artwork_from_row(row) for row in rows]
+
+    def list_files_for_artwork(
+        self,
+        artwork_id: str,
+        *,
+        candidate_source: str,
+    ) -> list[ArtworkFile]:
+        statuses = file_statuses_for_candidate_source(candidate_source)
+        status_filter = ""
+        params: list[object] = [artwork_id]
+        if statuses is not None:
+            status_filter = "AND status IN (" + ",".join("?" for _ in statuses) + ")"
+            params.extend(statuses)
+        try:
+            rows = self.conn.execute(
+                f"""
+                SELECT *
+                FROM artwork_files
+                WHERE artwork_id = ?
+                  {status_filter}
+                ORDER BY page_index
+                """,
+                params,
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list candidate files for artwork {artwork_id}") from exc
+        return [artwork_file_from_row(row) for row in rows]
 
     def close(self) -> None:
         self.conn.close()
@@ -422,3 +500,11 @@ def candidate_sort_expression(sort_order: str) -> str:
     if sort_order == "local_order":
         return "artworks.discovered_at ASC, artworks.id ASC"
     return "sort_key DESC, artworks.id DESC"
+
+
+def file_statuses_for_candidate_source(source: str) -> tuple[str, ...] | None:
+    if source == "failed_files":
+        return ("failed",)
+    if source in {"pending_files", "new_since_last_download"}:
+        return ("remote_only", "pending")
+    return None

@@ -34,6 +34,7 @@ type CollectMode =
 type CollectLimitMode = "none" | "limit";
 type CollectSortOrder = "newest_first" | "oldest_first" | "local_order";
 type ConflictMode = "skip" | "overwrite" | "rename";
+type ExecutionUnit = "artist" | "set";
 type PreviewTab = "summary" | "json";
 
 type WorkflowDraft = {
@@ -57,9 +58,8 @@ type WorkflowDraft = {
   requiredTags: string;
   blockedTags: string;
   downloadEnabled: boolean;
-  retryFailed: boolean;
-  skipExisting: boolean;
   conflictMode: ConflictMode;
+  executionUnit: ExecutionUnit;
   concurrency: string;
   requestDelay: string;
   namingRule: string;
@@ -91,9 +91,8 @@ const initialDraft: WorkflowDraft = {
   requiredTags: "",
   blockedTags: "",
   downloadEnabled: true,
-  retryFailed: false,
-  skipExisting: true,
   conflictMode: "skip",
+  executionUnit: "artist",
   concurrency: "1",
   requestDelay: "2",
   namingRule: "{artist}/{title}_{artwork_id}_{page}",
@@ -458,11 +457,19 @@ function StageEditor({
       <EditorPanel icon={Play} title="Actions" kicker="Execution">
         <div className="grid gap-3 sm:grid-cols-2">
           <Toggle label="Download files" checked={draft.downloadEnabled} onChange={(checked) => update("downloadEnabled", checked)} />
-          <Toggle label="Retry failed files" checked={draft.retryFailed} onChange={(checked) => update("retryFailed", checked)} />
-          <Toggle label="Skip existing files" checked={draft.skipExisting} onChange={(checked) => update("skipExisting", checked)} />
           <Toggle label="Pause on long run" checked={draft.pauseOnLongRun} onChange={(checked) => update("pauseOnLongRun", checked)} />
         </div>
         <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Execution unit">
+            <Segmented
+              value={draft.executionUnit}
+              items={[
+                { value: "artist", label: "Per artist" },
+                { value: "set", label: "Whole set" }
+              ]}
+              onChange={(value) => update("executionUnit", value)}
+            />
+          </Field>
           <Field label="Conflict mode">
             <Select value={draft.conflictMode} onChange={(event) => update("conflictMode", event.target.value as ConflictMode)} className="w-full">
               <option value="skip">Skip</option>
@@ -691,14 +698,8 @@ function filtersDetail(draft: WorkflowDraft): string {
 }
 
 function actionDetail(draft: WorkflowDraft): string {
-  const actions = [];
-  if (draft.downloadEnabled) {
-    actions.push("download");
-  }
-  if (draft.retryFailed) {
-    actions.push("retry failed");
-  }
-  return `${actions.join(" + ") || "no action"}, ${draft.conflictMode} conflicts`;
+  const unit = draft.executionUnit === "artist" ? "per artist" : "whole set";
+  return `${draft.downloadEnabled ? "download" : "no action"}, ${unit}, ${draft.conflictMode}`;
 }
 
 function outputDetail(draft: WorkflowDraft): string {
@@ -720,12 +721,6 @@ function candidateText(draft: WorkflowDraft): { value: string; detail: string } 
 }
 
 function actionMetric(draft: WorkflowDraft): string {
-  if (draft.downloadEnabled && draft.retryFailed) {
-    return "Download + Retry";
-  }
-  if (draft.retryFailed) {
-    return "Retry";
-  }
   return draft.downloadEnabled ? "Download" : "None";
 }
 
@@ -795,10 +790,8 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       type: "execute_actions",
       title: "Execute actions",
       config: {
-        actions: actionList(draft),
         download: draft.downloadEnabled,
-        retry_failed: draft.retryFailed,
-        skip_existing: draft.skipExisting,
+        execution_unit: draft.executionUnit,
         conflict_mode: draft.conflictMode,
         concurrency: numberOrNull(draft.concurrency),
         request_delay_seconds: numberOrNull(draft.requestDelay),
@@ -821,17 +814,6 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       nodes
     }
   };
-}
-
-function actionList(draft: WorkflowDraft): string[] {
-  const actions: string[] = [];
-  if (draft.downloadEnabled) {
-    actions.push("download_artist");
-  }
-  if (draft.retryFailed) {
-    actions.push("retry_failed_artist");
-  }
-  return actions.length ? actions : ["download_artist"];
 }
 
 function countLines(value: string): number {

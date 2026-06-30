@@ -31,6 +31,7 @@ class CollectArtworksNodeExecutor(WorkflowNodeExecutorBase):
         output = {
             "artist_ids": artist_ids,
             "collect_mode": source,
+            "candidate_source": source,
             "collect_sort_order": sort_order,
             "max_artworks": limit,
             "min_artwork_id": min_artwork_id,

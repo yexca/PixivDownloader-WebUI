@@ -4,8 +4,13 @@ from backend.core.paths import downloads_dir
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile, Job
 from backend.repositories.artist_repository import ArtistRepository
+from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.workflow_candidate_repository import (
+    CollectArtworkCandidatesRequest,
+    WorkflowCandidateRepository,
+)
 from backend.repositories.workflow_run_repository import (
     WorkflowRun,
     WorkflowRunItem,
@@ -172,6 +177,31 @@ class FakeFileDownloader:
 
     def download(self, _artist_name: str, _artist_id: str, url: str) -> FileDownloadResult:
         file_path = self.tmp_path / url.split("/")[-1]
+        file_path.write_bytes(b"image")
+        return FileDownloadResult(
+            url=url,
+            file_name=file_path.name,
+            local_path=file_path,
+            size_bytes=file_path.stat().st_size,
+        )
+
+
+class CandidateFileDownloader:
+    def __init__(self, tmp_path):
+        self.tmp_path = tmp_path
+        self.calls: list[str] = []
+
+    def download(
+        self,
+        _artist_name: str,
+        _artist_id: str,
+        url: str,
+        *,
+        relative_path: str | None = None,
+    ) -> FileDownloadResult:
+        self.calls.append(relative_path or url)
+        file_path = self.tmp_path / (relative_path or url.split("/")[-1])
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(b"image")
         return FileDownloadResult(
             url=url,
@@ -568,3 +598,113 @@ def test_worker_resolves_workflow_targets_without_creating_action_jobs(tmp_path)
         ],
         "skipped_count": 1,
     }
+
+
+def test_worker_downloads_candidate_artist_job(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    candidate_set_id = seed_candidate_download_library(db_path)
+    downloader = CandidateFileDownloader(tmp_path)
+    job_repository = JobRepository(db_path)
+    try:
+        job_repository.create(
+            Job(
+                id="candidate-job-1",
+                type="download_candidate_artist",
+                status="queued",
+                input_user_id="123",
+                options={
+                    "candidate_set_id": candidate_set_id,
+                    "conflict_mode": "overwrite",
+                    "naming_rule": "{artist}/{artwork_id}_{page}.{ext}",
+                },
+            )
+        )
+    finally:
+        job_repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=FakePixivClient,
+        file_downloader_factory=lambda: downloader,
+    )
+
+    job = worker.run_job("candidate-job-1")
+
+    assert job.status == "completed"
+    assert job.total_files == 1
+    assert job.completed_files == 1
+    assert downloader.calls == ["Artist/101_0.jpg"]
+    artist_repository = ArtistRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    try:
+        artist = artist_repository.get_by_id("123")
+        files = file_repository.list_by_artwork("101")
+    finally:
+        artist_repository.close()
+        file_repository.close()
+    assert artist is not None
+    assert artist.last_download_id == "101"
+    assert files[0].status == "downloaded"
+
+
+def seed_candidate_download_library(db_path) -> str:
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    candidate_repository = WorkflowCandidateRepository(db_path)
+    workflow_repository = WorkflowRunRepository(db_path)
+    try:
+        workflow_repository.create_run(
+            WorkflowRun(
+                id="candidate-run-1",
+                status="running",
+                total=1,
+                completed=0,
+                failed=0,
+                skipped=0,
+                concurrency=1,
+            )
+        )
+        artist_repository.upsert(Artist(id="123", name="Artist", last_download_id="100"))
+        artwork_repository.upsert(
+            Artwork(
+                id="101",
+                artist_id="123",
+                title="Title",
+                files=(
+                    ArtworkFile(
+                        artwork_id="101",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/101_p0.jpg",
+                        file_name="101_p0.jpg",
+                        status="remote_only",
+                    ),
+                ),
+            )
+        )
+        file_repository.upsert(
+            ArtworkFile(
+                artwork_id="101",
+                page_index=0,
+                original_url="https://i.pximg.net/img-original/img/101_p0.jpg",
+                file_name="101_p0.jpg",
+                status="remote_only",
+            )
+        )
+        candidate_set = candidate_repository.collect_artwork_candidates(
+            CollectArtworkCandidatesRequest(
+                workflow_run_id="candidate-run-1",
+                workflow_node_run_id=None,
+                artist_ids=["123"],
+                source="pending_files",
+                sort_order="newest_first",
+                config={"collect_mode": "pending_files"},
+            )
+        )
+        return candidate_set.id
+    finally:
+        workflow_repository.close()
+        candidate_repository.close()
+        artist_repository.close()
+        artwork_repository.close()
+        file_repository.close()

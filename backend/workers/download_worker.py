@@ -13,7 +13,12 @@ from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.workflow_candidate_repository import WorkflowCandidateRepository
 from backend.repositories.workflow_run_repository import WorkflowRunRepository
+from backend.services.candidate_download_service import (
+    CandidateDownloadService,
+    existing_file_behavior_from_conflict_mode,
+)
 from backend.services.download_service import DownloadOptions, DownloadService
 from backend.services.file_downloader import FileDownloader
 from backend.services.job_service import JobService, workflow_link_from_job
@@ -62,6 +67,7 @@ class DownloadWorker:
         self.db_path = db_path
         self.settings_json_path = settings_json_path
         self.pixiv_client_factory = pixiv_client_factory or self._create_pixiv_client
+        self._custom_file_downloader_factory = file_downloader_factory is not None
         self.file_downloader_factory = file_downloader_factory or self._create_file_downloader
 
     def run_job(self, job_id: str) -> Job:
@@ -82,6 +88,8 @@ class DownloadWorker:
                 return self._run_resolve_artist_targets_job(repository, job)
             if job.type == "sync_artist":
                 return self._run_sync_job(repository, job)
+            if job.type in {"download_candidate_artist", "download_candidate_set"}:
+                return self._run_candidate_download_job(repository, job)
             service = DownloadService(
                 pixiv_client=self.pixiv_client_factory(),
                 file_downloader=self.file_downloader_factory(),
@@ -267,6 +275,58 @@ class DownloadWorker:
         )
         if created_jobs:
             self._append_workflow_item_jobs(finished, [created.id for created in created_jobs])
+        return repository.get_by_id(job.id) or finished
+
+    def _run_candidate_download_job(self, repository: JobRepository, job: Job) -> Job:
+        candidate_set_id = string_option(job.options.get("candidate_set_id"))
+        if candidate_set_id is None:
+            raise ValueError("candidate download job requires candidate_set_id")
+        artist_repository = ArtistRepository(self.db_path)
+        file_repository = ArtworkFileRepository(self.db_path)
+        candidate_repository = WorkflowCandidateRepository(self.db_path)
+        service = CandidateDownloadService(
+            candidate_repository=candidate_repository,
+            artist_repository=artist_repository,
+            file_repository=file_repository,
+            file_downloader=self._create_candidate_file_downloader(job),
+        )
+        try:
+            summary = service.download(
+                candidate_set_id=candidate_set_id,
+                artist_id=job.input_user_id if job.type == "download_candidate_artist" else None,
+                naming_rule=string_option(job.options.get("naming_rule")),
+            )
+        finally:
+            candidate_repository.close()
+            artist_repository.close()
+            file_repository.close()
+        latest = repository.get_by_id(job.id) or job
+        finished = replace(
+            latest,
+            status="completed",
+            artist_id=job.input_user_id,
+            total_files=summary.total_files,
+            completed_files=summary.downloaded_files,
+            skipped_files=summary.skipped_files,
+            failed_files=summary.failed_files,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message=f"Downloaded {summary.downloaded_files} candidate file(s)",
+                payload={
+                    "candidate_set_id": candidate_set_id,
+                    "artist_ids": summary.artist_ids,
+                    "total_files": summary.total_files,
+                    "downloaded_files": summary.downloaded_files,
+                    "skipped_files": summary.skipped_files,
+                    "failed_files": summary.failed_files,
+                },
+            )
+        )
         return repository.get_by_id(job.id) or finished
 
     def _run_resolve_workflow_targets_job(self, repository: JobRepository, job: Job) -> Job:
@@ -539,6 +599,28 @@ class DownloadWorker:
         return FileDownloader(
             settings.download_path,
             existing_file_behavior=settings.existing_file_behavior,
+            request_policy=file_download_request_policy(
+                min_interval_seconds=settings.file_download_base_delay_seconds,
+                random_delay_seconds=settings.file_download_random_delay_seconds,
+            ),
+        )
+
+    def _create_candidate_file_downloader(self, job: Job) -> FileDownloader:
+        if self._custom_file_downloader_factory:
+            return self.file_downloader_factory()
+        settings_service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            settings = settings_service.load()
+        finally:
+            settings_service.close()
+        return FileDownloader(
+            settings.download_path,
+            existing_file_behavior=existing_file_behavior_from_conflict_mode(
+                job.options.get("conflict_mode")
+            ),
             request_policy=file_download_request_policy(
                 min_interval_seconds=settings.file_download_base_delay_seconds,
                 random_delay_seconds=settings.file_download_random_delay_seconds,
