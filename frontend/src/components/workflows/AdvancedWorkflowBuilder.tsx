@@ -26,7 +26,13 @@ import { cn } from "@/lib/utils";
 type TriggerMode = "manual" | "schedule";
 type TargetScope = "selected" | "all" | "tagged" | "stale";
 type SyncMode = "none" | "incremental" | "full";
-type CollectMode = "new" | "all_local" | "failed";
+type CollectMode =
+  | "new_since_last_download"
+  | "pending_files"
+  | "all_synced"
+  | "failed_files";
+type CollectLimitMode = "none" | "limit";
+type CollectSortOrder = "newest_first" | "oldest_first" | "local_order";
 type ConflictMode = "skip" | "overwrite" | "rename";
 type PreviewTab = "summary" | "json";
 
@@ -42,9 +48,11 @@ type WorkflowDraft = {
   maxArtists: string;
   syncMode: SyncMode;
   collectMode: CollectMode;
+  collectLimitMode: CollectLimitMode;
   maxArtworks: string;
   minArtworkId: string;
   maxArtworkId: string;
+  collectSortOrder: CollectSortOrder;
   filterAi: "include" | "exclude" | "only";
   minBookmarks: string;
   requiredTags: string;
@@ -74,10 +82,12 @@ const initialDraft: WorkflowDraft = {
   staleDays: "30",
   maxArtists: "20",
   syncMode: "incremental",
-  collectMode: "new",
+  collectMode: "new_since_last_download",
+  collectLimitMode: "limit",
   maxArtworks: "200",
   minArtworkId: "",
   maxArtworkId: "",
+  collectSortOrder: "newest_first",
   filterAi: "include",
   minBookmarks: "",
   requiredTags: "",
@@ -348,22 +358,65 @@ function StageEditor({
       <EditorPanel icon={ListChecks} title="Collect" kicker="Candidate artworks">
         <Field label="Candidate set">
           <Select value={draft.collectMode} onChange={(event) => update("collectMode", event.target.value as CollectMode)} className="w-full">
-            <option value="new">New since last download</option>
-            <option value="all_local">All local artworks</option>
-            <option value="failed">Failed files only</option>
+            <option value="new_since_last_download">New since last download</option>
+            <option value="pending_files">Pending files</option>
+            <option value="all_synced">All synced artworks</option>
+            <option value="failed_files">Failed files</option>
           </Select>
         </Field>
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Max artworks">
-            <Input value={draft.maxArtworks} inputMode="numeric" onChange={(event) => update("maxArtworks", event.target.value)} />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Candidate limit">
+            <div className="flex flex-wrap gap-2">
+              <Segmented
+                value={draft.collectLimitMode}
+                items={[
+                  { value: "none", label: "No limit" },
+                  { value: "limit", label: "Limit" }
+                ]}
+                onChange={(value) => update("collectLimitMode", value)}
+              />
+              {draft.collectLimitMode === "limit" ? (
+                <Input
+                  value={draft.maxArtworks}
+                  inputMode="numeric"
+                  className="w-28"
+                  onChange={(event) => update("maxArtworks", event.target.value)}
+                />
+              ) : null}
+            </div>
           </Field>
-          <Field label="Artwork ID from">
-            <Input value={draft.minArtworkId} inputMode="numeric" onChange={(event) => update("minArtworkId", event.target.value)} />
-          </Field>
-          <Field label="Artwork ID to">
-            <Input value={draft.maxArtworkId} inputMode="numeric" onChange={(event) => update("maxArtworkId", event.target.value)} />
+          <Field label="Sort">
+            <Select
+              value={draft.collectSortOrder}
+              onChange={(event) => update("collectSortOrder", event.target.value as CollectSortOrder)}
+              className="w-full"
+            >
+              <option value="newest_first">Newest first</option>
+              <option value="oldest_first">Oldest first</option>
+              <option value="local_order">Local order</option>
+            </Select>
           </Field>
         </div>
+        <Field label="Artwork ID range">
+          <div className="flex items-center gap-2">
+            <Input
+              value={draft.minArtworkId}
+              inputMode="numeric"
+              placeholder="from"
+              onChange={(event) => update("minArtworkId", event.target.value)}
+            />
+            <span className="text-sm text-muted-foreground">~</span>
+            <Input
+              value={draft.maxArtworkId}
+              inputMode="numeric"
+              placeholder="to"
+              onChange={(event) => update("maxArtworkId", event.target.value)}
+            />
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Empty means no limit.
+          </p>
+          </Field>
       </EditorPanel>
     );
   }
@@ -618,8 +671,14 @@ function syncDetail(draft: WorkflowDraft): string {
 }
 
 function collectDetail(draft: WorkflowDraft): string {
-  const mode = draft.collectMode === "new" ? "New artworks" : draft.collectMode === "failed" ? "Failed files" : "All local artworks";
-  return `${mode}, max ${draft.maxArtworks || "unlimited"}`;
+  const modes: Record<CollectMode, string> = {
+    new_since_last_download: "New since last download",
+    pending_files: "Pending files",
+    all_synced: "All synced artworks",
+    failed_files: "Failed files"
+  };
+  const limit = draft.collectLimitMode === "limit" ? draft.maxArtworks || "-" : "unlimited";
+  return `${modes[draft.collectMode]}, ${limit}`;
 }
 
 function filtersDetail(draft: WorkflowDraft): string {
@@ -663,7 +722,7 @@ function targetMetric(draft: WorkflowDraft): string {
 
 function candidateText(draft: WorkflowDraft): { value: string; detail: string } {
   return {
-    value: draft.maxArtworks || "-",
+    value: draft.collectLimitMode === "limit" ? draft.maxArtworks || "-" : "All",
     detail: collectDetail(draft)
   };
 }
@@ -722,9 +781,10 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       title: "Collect candidates",
       config: {
         mode: draft.collectMode,
-        max_artworks: numberOrNull(draft.maxArtworks),
+        max_artworks: draft.collectLimitMode === "limit" ? numberOrNull(draft.maxArtworks) : null,
         min_artwork_id: draft.minArtworkId || null,
-        max_artwork_id: draft.maxArtworkId || null
+        max_artwork_id: draft.maxArtworkId || null,
+        sort_order: draft.collectSortOrder
       }
     },
     {

@@ -29,9 +29,10 @@ class ExecuteActionsNodeExecutor(WorkflowNodeExecutorBase):
         if not artist_ids:
             return WorkflowNodeResult(output={"job_ids": [], "message": "No artist targets."})
 
+        collect_mode = context.values.get("collect_mode")
         download_options = {
-            "full_download": context.values.get("collect_mode") == "all_local",
-            "pending_only": context.values.get("collect_mode") == "new",
+            "full_download": collect_mode == "all_synced",
+            "pending_only": collect_mode == "pending_files",
             "max_artworks": context.values.get("max_artworks"),
             "min_artwork_id": context.values.get("min_artwork_id"),
             "max_artwork_id": context.values.get("max_artwork_id"),

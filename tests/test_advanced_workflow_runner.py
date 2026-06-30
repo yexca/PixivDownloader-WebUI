@@ -1,6 +1,14 @@
 from backend.db.migrate import migrate_database
-from backend.domain.entities import Artist, Artwork
+from backend.domain.entities import Artist, Artwork, ArtworkFile
+from backend.repositories.artist_repository import ArtistRepository
+from backend.repositories.artwork_repository import ArtworkRepository
+from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.workflow_candidate_repository import (
+    CollectArtworkCandidatesRequest,
+    WorkflowCandidateRepository,
+)
+from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunRepository
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.workers.download_worker import DownloadWorker
@@ -197,3 +205,150 @@ def test_advanced_workflow_sync_node_creates_artist_sync_jobs(tmp_path):
         ("sync_artist", "456"),
     ]
     assert [job.options.get("full_sync") for job in sync_jobs if job is not None] == [True, True]
+
+
+def test_advanced_workflow_collect_node_materializes_candidate_set(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    seed_collect_library(db_path)
+
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Advanced collect workflow",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {"artist_ids": ["123"], "max_artists": 10},
+                },
+                {
+                    "id": "collect",
+                    "type": "collect_artworks",
+                    "title": "Collect candidates",
+                    "config": {
+                        "mode": "new_since_last_download",
+                        "max_artworks": 2,
+                        "sort_order": "oldest_first",
+                    },
+                },
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(db_path)
+    try:
+        run = runner.create_run(definition)
+        worker = DownloadWorker(
+            db_path=db_path,
+            pixiv_client_factory=WorkflowTargetPixivClient,
+        )
+        worker.run_job(run.node_runs[0].job_ids[0])
+        run = runner.process_run(run.id, item_id=run.items[0].id)
+    finally:
+        runner.close()
+
+    assert run.status == "completed"
+    assert run.node_runs[1].status == "completed"
+    assert run.node_runs[1].output["candidate_count"] == 2
+    candidate_set_id = run.node_runs[1].output["candidate_set_id"]
+    assert isinstance(candidate_set_id, str)
+
+    repository = WorkflowCandidateRepository(db_path)
+    try:
+        assert repository.count_artworks(candidate_set_id) == 2
+    finally:
+        repository.close()
+
+
+def test_collect_candidate_sources_separate_new_and_pending(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    seed_collect_library(db_path)
+    run_repository = WorkflowRunRepository(db_path)
+    try:
+        run_repository.create_run(
+            WorkflowRun(
+                id="run-1",
+                status="running",
+                total=1,
+                completed=0,
+                failed=0,
+                skipped=0,
+                concurrency=1,
+            )
+        )
+    finally:
+        run_repository.close()
+    repository = WorkflowCandidateRepository(db_path)
+    try:
+        new_set = repository.collect_artwork_candidates(
+            CollectArtworkCandidatesRequest(
+                workflow_run_id="run-1",
+                workflow_node_run_id=None,
+                artist_ids=["123"],
+                source="new_since_last_download",
+                sort_order="newest_first",
+                config={},
+            )
+        )
+        new_artwork_ids = repository.list_artwork_ids(new_set.id)
+        pending_set = repository.collect_artwork_candidates(
+            CollectArtworkCandidatesRequest(
+                workflow_run_id="run-1",
+                workflow_node_run_id=None,
+                artist_ids=["123"],
+                source="pending_files",
+                sort_order="newest_first",
+                config={},
+            )
+        )
+        pending_artwork_ids = repository.list_artwork_ids(pending_set.id)
+    finally:
+        repository.close()
+
+    assert new_artwork_ids == ["103", "102", "101"]
+    assert pending_artwork_ids == ["103", "102", "090"]
+
+
+def seed_collect_library(db_path) -> None:
+    artist_repository = ArtistRepository(db_path)
+    artwork_repository = ArtworkRepository(db_path)
+    file_repository = ArtworkFileRepository(db_path)
+    try:
+        artist_repository.upsert(Artist(id="123", name="Artist", last_download_id="100"))
+        for artwork_id, status in [
+            ("090", "remote_only"),
+            ("101", "downloaded"),
+            ("102", "remote_only"),
+            ("103", "remote_only"),
+        ]:
+            artwork_repository.upsert(
+                Artwork(
+                    id=artwork_id,
+                    artist_id="123",
+                    title=f"Artwork {artwork_id}",
+                    files=(
+                        ArtworkFile(
+                            artwork_id=artwork_id,
+                            page_index=0,
+                            original_url=f"https://i.pximg.net/{artwork_id}.jpg",
+                            file_name=f"{artwork_id}.jpg",
+                            status=status,
+                        ),
+                    ),
+                )
+            )
+            file_repository.upsert(
+                ArtworkFile(
+                    artwork_id=artwork_id,
+                    page_index=0,
+                    original_url=f"https://i.pximg.net/{artwork_id}.jpg",
+                    file_name=f"{artwork_id}.jpg",
+                    status=status,
+                )
+            )
+    finally:
+        artist_repository.close()
+        artwork_repository.close()
+        file_repository.close()
