@@ -575,6 +575,8 @@ def clean_job_options(options: dict[str, object]) -> dict[str, object]:
         cleaned[key] = value
     if options.get("full_download") is True:
         cleaned["full_download"] = True
+    if options.get("full_sync") is True:
+        cleaned["full_sync"] = True
     if options.get("pending_only") is True:
         cleaned["pending_only"] = True
     if options.get("only_new_artworks") is True:

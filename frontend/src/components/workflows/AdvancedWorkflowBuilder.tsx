@@ -691,87 +691,89 @@ function previewPath(rule: string): string {
 }
 
 function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest {
-  return {
-    definition: {
-      name: draft.name,
-      nodes: [
-      {
-        id: "target",
-        type: "artist_target",
-        title: "Target artists",
-        config: {
+  const nodes: AdvancedWorkflowRunRequest["definition"]["nodes"] = [
+    {
+      id: "target",
+      type: "artist_target",
+      title: "Target artists",
+      config: {
         scope: draft.targetScope,
         artist_ids: draft.targetScope === "selected" ? lines(draft.artistIds) : [],
         tag: draft.targetScope === "tagged" ? draft.artistTag : null,
         stale_days: draft.targetScope === "stale" ? numberOrNull(draft.staleDays) : null,
-          max_artists: numberOrNull(draft.maxArtists)
-        }
-      },
-      {
-        id: "sync",
-        type: "sync_metadata",
-        title: "Sync metadata",
-        config: {
+        max_artists: numberOrNull(draft.maxArtists)
+      }
+    }
+  ];
+  if (draft.syncMode !== "none") {
+    nodes.push({
+      id: "sync",
+      type: "sync_metadata",
+      title: "Sync metadata",
+      config: {
         mode: draft.syncMode
-        }
-      },
-      {
-        id: "collect",
-        type: "collect_artworks",
-        title: "Collect candidates",
-        config: {
+      }
+    });
+  }
+  nodes.push(
+    {
+      id: "collect",
+      type: "collect_artworks",
+      title: "Collect candidates",
+      config: {
         mode: draft.collectMode,
         max_artworks: numberOrNull(draft.maxArtworks),
         min_artwork_id: draft.minArtworkId || null,
         max_artwork_id: draft.maxArtworkId || null
-        }
-      },
-      {
-        id: "filters",
-        type: "filter_artworks",
-        title: "Filter candidates",
-        config: {
+      }
+    },
+    {
+      id: "filters",
+      type: "filter_artworks",
+      title: "Filter candidates",
+      config: {
         ai: draft.filterAi,
         min_bookmarks: numberOrNull(draft.minBookmarks),
         required_tags: commaList(draft.requiredTags),
         blocked_tags: commaList(draft.blockedTags),
         stop_above_limit: draft.stopAboveLimit ? numberOrNull(draft.stopLimit) : null
-        }
-      },
-      {
-        id: "actions",
-        type: "execute_actions",
-        title: "Execute actions",
-        config: {
-          actions: actionList(draft),
+      }
+    },
+    {
+      id: "actions",
+      type: "execute_actions",
+      title: "Execute actions",
+      config: {
+        actions: actionList(draft),
         download: draft.downloadEnabled,
         retry_failed: draft.retryFailed,
         skip_existing: draft.skipExisting,
         conflict_mode: draft.conflictMode,
         concurrency: numberOrNull(draft.concurrency),
         request_delay_seconds: numberOrNull(draft.requestDelay),
-          pause_on_long_run: draft.pauseOnLongRun,
-          naming_rule: draft.namingRule
-        }
-      },
-      {
-        id: "output",
-        type: "file_output",
-        title: "Output",
-        config: {
+        pause_on_long_run: draft.pauseOnLongRun,
         naming_rule: draft.namingRule
-        }
       }
-      ]
+    },
+    {
+      id: "output",
+      type: "file_output",
+      title: "Output",
+      config: {
+        naming_rule: draft.namingRule
+      }
+    }
+  );
+  return {
+    definition: {
+      name: draft.name,
+      nodes
     }
   };
 }
 
 function actionList(draft: WorkflowDraft): string[] {
   const actions: string[] = [];
-  if (draft.syncMode !== "none") {
-    actions.push("sync_artist");
-  }
   if (draft.downloadEnabled) {
     actions.push("download_artist");
   }

@@ -132,6 +132,40 @@ class FakeUnavailablePixivClient:
         return []
 
 
+class RecordingSyncPixivClient:
+    stop_markers: list[str | None] = []
+
+    def get_artist_by_user_id(self, user_id: str) -> Artist:
+        return Artist(id=user_id, name="Artist")
+
+    def get_artist_by_artwork_id(self, _artwork_id: str) -> Artist:
+        raise NotImplementedError
+
+    def get_artworks_by_user_id(
+        self,
+        user_id: str,
+        *,
+        stop_at_artwork_id: str | None = None,
+    ) -> list[Artwork]:
+        del user_id
+        self.stop_markers.append(stop_at_artwork_id)
+        return [
+            Artwork(
+                id="300",
+                artist_id="123",
+                title="Title",
+                files=(
+                    ArtworkFile(
+                        artwork_id="300",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/300_p0.jpg",
+                        file_name="300_p0.jpg",
+                    ),
+                ),
+            )
+        ]
+
+
 class FakeFileDownloader:
     def __init__(self, tmp_path):
         self.tmp_path = tmp_path
@@ -379,6 +413,35 @@ def test_worker_accepts_library_shortcut_unavailable_artist(tmp_path):
         assert artist.account_status == "unavailable"
     finally:
         artist_repository.close()
+
+
+def test_sync_artist_job_passes_full_sync_option(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
+    RecordingSyncPixivClient.stop_markers = []
+    repository = JobRepository(db_path)
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="sync_artist",
+                status="queued",
+                input_user_id="123",
+                options={"full_sync": True},
+            )
+        )
+    finally:
+        repository.close()
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=RecordingSyncPixivClient,
+        file_downloader_factory=lambda: FakeFileDownloader(tmp_path),
+    )
+
+    job = worker.run_job("job-1")
+
+    assert job.status == "completed"
+    assert RecordingSyncPixivClient.stop_markers == [None]
 
 
 def test_worker_resolves_artwork_targets_and_appends_artist_jobs(tmp_path):

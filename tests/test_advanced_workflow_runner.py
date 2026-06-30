@@ -139,3 +139,61 @@ def test_advanced_workflow_resolves_target_job_before_action_job(tmp_path):
     assert action_job.type == "resolve_artist_targets"
     assert action_job.options["artist_ids"] == ["123", "456"]
     assert action_job.options["artwork_ids"] == []
+
+
+def test_advanced_workflow_sync_node_creates_artist_sync_jobs(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Advanced sync workflow",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {
+                        "artist_ids": ["123"],
+                        "artwork_ids": ["999"],
+                        "max_artists": 10,
+                    },
+                },
+                {
+                    "id": "sync",
+                    "type": "sync_metadata",
+                    "title": "Sync metadata",
+                    "config": {"mode": "full"},
+                },
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(db_path)
+    try:
+        run = runner.create_run(definition)
+        worker = DownloadWorker(
+            db_path=db_path,
+            pixiv_client_factory=WorkflowTargetPixivClient,
+        )
+        worker.run_job(run.node_runs[0].job_ids[0])
+        run = runner.process_run(run.id, item_id=run.items[0].id)
+    finally:
+        runner.close()
+
+    assert run.status == "running"
+    assert run.node_runs[0].status == "completed"
+    assert run.node_runs[1].status == "running"
+    assert run.node_runs[1].output["sync_mode"] == "full"
+
+    repository = JobRepository(db_path)
+    try:
+        sync_jobs = [repository.get_by_id(job_id) for job_id in run.node_runs[1].job_ids]
+    finally:
+        repository.close()
+
+    assert [(job.type, job.input_user_id) for job in sync_jobs if job is not None] == [
+        ("sync_artist", "123"),
+        ("sync_artist", "456"),
+    ]
+    assert [job.options.get("full_sync") for job in sync_jobs if job is not None] == [True, True]

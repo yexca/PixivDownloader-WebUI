@@ -421,7 +421,11 @@ class DownloadWorker:
             repository.add_event(
                 JobEvent(job_id=job.id, level="info", message="Syncing Pixiv metadata")
             )
-            summary = service.sync_artist(job.input_user_id, source=job_source(job))
+            summary = service.sync_artist(
+                job.input_user_id,
+                source=job_source(job),
+                full_sync=bool(job.options.get("full_sync", False)),
+            )
         finally:
             service.close()
         finished = replace(
