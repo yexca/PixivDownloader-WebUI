@@ -52,13 +52,10 @@ def test_advanced_workflow_creates_node_runs_and_action_job(tmp_path):
                     "id": "actions",
                     "type": "execute_actions",
                     "title": "Execute actions",
-                    "config": {"actions": ["download_artist"]},
-                },
-                {
-                    "id": "output",
-                    "type": "file_output",
-                    "title": "Output",
-                    "config": {"naming_rule": "{artist}/{original_filename}"},
+                    "config": {
+                        "download": True,
+                        "naming_rule": "{artist}/{original_filename}",
+                    },
                 },
             ],
         }
@@ -72,11 +69,10 @@ def test_advanced_workflow_creates_node_runs_and_action_job(tmp_path):
 
     assert run.source == "advanced"
     assert run.status == "running"
-    assert [node.node_id for node in run.node_runs] == ["target", "actions", "output"]
+    assert [node.node_id for node in run.node_runs] == ["target", "actions"]
     assert run.node_runs[0].status == "running"
     assert run.node_runs[0].job_ids
     assert run.node_runs[1].status == "pending"
-    assert run.node_runs[2].status == "pending"
 
     repository = JobRepository(db_path)
     try:

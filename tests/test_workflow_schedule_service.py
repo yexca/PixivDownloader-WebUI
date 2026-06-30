@@ -13,10 +13,13 @@ def test_workflow_trigger_creates_advanced_run(tmp_path):
             "name": "Scheduled advanced workflow",
             "nodes": [
                 {
-                    "id": "output",
-                    "type": "file_output",
-                    "title": "Output",
-                    "config": {"naming_rule": "{artist}/{original_filename}"},
+                    "id": "actions",
+                    "type": "execute_actions",
+                    "title": "Execute actions",
+                    "config": {
+                        "download": False,
+                        "naming_rule": "{artist}/{original_filename}",
+                    },
                 }
             ],
         }
@@ -40,7 +43,7 @@ def test_workflow_trigger_creates_advanced_run(tmp_path):
     assert results[0].run is not None
     assert results[0].run.source == "workflow_trigger"
     assert results[0].run.schedule_id == trigger.id
-    assert [node.node_id for node in runs] == ["output"]
+    assert [node.node_id for node in runs] == ["actions"]
 
 
 def test_next_run_time_supports_interval_daily_weekly_monthly():

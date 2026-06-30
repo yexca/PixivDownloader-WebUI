@@ -87,8 +87,7 @@ export type AdvancedWorkflowNode = {
     | "sync_metadata"
     | "collect_artworks"
     | "filter_artworks"
-    | "execute_actions"
-    | "file_output";
+    | "execute_actions";
   title?: string;
   config: Record<string, unknown>;
 };

@@ -5,7 +5,6 @@ import {
   Check,
   Database,
   Filter,
-  FolderTree,
   ListChecks,
   Play,
   RotateCcw,
@@ -73,15 +72,12 @@ type WorkflowDraft = {
   downloadEnabled: boolean;
   conflictMode: ConflictMode;
   executionUnit: ExecutionUnit;
-  concurrency: string;
-  requestDelay: string;
   namingRule: string;
   stopAboveLimit: boolean;
   stopLimit: string;
-  pauseOnLongRun: boolean;
 };
 
-type StageKey = "trigger" | "target" | "sync" | "collect" | "filters" | "actions" | "output";
+type StageKey = "trigger" | "target" | "sync" | "collect" | "filters" | "actions";
 
 const initialDraft: WorkflowDraft = {
   name: "Artist download pipeline",
@@ -111,12 +107,9 @@ const initialDraft: WorkflowDraft = {
   downloadEnabled: true,
   conflictMode: "skip",
   executionUnit: "artist",
-  concurrency: "1",
-  requestDelay: "2",
   namingRule: "{artist}/{title}_{artwork_id}_{page}",
   stopAboveLimit: true,
-  stopLimit: "500",
-  pauseOnLongRun: false
+  stopLimit: "500"
 };
 
 const previewTabs: Array<{ value: PreviewTab; label: string }> = [
@@ -130,8 +123,7 @@ const stages: Array<{ key: StageKey; title: string; icon: React.ComponentType<{ 
   { key: "sync", title: "Sync", icon: Database },
   { key: "collect", title: "Collect", icon: ListChecks },
   { key: "filters", title: "Filters", icon: Filter },
-  { key: "actions", title: "Actions", icon: Play },
-  { key: "output", title: "Output", icon: FolderTree }
+  { key: "actions", title: "Actions", icon: Play }
 ];
 
 export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => void }): JSX.Element {
@@ -300,7 +292,6 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
                 <PreviewRow label="Collect" value={collectDetail(draft)} />
                 <PreviewRow label="Filters" value={filtersDetail(draft)} />
                 <PreviewRow label="Actions" value={actionDetail(draft)} />
-                <PreviewRow label="Output" value={outputDetail(draft)} />
               </dl>
             ) : (
               <pre className="mt-4 max-h-[520px] overflow-auto rounded-md border bg-muted/30 p-3 text-xs leading-relaxed">
@@ -582,9 +573,8 @@ function StageEditor({
       <EditorPanel icon={Play} title="Actions" kicker="Execution">
         <div className="grid gap-3 sm:grid-cols-2">
           <Toggle label="Download files" checked={draft.downloadEnabled} onChange={(checked) => update("downloadEnabled", checked)} />
-          <Toggle label="Pause on long run" checked={draft.pauseOnLongRun} onChange={(checked) => update("pauseOnLongRun", checked)} />
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Execution unit">
             <Segmented
               value={draft.executionUnit}
@@ -602,33 +592,22 @@ function StageEditor({
               <option value="rename">Rename</option>
             </Select>
           </Field>
-          <Field label="Concurrency">
-            <Input value={draft.concurrency} inputMode="numeric" onChange={(event) => update("concurrency", event.target.value)} />
-          </Field>
-          <Field label="Request delay seconds">
-            <Input value={draft.requestDelay} inputMode="numeric" onChange={(event) => update("requestDelay", event.target.value)} />
-          </Field>
+        </div>
+        <Field label="Naming rule">
+          <Input value={draft.namingRule} onChange={(event) => update("namingRule", event.target.value)} />
+        </Field>
+        <div className="rounded-md border bg-muted/25 p-3">
+          <p className="text-xs font-medium uppercase text-muted-foreground">Preview path</p>
+          <p className="mt-2 break-all font-mono text-sm">{previewPath(draft.namingRule)}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {["{artist}", "{artist_id}", "{artwork_id}", "{title}", "{page}", "{original_filename}", "{ext}", "{ai}"].map((token) => (
+            <Badge key={token} tone="muted">{token}</Badge>
+          ))}
         </div>
       </EditorPanel>
     );
   }
-
-  return (
-    <EditorPanel icon={FolderTree} title="Output" kicker="Naming">
-      <Field label="Naming rule">
-        <Input value={draft.namingRule} onChange={(event) => update("namingRule", event.target.value)} />
-      </Field>
-      <div className="rounded-md border bg-muted/25 p-3">
-        <p className="text-xs font-medium uppercase text-muted-foreground">Preview path</p>
-        <p className="mt-2 break-all font-mono text-sm">{previewPath(draft.namingRule)}</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {["{artist}", "{artist_id}", "{artwork_id}", "{title}", "{page}", "{original_filename}", "{ext}", "{ai}"].map((token) => (
-          <Badge key={token} tone="muted">{token}</Badge>
-        ))}
-      </div>
-    </EditorPanel>
-  );
 }
 
 function StageButton({
@@ -804,8 +783,7 @@ function stageDetail(stage: StageKey, draft: WorkflowDraft): string {
     sync: syncDetail(draft),
     collect: collectDetail(draft),
     filters: filtersDetail(draft),
-    actions: actionDetail(draft),
-    output: outputDetail(draft)
+    actions: actionDetail(draft)
   };
   return details[stage];
 }
@@ -897,11 +875,8 @@ function filtersDetail(draft: WorkflowDraft): string {
 
 function actionDetail(draft: WorkflowDraft): string {
   const unit = draft.executionUnit === "artist" ? "per artist" : "whole set";
-  return `${draft.downloadEnabled ? "download" : "no action"}, ${unit}, ${draft.conflictMode}`;
-}
-
-function outputDetail(draft: WorkflowDraft): string {
-  return draft.namingRule || "Default naming";
+  const naming = draft.namingRule ? "custom naming" : "default naming";
+  return `${draft.downloadEnabled ? "download" : "no action"}, ${unit}, ${draft.conflictMode}, ${naming}`;
 }
 
 function targetMetric(draft: WorkflowDraft): string {
@@ -991,17 +966,6 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
         download: draft.downloadEnabled,
         execution_unit: draft.executionUnit,
         conflict_mode: draft.conflictMode,
-        concurrency: numberOrNull(draft.concurrency),
-        request_delay_seconds: numberOrNull(draft.requestDelay),
-        pause_on_long_run: draft.pauseOnLongRun,
-        naming_rule: draft.namingRule
-      }
-    },
-    {
-      id: "output",
-      type: "file_output",
-      title: "Output",
-      config: {
         naming_rule: draft.namingRule
       }
     }
