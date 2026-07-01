@@ -26,7 +26,7 @@ import {
   type WorkflowDefinition,
   type WorkflowNodeRun
 } from "@/api/workflows";
-import { listJobs, type Job } from "@/api/jobs";
+import { listJobs, type Job, type JobDetail } from "@/api/jobs";
 import { getSettings, updateSettings } from "@/api/settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,13 +40,26 @@ import { AdvancedWorkflowBuilder } from "@/components/workflows/AdvancedWorkflow
 import { loadRunJobs, RunDetailDialog, WorkflowLimitPanel } from "@/components/workflows/WorkflowRuntimeCards";
 import { cn, formatDate, percent } from "@/lib/utils";
 
-type WorkflowView = "definitions" | "runs" | "shortcuts";
+type WorkflowView = "definitions" | "runs";
+type RunFilter = "all" | "running" | "completed" | "failed" | "scheduled" | "shortcuts";
 
 const viewTabs: Array<{ value: WorkflowView; label: string }> = [
   { value: "definitions", label: "Definitions" },
-  { value: "runs", label: "Runs" },
+  { value: "runs", label: "Runs" }
+];
+
+const runFilterTabs: Array<{ value: RunFilter; label: string }> = [
+  { value: "all", label: "All" },
+  { value: "running", label: "Running" },
+  { value: "completed", label: "Completed" },
+  { value: "failed", label: "Failed" },
+  { value: "scheduled", label: "Scheduled" },
   { value: "shortcuts", label: "Shortcuts" }
 ];
+
+const emptyDefinitions: WorkflowDefinition[] = [];
+const emptyRuns: WorkflowRun[] = [];
+const emptyJobs: Job[] = [];
 
 const nodeTypeLabels: Record<string, string> = {
   artist_target: "Target",
@@ -77,11 +90,13 @@ export function WorkflowsPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialView = workflowViewFromParam(searchParams.get("view"));
   const [view, setViewState] = React.useState<WorkflowView>(initialView);
+  const [runFilter, setRunFilter] = React.useState<RunFilter>(runFilterFromParam(searchParams.get("filter")));
   const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
   const [builderOpen, setBuilderOpen] = React.useState(false);
   const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
   const [selectedRun, setSelectedRun] = React.useState<WorkflowRun | null>(null);
+  const [inspectedRun, setInspectedRun] = React.useState<WorkflowRun | null>(null);
 
   const definitions = useQuery({
     queryKey: ["workflow-definitions"],
@@ -105,15 +120,20 @@ export function WorkflowsPage(): JSX.Element {
     enabled: Boolean(selectedRun),
     refetchInterval: selectedRun?.status === "running" ? 4000 : false
   });
+  const inspectedRunJobs = useQuery({
+    queryKey: ["workflow-run-jobs", inspectedRun?.id],
+    queryFn: () => loadRunJobs(inspectedRun),
+    enabled: Boolean(inspectedRun),
+    refetchInterval: inspectedRun?.status === "running" ? 4000 : false
+  });
 
-  const definitionItems = definitions.data?.items ?? [];
-  const runItems = runs.data?.items ?? [];
-  const shortcutRuns = runItems.filter(isShortcutRun);
+  const definitionItems = definitions.data?.items ?? emptyDefinitions;
+  const runItems = runs.data?.items ?? emptyRuns;
   const selectedDefinition =
     definitionItems.find((definition) => definition.id === selectedDefinitionId) ?? definitionItems[0] ?? null;
   const filteredDefinitions = filterDefinitions(definitionItems, search);
-  const filteredRuns = filterRuns(view === "shortcuts" ? shortcutRuns : runItems, search);
-  const visibleShortcutJobs = filterShortcutJobs(jobs.data?.items ?? [], search);
+  const filteredRuns = filterRuns(filterRunsByKind(runItems, runFilter), search);
+  const visibleShortcutJobs = filterShortcutJobs(jobs.data?.items ?? emptyJobs, "");
 
   React.useEffect(() => {
     if (!selectedDefinitionId && definitionItems[0]) {
@@ -121,13 +141,22 @@ export function WorkflowsPage(): JSX.Element {
     }
   }, [definitionItems, selectedDefinitionId]);
 
+  React.useEffect(() => {
+    if (view !== "runs") {
+      return;
+    }
+    if (!selectedRun || !filteredRuns.some((run) => run.id === selectedRun.id)) {
+      setSelectedRun(filteredRuns[0] ?? null);
+    }
+  }, [filteredRuns, selectedRun, view]);
+
   const runDefinition = useMutation({
     mutationFn: runWorkflowDefinition,
     onSuccess: (run) => {
       pushToast({ title: "Workflow started", description: run.id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      setSelectedRun(run);
+      setInspectedRun(run);
     },
     onError: (error) => pushToast({ title: "Workflow could not start", description: error.message, tone: "error" })
   });
@@ -150,6 +179,18 @@ export function WorkflowsPage(): JSX.Element {
     setViewState(nextView);
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("view", nextView);
+    if (search.trim()) {
+      nextParams.set("q", search.trim());
+    } else {
+      nextParams.delete("q");
+    }
+    setSearchParams(nextParams, { replace: true });
+  };
+  const setRunFilterParam = (nextFilter: RunFilter) => {
+    setRunFilter(nextFilter);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("view", "runs");
+    nextParams.set("filter", nextFilter);
     if (search.trim()) {
       nextParams.set("q", search.trim());
     } else {
@@ -233,10 +274,13 @@ export function WorkflowsPage(): JSX.Element {
               error={definitions.isError ? definitions.error.message : undefined}
               onSelect={setSelectedDefinitionId}
             />
-          ) : view === "shortcuts" ? (
-            <ShortcutJobList jobs={visibleShortcutJobs} />
           ) : (
-            <RunList runs={filteredRuns} selectedRunId={selectedRun?.id ?? null} onInspect={setSelectedRun} />
+            <>
+              <section className="surface p-3">
+                <Tabs value={runFilter} onValueChange={setRunFilterParam} items={runFilterTabs} className="max-w-full flex-wrap" />
+              </section>
+              <RunList runs={filteredRuns} selectedRunId={selectedRun?.id ?? null} onInspect={setSelectedRun} />
+            </>
           )}
         </aside>
 
@@ -249,25 +293,28 @@ export function WorkflowsPage(): JSX.Element {
                 running={runDefinition.isPending}
                 onEdit={() => openEditBuilder(selectedDefinition)}
                 onRun={() => runDefinition.mutate(selectedDefinition.id)}
-                onInspectRun={(run) => setSelectedRun(run)}
+                onInspectRun={(run) => setInspectedRun(run)}
               />
             ) : definitions.isLoading ? (
               <DataState title="Loading workflows" variant="loading" />
             ) : (
               <EmptyDefinitionState onCreate={openNewBuilder} />
             )
-          ) : (
-            <RunExplorer
-              title={view === "shortcuts" ? "Shortcut Runs" : "Recent Runs"}
-              runs={filteredRuns}
-              onInspect={setSelectedRun}
+          ) : selectedRun ? (
+            <RunWorkbench
+              run={selectedRun}
+              jobs={selectedRunJobs.data ?? []}
+              loading={selectedRunJobs.isLoading}
+              error={selectedRunJobs.isError ? selectedRunJobs.error.message : undefined}
             />
+          ) : (
+            <DataState title="No run selected" description="Workflow runs matching the current filter appear in the left list." />
           )}
         </main>
 
         <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
           <RuntimeSummary definitions={definitionItems} runs={runItems} jobs={jobs.data?.items ?? []} />
-          <RecentShortcutPanel runs={shortcutRuns} jobs={jobs.data?.items ?? []} onInspect={setSelectedRun} />
+          <ActiveShortcutPanel jobs={visibleShortcutJobs} />
         </aside>
       </div>
 
@@ -299,17 +346,19 @@ export function WorkflowsPage(): JSX.Element {
         />
       </Dialog>
 
-      <RunDetailDialog
-        run={selectedRun}
-        jobs={selectedRunJobs.data ?? []}
-        loading={selectedRunJobs.isLoading}
-        error={selectedRunJobs.isError ? selectedRunJobs.error.message : undefined}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedRun(null);
-          }
-        }}
-      />
+      {view === "definitions" ? (
+        <RunDetailDialog
+          run={inspectedRun}
+          jobs={inspectedRunJobs.data ?? []}
+          loading={inspectedRunJobs.isLoading}
+          error={inspectedRunJobs.isError ? inspectedRunJobs.error.message : undefined}
+          onOpenChange={(open) => {
+            if (!open) {
+              setInspectedRun(null);
+            }
+          }}
+        />
+      ) : null}
     </>
   );
 }
@@ -502,30 +551,6 @@ function WorkflowNodeCard({ node, nodeRun }: { node: AdvancedWorkflowNode; nodeR
   );
 }
 
-function RunExplorer({
-  title,
-  runs,
-  onInspect
-}: {
-  title: string;
-  runs: WorkflowRun[];
-  onInspect: (run: WorkflowRun) => void;
-}): JSX.Element {
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center justify-between gap-3 px-1">
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <Badge tone="muted">{runs.length}</Badge>
-      </div>
-      {runs.length ? (
-        runs.map((run) => <RunCard key={run.id} run={run} onInspect={() => onInspect(run)} />)
-      ) : (
-        <DataState title="No matching runs" description="Runs created by definitions and shortcuts appear here." />
-      )}
-    </section>
-  );
-}
-
 function RunList({
   runs,
   selectedRunId,
@@ -563,32 +588,6 @@ function RunList({
         </button>
       ))}
     </section>
-  );
-}
-
-function RunCard({ run, onInspect }: { run: WorkflowRun; onInspect: () => void }): JSX.Element {
-  return (
-    <article className="surface p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="break-words text-sm font-semibold">{runTitle(run)}</h3>
-            <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
-            <Badge tone="muted">{runSourceLabel(run)}</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {run.completed}/{run.total} completed, {run.failed} failed, {run.skipped} skipped
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={onInspect}>
-            <Eye className="h-4 w-4" aria-hidden="true" />
-            Inspect
-          </Button>
-        </div>
-      </div>
-      <RunNodeTimeline run={run} />
-    </article>
   );
 }
 
@@ -673,24 +672,16 @@ function SummaryMetric({
   );
 }
 
-function RecentShortcutPanel({
-  runs,
-  jobs,
-  onInspect
-}: {
-  runs: WorkflowRun[];
-  jobs: Job[];
-  onInspect: (run: WorkflowRun) => void;
-}): JSX.Element {
-  const activeShortcutJobs = jobs.filter((job) => isShortcutJob(job) && isActiveJob(job)).slice(0, 4);
+function ActiveShortcutPanel({ jobs }: { jobs: Job[] }): JSX.Element {
+  const activeShortcutJobs = jobs.slice(0, 4);
   return (
     <section className="surface p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Shortcuts</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Library and download actions become workflow runs.</p>
+          <h2 className="text-sm font-semibold">Active Shortcuts</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Shortcut jobs waiting or running now.</p>
         </div>
-        <Badge tone="muted">{runs.length}</Badge>
+        <Badge tone="muted">{jobs.length}</Badge>
       </div>
       <div className="mt-4 space-y-2">
         {activeShortcutJobs.map((job) => (
@@ -700,37 +691,6 @@ function RecentShortcutPanel({
           <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No active shortcut jobs.</p>
         ) : null}
       </div>
-      {runs.slice(0, 3).length ? (
-        <div className="mt-4 space-y-2 border-t pt-4">
-          {runs.slice(0, 3).map((run) => (
-            <button
-              key={run.id}
-              type="button"
-              className="block w-full rounded-md border bg-background p-3 text-left text-sm hover:bg-muted/50"
-              onClick={() => onInspect(run)}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="truncate font-medium">{runTitle(run)}</span>
-                <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
-              </div>
-              <p className="mt-1 text-xs text-muted-foreground">{formatDate(run.created_at)}</p>
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function ShortcutJobList({ jobs }: { jobs: Job[] }): JSX.Element {
-  if (!jobs.length) {
-    return <DataState title="No shortcut jobs" description="Library shortcut jobs appear while they are waiting or running." />;
-  }
-  return (
-    <section className="space-y-2">
-      {jobs.map((job) => (
-        <ShortcutJobCard key={job.id} job={job} />
-      ))}
     </section>
   );
 }
@@ -838,8 +798,207 @@ function latestDefinitionRun(definition: WorkflowDefinition, runs: WorkflowRun[]
   return matches[0] ?? null;
 }
 
+function RunWorkbench({
+  run,
+  jobs,
+  loading,
+  error
+}: {
+  run: WorkflowRun;
+  jobs: JobDetail[];
+  loading: boolean;
+  error?: string;
+}): JSX.Element {
+  const [selectedNodeId, setSelectedNodeId] = React.useState(run.node_runs[0]?.node_id ?? null);
+  const selectedNode = run.node_runs.find((node) => node.node_id === selectedNodeId) ?? run.node_runs[0] ?? null;
+  const selectedNodeJobs = selectedNode ? jobs.filter((job) => selectedNode.job_ids.includes(job.id)) : [];
+
+  React.useEffect(() => {
+    setSelectedNodeId(run.node_runs[0]?.node_id ?? null);
+  }, [run.id, run.node_runs]);
+
+  return (
+    <section className="surface min-w-0 p-4">
+      <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="break-words text-lg font-semibold">{runTitle(run)}</h2>
+            <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
+            <Badge tone="muted">{runSourceLabel(run)}</Badge>
+          </div>
+          <p className="mt-1 break-all text-sm text-muted-foreground">{run.id}</p>
+        </div>
+        <dl className="grid gap-3 text-sm sm:grid-cols-4 lg:min-w-[520px]">
+          <RunMetric label="Completed" value={`${run.completed}/${run.total}`} />
+          <RunMetric label="Failed" value={String(run.failed)} />
+          <RunMetric label="Created" value={formatDate(run.created_at)} />
+          <RunMetric label="Finished" value={formatDate(run.finished_at)} />
+        </dl>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="min-w-0 space-y-2">
+          <h3 className="px-1 text-sm font-semibold">Node Timeline</h3>
+          {run.node_runs.length ? (
+            run.node_runs.map((node) => {
+              const selected = selectedNode?.node_id === node.node_id;
+              return (
+                <button
+                  key={node.id ?? node.node_id}
+                  type="button"
+                  className={cn(
+                    "w-full rounded-md border bg-background p-3 text-left text-sm transition-colors hover:bg-muted/50",
+                    selected && "border-primary bg-primary/5"
+                  )}
+                  onClick={() => setSelectedNodeId(node.node_id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{node.title}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {node.position + 1}. {node.node_type}
+                      </p>
+                    </div>
+                    <Badge tone={workflowStatusTone(node.status)}>{node.status}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">{node.job_ids.length} job(s)</p>
+                </button>
+              );
+            })
+          ) : (
+            <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No workflow nodes were recorded.</p>
+          )}
+        </aside>
+
+        <div className="min-w-0">
+          {selectedNode ? (
+            <NodeWorkbench node={selectedNode} jobs={selectedNodeJobs} loading={loading} error={error} />
+          ) : (
+            <DataState title="No node selected" description="Select a workflow node to inspect its runtime data." />
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function filterRunsByKind(runs: WorkflowRun[], filter: RunFilter): WorkflowRun[] {
+  if (filter === "running") {
+    return runs.filter((run) => run.status === "running");
+  }
+  if (filter === "completed") {
+    return runs.filter((run) => run.status === "completed" || run.status === "skipped");
+  }
+  if (filter === "failed") {
+    return runs.filter((run) => run.status === "failed" || run.status === "partial");
+  }
+  if (filter === "scheduled") {
+    return runs.filter((run) => isScheduledRun(run));
+  }
+  if (filter === "shortcuts") {
+    return runs.filter((run) => isShortcutRun(run));
+  }
+  return runs;
+}
+
+function NodeWorkbench({
+  node,
+  jobs,
+  loading,
+  error
+}: {
+  node: WorkflowNodeRun;
+  jobs: JobDetail[];
+  loading: boolean;
+  error?: string;
+}): JSX.Element {
+  const completedFiles = jobs.reduce((total, job) => total + job.completed_files, 0);
+  const failedFiles = jobs.reduce((total, job) => total + job.failed_files, 0);
+  return (
+    <div className="space-y-4">
+      <section className="rounded-md border bg-card p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="break-words text-base font-semibold">{node.title}</h3>
+              <Badge tone={workflowStatusTone(node.status)}>{node.status}</Badge>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {node.position + 1}. {node.node_type} · {node.node_id}
+            </p>
+          </div>
+        </div>
+        {node.error_message ? (
+          <p className="mt-4 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+            {node.error_message}
+          </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-md border bg-card p-4">
+        <dl className="grid gap-3 text-sm sm:grid-cols-4">
+          <RunMetric label="Started" value={formatDate(node.started_at)} />
+          <RunMetric label="Finished" value={formatDate(node.finished_at)} />
+          <RunMetric label="Jobs" value={String(node.job_ids.length)} />
+          <RunMetric label="Files" value={loading ? "Loading" : error ? "-" : `${completedFiles} ok / ${failedFiles} failed`} />
+        </dl>
+      </section>
+
+      {error ? <DataState title="Could not load jobs" description={error} variant="error" /> : null}
+      {!error && jobs.length ? (
+        <section className="space-y-3">
+          {jobs.map((job) => (
+            <RunJobSummary key={job.id} job={job} />
+          ))}
+        </section>
+      ) : null}
+      {!loading && !error && !jobs.length ? (
+        <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No jobs were linked to this node.</p>
+      ) : null}
+    </div>
+  );
+}
+
+function RunJobSummary({ job }: { job: JobDetail }): JSX.Element {
+  const latestEvent = [...job.events].sort((left, right) => timeValue(right.created_at) - timeValue(left.created_at))[0];
+  return (
+    <article className="rounded-md border bg-card p-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="break-words text-sm font-semibold">{job.type.replaceAll("_", " ")}</h4>
+            <Badge tone={jobStatusTone(job.status)}>{job.status}</Badge>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
+        </div>
+        <p className="text-sm text-muted-foreground">{job.completed_files}/{job.total_files || 0} files</p>
+      </div>
+      {job.error_message ? (
+        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+          {job.error_message}
+        </p>
+      ) : latestEvent ? (
+        <p className="mt-3 rounded-md border bg-muted/20 p-2 text-xs">{latestEvent.message}</p>
+      ) : null}
+    </article>
+  );
+}
+
+function RunMetric({ label, value }: { label: string; value: string }): JSX.Element {
+  return (
+    <div>
+      <dt className="text-xs uppercase text-muted-foreground">{label}</dt>
+      <dd className="mt-1 break-words font-medium">{value}</dd>
+    </div>
+  );
+}
+
 function isShortcutRun(run: WorkflowRun): boolean {
   return run.source.includes("shortcut") || run.source.includes("api");
+}
+
+function isScheduledRun(run: WorkflowRun): boolean {
+  return run.schedule_id !== null || run.source.includes("schedule") || run.source.includes("trigger");
 }
 
 function isShortcutJob(job: Job): boolean {
@@ -933,7 +1092,22 @@ function jobStatusTone(status: Job["status"]): "default" | "success" | "danger" 
 
 function workflowViewFromParam(value: string | null): WorkflowView {
   if (value === "runs" || value === "shortcuts") {
-    return value;
+    return "runs";
   }
   return "definitions";
+}
+
+function runFilterFromParam(value: string | null): RunFilter {
+  if (value === "running" || value === "completed" || value === "failed" || value === "scheduled" || value === "shortcuts") {
+    return value;
+  }
+  return "all";
+}
+
+function timeValue(value: string | null): number {
+  if (!value) {
+    return 0;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
