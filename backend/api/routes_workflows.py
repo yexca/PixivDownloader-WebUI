@@ -5,69 +5,20 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.workflows import (
     AdvancedWorkflowRunRequest,
-    WorkflowBatchItemRequest,
     WorkflowBatchRunListResponse,
-    WorkflowBatchRunRequest,
     WorkflowBatchRunResponse,
     WorkflowDefinitionListResponse,
     WorkflowDefinitionSaveRequest,
     WorkflowDefinitionSaveResponse,
-    WorkflowRunRequest,
-    WorkflowRunResponse,
     workflow_definition_response,
     workflow_run_response,
     workflow_trigger_response,
 )
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.workflow_read_service import WorkflowReadService
-from backend.services.workflow_run_service import WorkflowRunService
 from backend.services.workflow_schedule_service import WorkflowScheduleService
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
-
-
-@router.post("/run", response_model=WorkflowRunResponse)
-def run_workflow(
-    request: WorkflowRunRequest,
-    db_path: DbPath,
-    settings_json_path: SettingsJsonPath,
-    queue: Queue,
-) -> WorkflowRunResponse:
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        run = service.run_batch(
-            items=[
-                WorkflowBatchItemRequest(
-                    draft_id="workflow-run",
-                    title="Workflow run",
-                    config=request.config,
-                )
-            ],
-            concurrency=1,
-        )
-    finally:
-        service.close()
-    job_ids = [job_id for item in run.items for job_id in item.job_ids]
-    if job_ids:
-        queue.wake()
-    return WorkflowRunResponse(job_ids=job_ids, created=bool(job_ids))
-
-
-@router.post("/runs", response_model=WorkflowBatchRunResponse)
-def create_workflow_run(
-    request: WorkflowBatchRunRequest,
-    db_path: DbPath,
-    settings_json_path: SettingsJsonPath,
-    queue: Queue,
-) -> WorkflowBatchRunResponse:
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        run = service.run_batch(items=request.items, concurrency=request.concurrency)
-    finally:
-        service.close()
-    if any(item.job_ids for item in run.items):
-        queue.wake()
-    return workflow_run_response(run)
 
 
 @router.post("/advanced/runs", response_model=WorkflowBatchRunResponse)

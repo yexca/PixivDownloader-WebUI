@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from backend.domain.entities import Job, ScheduledTask, ScheduledTaskConfig, ScheduledTaskTarget
+from backend.domain.entities import Job
 from backend.repositories._time import utc_now
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import (
@@ -36,38 +35,6 @@ class WorkflowRunService:
         self.db_path = db_path
         self.settings_json_path = settings_json_path
         self.repository = WorkflowRunRepository(db_path)
-
-    def run_download_shortcut(
-        self,
-        *,
-        source: str,
-        title: str,
-        draft_id: str,
-        config: ScheduledTaskConfig,
-        user_id: str | None,
-        artwork_id: str | None,
-        force_rescan: bool = False,
-        retry_failed: bool = False,
-        sync_only: bool = False,
-        retry_failed_artist: bool = False,
-        options: dict[str, object] | None = None,
-    ) -> WorkflowRun:
-        return self._run_single_shortcut(
-            source=source,
-            title=title,
-            draft_id=draft_id,
-            config=config,
-            create_jobs=lambda workflow_link: self._create_download_jobs(
-                user_id=user_id,
-                artwork_id=artwork_id,
-                force_rescan=force_rescan,
-                retry_failed=retry_failed,
-                sync_only=sync_only,
-                retry_failed_artist=retry_failed_artist,
-                options=options,
-                workflow_link=workflow_link,
-            ),
-        )
 
     def run_batch(
         self,
@@ -103,96 +70,6 @@ class WorkflowRunService:
                 )
             )
         return self.process_run(run.id)
-
-    def run_schedule(self, task: ScheduledTask, *, manual: bool) -> WorkflowRun:
-        if task.id is None:
-            raise ValueError("scheduled task id is required")
-        now = utc_now()
-        source = "manual_schedule" if manual else "schedule"
-        config = task.config or legacy_schedule_config(task)
-        run = WorkflowRun(
-            id=str(uuid.uuid4()),
-            status="running",
-            total=1,
-            completed=0,
-            failed=0,
-            skipped=0,
-            concurrency=1,
-            source=source,
-            schedule_id=task.id,
-            created_at=now,
-        )
-        self.repository.create_run(run)
-        item_id = self.repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=f"schedule:{task.id}",
-                title=task.name,
-                status="running",
-                config=scheduled_task_config_to_dict(config),
-                request={
-                    "source": source,
-                    "schedule_id": task.id,
-                    "schedule_name": task.name,
-                    "manual": manual,
-                    "config": scheduled_task_config_to_dict(config),
-                },
-                created_at=utc_now(),
-            )
-        )
-        item = self.repository.list_items(run.id)[0]
-        task_service = ScheduledTaskService(
-            self.db_path,
-            settings_json_path=self.settings_json_path,
-        )
-        try:
-            jobs = task_service.run_config(
-                config,
-                workflow_link=WorkflowJobLink(
-                    run_id=run.id,
-                    item_id=item_id,
-                    source=source,
-                ),
-            )
-        except Exception as exc:
-            failed_item = replace(
-                item,
-                id=item_id,
-                status="failed",
-                error_message=str(exc),
-                finished_at=utc_now(),
-            )
-            self.repository.update_item(failed_item)
-            failed_run = replace(
-                run,
-                status="failed",
-                failed=1,
-                finished_at=utc_now(),
-                items=[failed_item],
-            )
-            self.repository.update_run(failed_run)
-            raise
-        finally:
-            task_service.close()
-
-        updated_item = replace(
-            item,
-            id=item_id,
-            status="running" if jobs else "completed",
-            job_ids=[job.id for job in jobs],
-            finished_at=None if jobs else utc_now(),
-        )
-        self.repository.update_item(updated_item)
-        updated_run = replace(
-            run,
-            status="running" if jobs else "completed",
-            completed=0 if jobs else 1,
-            finished_at=None if jobs else utc_now(),
-            items=[updated_item],
-        )
-        self.repository.update_run(updated_run)
-        return self.refresh_run_status(updated_run)
 
     def run_legacy_import_hydration(
         self,
@@ -477,85 +354,6 @@ class WorkflowRunService:
     def close(self) -> None:
         self.repository.close()
 
-    def _run_single_shortcut(
-        self,
-        *,
-        source: str,
-        title: str,
-        draft_id: str,
-        config: ScheduledTaskConfig,
-        create_jobs: Callable[[WorkflowJobLink], list[Job]],
-    ) -> WorkflowRun:
-        now = utc_now()
-        run = WorkflowRun(
-            id=str(uuid.uuid4()),
-            status="running",
-            total=1,
-            completed=0,
-            failed=0,
-            skipped=0,
-            concurrency=1,
-            created_at=now,
-        )
-        self.repository.create_run(run)
-        item_id = self.repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=draft_id,
-                title=title,
-                status="running",
-                config=scheduled_task_config_to_dict(config),
-                request={
-                    "source": source,
-                    "title": title,
-                    "config": scheduled_task_config_to_dict(config),
-                },
-                created_at=utc_now(),
-            )
-        )
-        item = self.repository.list_items(run.id)[0]
-        workflow_link = WorkflowJobLink(run_id=run.id, item_id=item_id, source=source)
-        try:
-            jobs = create_jobs(workflow_link)
-        except Exception as exc:
-            failed_item = replace(
-                item,
-                id=item_id,
-                status="failed",
-                error_message=str(exc),
-                finished_at=utc_now(),
-            )
-            self.repository.update_item(failed_item)
-            failed_run = replace(
-                run,
-                status="failed",
-                failed=1,
-                finished_at=utc_now(),
-                items=[failed_item],
-            )
-            self.repository.update_run(failed_run)
-            raise
-
-        item_status = "running" if jobs else "completed"
-        completed_item = replace(
-            item,
-            id=item_id,
-            status=item_status,
-            job_ids=[job.id for job in jobs],
-            finished_at=None if jobs else utc_now(),
-        )
-        self.repository.update_item(completed_item)
-        running_run = replace(
-            run,
-            status="running" if jobs else "completed",
-            completed=0 if jobs else 1,
-            finished_at=None if jobs else utc_now(),
-            items=[completed_item],
-        )
-        self.repository.update_run(running_run)
-        return self.refresh_run_status(running_run)
-
     def _refresh_item_status(self, item: WorkflowRunItem) -> WorkflowRunItem:
         if not item.job_ids:
             return item
@@ -676,44 +474,9 @@ class WorkflowRunService:
         )
         return self.refresh_run_status(refreshed)
 
-    def _create_download_jobs(
-        self,
-        *,
-        user_id: str | None,
-        artwork_id: str | None,
-        force_rescan: bool,
-        retry_failed: bool,
-        sync_only: bool,
-        retry_failed_artist: bool,
-        options: dict[str, object],
-        workflow_link: WorkflowJobLink,
-    ) -> list[Job]:
-        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
-        try:
-            job = service.create_download_job(
-                user_id=user_id,
-                artwork_id=artwork_id,
-                force_rescan=force_rescan,
-                retry_failed=retry_failed,
-                sync_only=sync_only,
-                retry_failed_artist=retry_failed_artist,
-                options=options,
-                workflow_link=workflow_link,
-            )
-            return [job]
-        finally:
-            service.close()
-
 
 def request_config_to_dict(request: ScheduledTaskConfigRequest) -> dict[str, object]:
     return scheduled_task_config_to_dict(scheduled_task_config_from_request(request))
-
-
-def legacy_schedule_config(task: ScheduledTask) -> ScheduledTaskConfig:
-    return task.config or ScheduledTaskConfig(
-        target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
-        actions=(task.action,),
-    )
 
 
 def workflow_item_request_to_dict(request: WorkflowBatchItemRequest) -> dict[str, object]:

@@ -19,15 +19,6 @@ from backend.schemas.failure_reasons import classify_failure_reason
 from backend.schemas.scheduled_tasks import ScheduledTaskConfigRequest
 
 
-class WorkflowRunRequest(BaseModel):
-    config: ScheduledTaskConfigRequest
-
-
-class WorkflowRunResponse(BaseModel):
-    job_ids: list[str]
-    created: bool
-
-
 class WorkflowBatchItemRequest(BaseModel):
     draft_id: str
     title: str
@@ -38,11 +29,6 @@ class WorkflowBatchItemRequest(BaseModel):
     interval_days: int = Field(default=30, ge=1)
     enabled: bool = True
     run_after_startup: bool = True
-
-
-class WorkflowBatchRunRequest(BaseModel):
-    concurrency: int = Field(default=1, ge=1, le=6)
-    items: list[WorkflowBatchItemRequest] = Field(default_factory=list)
 
 
 AdvancedWorkflowNodeType = Literal[

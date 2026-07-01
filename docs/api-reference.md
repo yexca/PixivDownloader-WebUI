@@ -71,8 +71,6 @@ The job is linked to the workflow run through `workflow_run_id` and
 ## Workflows
 
 ```text
-POST /api/workflows/run
-POST /api/workflows/runs
 POST /api/workflows/advanced/runs
 GET  /api/workflows/runs
 GET  /api/workflows/runs/{run_id}
