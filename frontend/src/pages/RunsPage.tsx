@@ -98,8 +98,8 @@ export function RunsPage(): JSX.Element {
   return (
     <>
       <PageHeader
-        title="Runs"
-        description="Inspect workflow executions, node timelines, embedded jobs, and job events."
+        title="Run History"
+        description="Workflow executions, node progress, embedded jobs, and events."
         actions={
           <Button type="button" variant="outline" onClick={refresh} disabled={runs.isFetching || selectedRunJobs.isFetching}>
             <RefreshCw className="h-4 w-4" aria-hidden="true" />
@@ -107,17 +107,15 @@ export function RunsPage(): JSX.Element {
           </Button>
         }
       />
-      <div className="grid gap-4 p-4 sm:p-6 xl:grid-cols-[340px_minmax(0,1fr)]">
-        <aside className="space-y-4">
-          <section className="surface p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold">Run History</h2>
-                <p className="mt-1 text-sm text-muted-foreground">{runItems.length} recent run(s)</p>
-              </div>
+      <div className="space-y-4 p-4 sm:p-6">
+        <section className="surface p-3">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
+            <Tabs value={filter} onValueChange={setFilter} items={runFilterTabs} className="max-w-full flex-wrap" />
+            <div className="flex items-center gap-2 text-sm text-muted-foreground xl:ml-auto">
               <Badge tone="muted">{filteredRuns.length}</Badge>
+              <span>{runItems.length} recent run(s)</span>
             </div>
-            <div className="relative mt-4">
+            <div className="relative min-w-0 xl:w-80">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
                 value={search}
@@ -126,9 +124,11 @@ export function RunsPage(): JSX.Element {
                 onChange={(event) => setSearchQuery(event.target.value)}
               />
             </div>
-            <Tabs value={filter} onValueChange={setFilter} items={runFilterTabs} className="mt-4 max-w-full flex-wrap" />
-          </section>
+          </div>
+        </section>
 
+        <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+          <aside className="min-w-0">
           {runs.isLoading ? (
             <DataState title="Loading runs" variant="loading" />
           ) : runs.isError ? (
@@ -136,9 +136,9 @@ export function RunsPage(): JSX.Element {
           ) : (
             <RunList runs={filteredRuns} selectedRunId={selectedRun?.id ?? null} onSelect={selectRun} />
           )}
-        </aside>
+          </aside>
 
-        <main className="min-w-0">
+          <main className="min-w-0">
           {selectedRun ? (
             <WorkflowRunDetail
               run={selectedRun}
@@ -149,7 +149,8 @@ export function RunsPage(): JSX.Element {
           ) : (
             <DataState title="No run selected" description="Runs matching the current filter appear in the left list." />
           )}
-        </main>
+          </main>
+        </div>
       </div>
     </>
   );
@@ -174,7 +175,7 @@ function RunList({
           key={run.id}
           type="button"
           className={cn(
-            "surface w-full p-3 text-left transition-colors hover:bg-muted/50",
+            "w-full rounded-md border bg-card p-3 text-left transition-colors hover:bg-muted/50",
             run.id === selectedRunId && "border-primary bg-primary/5"
           )}
           onClick={() => onSelect(run)}
@@ -182,13 +183,17 @@ function RunList({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h3 className="truncate text-sm font-semibold">{runTitle(run)}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">{sourceLabel(run.source)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {sourceLabel(run.source)} · {formatDate(run.created_at)}
+              </p>
             </div>
             <Badge tone={workflowRunTone(run.status)}>{run.status}</Badge>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            {run.completed}/{run.total} completed · {formatDate(run.created_at)}
-          </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+            <span>{run.completed}/{run.total} nodes</span>
+            <span>{run.failed} failed</span>
+            <span>{run.node_runs.reduce((total, node) => total + node.job_ids.length, 0)} job(s)</span>
+          </div>
         </button>
       ))}
     </section>
