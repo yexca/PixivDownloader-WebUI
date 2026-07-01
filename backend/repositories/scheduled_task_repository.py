@@ -364,6 +364,11 @@ def normalize_ids(value: object) -> list[str]:
 def optional_int(value: object) -> int | None:
     if value is None:
         return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def clean_download_options(value: object) -> dict[str, object]:

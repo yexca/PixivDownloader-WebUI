@@ -21,7 +21,11 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.scheduled_task_repository import ScheduledTaskRepository
 from backend.repositories.workflow_run_repository import WorkflowRun
+from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
+from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.job_service import JobService, WorkflowJobLink
+from backend.services.settings_service import AppSettingsService
+from backend.services.storage_service import check_free_space
 
 
 class ScheduledTaskService:
@@ -221,13 +225,124 @@ class ScheduledTaskService:
         self.repository.close()
 
     def _create_workflow_run(self, task: ScheduledTask, *, manual: bool) -> WorkflowRun:
-        from backend.services.workflow_run_service import WorkflowRunService
-
-        service = WorkflowRunService(self.db_path, settings_json_path=self.settings_json_path)
+        config = task.config or legacy_config(task)
+        if scheduled_task_downloads(config):
+            self._ensure_download_space()
+        runner = AdvancedWorkflowRunner(
+            self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
         try:
-            return service.run_schedule(task, manual=manual)
+            return runner.create_run(
+                self._scheduled_task_definition(task, config),
+                source="manual_schedule" if manual else "schedule",
+                schedule_id=task.id,
+            )
         finally:
-            service.close()
+            runner.close()
+
+    def _ensure_download_space(self) -> None:
+        settings_service = AppSettingsService(
+            db_path=self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            settings = settings_service.load()
+        finally:
+            settings_service.close()
+        check_free_space(settings.download_path, settings.min_free_space_gb)
+
+    def _scheduled_task_definition(
+        self,
+        task: ScheduledTask,
+        config: ScheduledTaskConfig,
+    ) -> AdvancedWorkflowDefinitionRequest:
+        actions = tuple(config.actions) or ("download_artist",)
+        nodes: list[dict[str, object]] = [
+            {
+                "id": "target",
+                "type": "artist_target",
+                "title": "Target artists",
+                "config": self._scheduled_target_config(config),
+            }
+        ]
+        if any(
+            action in {"sync_artist", "download_artist", "retry_failed_artist"}
+            for action in actions
+        ):
+            nodes.append(
+                {
+                    "id": "sync",
+                    "type": "sync_metadata",
+                    "title": "Sync metadata",
+                    "config": {
+                        "mode": "full"
+                        if config.download_options.get("full_download")
+                        else "incremental"
+                    },
+                }
+            )
+        if actions == ("sync_artist",):
+            return AdvancedWorkflowDefinitionRequest.model_validate(
+                {
+                    "name": task.name
+                    or default_task_name("sync_artist", task.target_artist_id, config),
+                    "nodes": nodes,
+                }
+            )
+
+        download_options = dict(config.download_options)
+        if "download_artist" in actions:
+            nodes.extend(
+                scheduled_download_nodes(
+                    download_options,
+                    suffix="",
+                    collect_mode=scheduled_download_collect_mode(download_options),
+                    title="Download files",
+                )
+            )
+        if "retry_failed_artist" in actions:
+            nodes.extend(
+                scheduled_download_nodes(
+                    download_options,
+                    suffix="_retry",
+                    collect_mode="failed_files",
+                    title="Retry failed files",
+                )
+            )
+        return AdvancedWorkflowDefinitionRequest.model_validate(
+            {
+                "name": task.name or default_task_name(actions[0], task.target_artist_id, config),
+                "nodes": nodes,
+            }
+        )
+
+    def _scheduled_target_config(self, config: ScheduledTaskConfig) -> dict[str, object]:
+        target = config.target
+        artist_ids = self._scheduled_artist_ids(config)
+        artwork_ids = self._scheduled_artwork_ids(config)
+        return {
+            "scope": target.type,
+            "artist_ids": artist_ids,
+            "artwork_ids": artwork_ids,
+            "max_artists": config.max_artists_per_run,
+        }
+
+    def _scheduled_artist_ids(self, config: ScheduledTaskConfig) -> list[str]:
+        target = config.target
+        if target.type == "artists":
+            return list(target.artist_ids)[: config.max_artists_per_run]
+        if target.type == "single_artist" and target.artist_id:
+            return [target.artist_id]
+        return [artist.id for artist in self._resolve_artists(config)[: config.max_artists_per_run]]
+
+    def _scheduled_artwork_ids(self, config: ScheduledTaskConfig) -> list[str]:
+        target = config.target
+        if target.type == "single_artwork" and target.artwork_id:
+            return [target.artwork_id]
+        if target.type == "artists" and target.artwork_ids:
+            return list(target.artwork_ids)
+        return []
 
     def _jobs_for_ids(self, job_ids: list[str]) -> list[Job]:
         if not job_ids:
@@ -395,9 +510,7 @@ class ScheduledTaskService:
                 for artist_id in artist_ids:
                     artist = repository.get_by_id(artist_id)
                     artists.append(
-                        artist
-                        if artist is not None
-                        else Artist(id=artist_id, name=artist_id)
+                        artist if artist is not None else Artist(id=artist_id, name=artist_id)
                     )
                 return artists
             if target.type == "single_artist":
@@ -529,6 +642,58 @@ def legacy_config(task: ScheduledTask) -> ScheduledTaskConfig:
         target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
         actions=(task.action,),
     )
+
+
+def scheduled_task_downloads(config: ScheduledTaskConfig) -> bool:
+    return any(action in {"download_artist", "retry_failed_artist"} for action in config.actions)
+
+
+def scheduled_download_collect_mode(download_options: dict[str, object]) -> str:
+    if download_options.get("full_download"):
+        return "all_synced"
+    if download_options.get("pending_only"):
+        return "pending_files"
+    return "new_since_last_download"
+
+
+def scheduled_download_nodes(
+    download_options: dict[str, object],
+    *,
+    suffix: str,
+    collect_mode: str,
+    title: str,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "id": f"collect{suffix}",
+            "type": "collect_artworks",
+            "title": "Collect artworks" if not suffix else "Collect failed files",
+            "config": {
+                "mode": collect_mode,
+                "max_artworks": download_options.get("max_artworks"),
+                "min_artwork_id": download_options.get("min_artwork_id"),
+                "max_artwork_id": download_options.get("max_artwork_id"),
+            },
+        },
+        {
+            "id": f"filters{suffix}",
+            "type": "filter_artworks",
+            "title": "Filter artworks",
+            "config": {
+                "stop_above_limit": download_options.get("stop_if_artwork_count_above"),
+            },
+        },
+        {
+            "id": f"actions{suffix}",
+            "type": "execute_actions",
+            "title": title,
+            "config": {
+                "download": True,
+                "execution_unit": "artist",
+                "naming_rule": download_options.get("naming_rule"),
+            },
+        },
+    ]
 
 
 def artist_is_stale(artist: Artist, days: int) -> bool:

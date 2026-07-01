@@ -757,9 +757,24 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     finally:
         repository.close()
     assert job is not None
+    assert job.type == "resolve_workflow_targets"
     assert job.workflow_run_id == body["workflow_run_id"]
-    assert job.workflow_source == "manual_schedule"
+    assert job.workflow_source == "advanced_workflow"
     assert "workflow_source" not in job.options
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(body["workflow_run_id"])
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.source == "manual_schedule"
+    assert [node.node_id for node in run.node_runs] == [
+        "target",
+        "sync",
+        "collect",
+        "filters",
+        "actions",
+    ]
 
 
 def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
@@ -909,10 +924,17 @@ def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
     try:
         job = repository.get_by_id(body["job_ids"][0])
         assert job is not None
-        assert job.type == "sync_artist"
-        assert job.input_user_id == "123"
+        assert job.type == "resolve_workflow_targets"
+        assert job.options["artist_ids"] == ["123"]
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(body["workflow_run_id"])
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert [node.node_id for node in run.node_runs] == ["target", "sync"]
 
 
 def test_scheduled_task_builder_targets_single_artwork(tmp_path):
@@ -945,13 +967,19 @@ def test_scheduled_task_builder_targets_single_artwork(tmp_path):
     try:
         job = repository.get_by_id(body["job_ids"][0])
         assert job is not None
-        assert job.type == "download_from_artwork"
-        assert job.input_artwork_id == "999"
-        assert job.options["full_download"] is True
+        assert job.type == "resolve_workflow_targets"
+        assert job.options["artwork_ids"] == ["999"]
         assert job.workflow_run_id == body["workflow_run_id"]
-        assert job.workflow_source == "manual_schedule"
+        assert job.workflow_source == "advanced_workflow"
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(body["workflow_run_id"])
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.node_runs[2].input["config"]["mode"] == "all_synced"
 
 
 def test_scheduled_task_builder_accepts_empty_legacy_target_artist_id(tmp_path):
@@ -1029,7 +1057,7 @@ def test_scheduled_task_builder_uses_oldest_checked_artists_first(tmp_path):
     try:
         job = repository.get_by_id(body["job_ids"][0])
         assert job is not None
-        assert job.input_user_id == "old"
+        assert job.options["artist_ids"] == ["old"]
     finally:
         repository.close()
 
@@ -1082,7 +1110,7 @@ def test_scheduled_task_builder_uses_newest_checked_artists_first(tmp_path):
     try:
         job = repository.get_by_id(body["job_ids"][0])
         assert job is not None
-        assert job.input_user_id == "new"
+        assert job.options["artist_ids"] == ["new"]
     finally:
         repository.close()
 
@@ -1128,7 +1156,7 @@ def test_scheduled_task_builder_can_randomly_select_artists(tmp_path, monkeypatc
     try:
         job = repository.get_by_id(body["job_ids"][0])
         assert job is not None
-        assert job.input_user_id == "second"
+        assert job.options["artist_ids"] == ["second"]
     finally:
         repository.close()
 
@@ -1166,17 +1194,29 @@ def test_scheduled_task_builder_targets_local_tag(tmp_path):
 
     assert run_response.status_code == 200
     body = run_response.json()
-    assert len(body["job_ids"]) == 2
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
-        assert [job.type for job in jobs if job is not None] == [
-            "download_artist",
-            "retry_failed_artist",
-        ]
-        assert {job.input_user_id for job in jobs if job is not None} == {"123"}
+        job = repository.get_by_id(body["job_ids"][0])
+        assert job is not None
+        assert job.options["artist_ids"] == ["123"]
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(body["workflow_run_id"])
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert [node.node_id for node in run.node_runs] == [
+        "target",
+        "sync",
+        "collect",
+        "filters",
+        "actions",
+        "collect_retry",
+        "filters_retry",
+        "actions_retry",
+    ]
 
 
 def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
@@ -1223,8 +1263,9 @@ def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
     body = run_response.json()
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
-        assert {job.input_user_id for job in jobs if job is not None} == {"123", "456"}
+        job = repository.get_by_id(body["job_ids"][0])
+        assert job is not None
+        assert job.options["artist_ids"] == ["123", "456"]
     finally:
         repository.close()
 
@@ -1262,8 +1303,9 @@ def test_scheduled_task_builder_skips_unavailable_artists_by_default(tmp_path):
     body = run_response.json()
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
-        assert {job.input_user_id for job in jobs if job is not None} == {"123"}
+        job = repository.get_by_id(body["job_ids"][0])
+        assert job is not None
+        assert job.options["artist_ids"] == ["123"]
     finally:
         repository.close()
 
@@ -1301,8 +1343,9 @@ def test_scheduled_task_builder_can_include_unavailable_artists(tmp_path):
     body = run_response.json()
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        jobs = [repository.get_by_id(job_id) for job_id in body["job_ids"]]
-        assert {job.input_user_id for job in jobs if job is not None} == {"123", "456"}
+        job = repository.get_by_id(body["job_ids"][0])
+        assert job is not None
+        assert job.options["artist_ids"] == ["123", "456"]
     finally:
         repository.close()
 

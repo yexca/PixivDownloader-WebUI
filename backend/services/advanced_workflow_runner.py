@@ -26,6 +26,8 @@ ADVANCED_WORKFLOW_SOURCES = {
     "download_api",
     "library_shortcut",
     "artwork_file_shortcut",
+    "manual_schedule",
+    "schedule",
 }
 
 
