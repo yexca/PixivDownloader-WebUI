@@ -4,7 +4,6 @@ import uuid
 from dataclasses import replace
 from pathlib import Path
 
-from backend.domain.entities import Job
 from backend.repositories._time import utc_now
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import (
@@ -142,57 +141,6 @@ class WorkflowRunService:
         )
         self.repository.update_run(updated_run)
         return self.refresh_run_status(updated_run)
-
-    def run_job_action(self, job_id: str, *, action: str) -> tuple[WorkflowRun, Job]:
-        if action not in {"retry", "rerun"}:
-            raise ValueError("job action must be retry or rerun")
-        now = utc_now()
-        source = f"job_{action}"
-        title = "Retry job" if action == "retry" else "Rerun job"
-        run = WorkflowRun(
-            id=str(uuid.uuid4()),
-            status="running",
-            total=1,
-            completed=0,
-            failed=0,
-            skipped=0,
-            concurrency=1,
-            source=source,
-            created_at=now,
-        )
-        self.repository.create_run(run)
-        item_id = self.repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=f"{source}:{job_id}",
-                title=title,
-                status="running",
-                config={"target": {"type": "job", "job_id": job_id}, "actions": [action]},
-                request={"source": source, "source_job_id": job_id, "action": action},
-                created_at=utc_now(),
-            )
-        )
-        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
-        try:
-            workflow_link = WorkflowJobLink(
-                run_id=run.id,
-                item_id=item_id,
-                source=source,
-            )
-            job = (
-                service.retry_job(job_id, workflow_link=workflow_link)
-                if action == "retry"
-                else service.rerun_job(job_id, workflow_link=workflow_link)
-            )
-        finally:
-            service.close()
-        item = self.repository.list_items(run.id)[0]
-        updated_item = replace(item, id=item_id, status="running", job_ids=[job.id])
-        self.repository.update_item(updated_item)
-        updated_run = replace(run, status="running", items=[updated_item])
-        self.repository.update_run(updated_run)
-        return self.refresh_run_status(updated_run), job
 
     def process_run(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)

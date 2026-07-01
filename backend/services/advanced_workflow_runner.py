@@ -26,6 +26,8 @@ ADVANCED_WORKFLOW_SOURCES = {
     "download_api",
     "library_shortcut",
     "artwork_file_shortcut",
+    "job_retry",
+    "job_rerun",
     "manual_schedule",
     "schedule",
 }

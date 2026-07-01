@@ -37,6 +37,7 @@ AdvancedWorkflowNodeType = Literal[
     "collect_artworks",
     "filter_artworks",
     "execute_actions",
+    "job_action",
 ]
 
 

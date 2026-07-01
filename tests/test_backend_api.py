@@ -1698,7 +1698,7 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
     assert retry.workflow_run_id is not None
     assert retry.workflow_run_id != "run-1"
     assert retry.workflow_item_id is not None
-    assert retry.workflow_source == "job_retry"
+    assert retry.workflow_source == "advanced_workflow"
     assert retry.options["artist_ids"] == ["222"]
     assert retry.options["legacy_latest_download_id_by_artist"] == {"222": "2000"}
     assert "workflow_source" not in retry.options
@@ -1710,6 +1710,9 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
     assert run is not None
     assert run.source == "job_retry"
     assert run.items[0].job_ids == [retry.id]
+    assert len(run.node_runs) == 1
+    assert run.node_runs[0].node_type == "job_action"
+    assert run.node_runs[0].job_ids == [retry.id]
 
 
 def test_rerun_job_queues_copy_with_original_options(tmp_path):
@@ -1745,7 +1748,7 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert rerun.options["max_artworks"] == 5
     assert rerun.options["source_job_id"] == "job-1"
     assert rerun.workflow_run_id is not None
-    assert rerun.workflow_source == "job_rerun"
+    assert rerun.workflow_source == "advanced_workflow"
     assert "workflow_source" not in rerun.options
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -1755,6 +1758,9 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert run is not None
     assert run.source == "job_rerun"
     assert run.items[0].job_ids == [rerun.id]
+    assert len(run.node_runs) == 1
+    assert run.node_runs[0].node_type == "job_action"
+    assert run.node_runs[0].job_ids == [rerun.id]
 
 
 def test_job_detail_reports_related_retry_and_rerun_jobs(tmp_path):

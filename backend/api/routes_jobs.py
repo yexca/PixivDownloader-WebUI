@@ -7,7 +7,9 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.core.errors import JobNotFoundError
+from backend.domain.entities import Job
 from backend.domain.types import JobStatus
+from backend.repositories.job_repository import JobRepository
 from backend.schemas.jobs import (
     JobActionResponse,
     JobBulkActionError,
@@ -22,8 +24,9 @@ from backend.schemas.jobs import (
     job_event_response,
     job_response,
 )
+from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
+from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.job_service import JobService
-from backend.services.workflow_run_service import WorkflowRunService
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
@@ -112,11 +115,12 @@ def retry_job(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> JobActionResponse:
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        _run, job = service.run_job_action(job_id, action="retry")
-    finally:
-        service.close()
+    job = run_job_action_workflow(
+        job_id,
+        action="retry",
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+    )
     queue.wake()
     return JobActionResponse(
         job_id=job.id,
@@ -133,11 +137,12 @@ def rerun_job(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> JobActionResponse:
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        _run, job = service.run_job_action(job_id, action="rerun")
-    finally:
-        service.close()
+    job = run_job_action_workflow(
+        job_id,
+        action="rerun",
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+    )
     queue.wake()
     return JobActionResponse(
         job_id=job.id,
@@ -145,6 +150,49 @@ def rerun_job(
         source_job_id=job_id,
         action="rerun",
     )
+
+
+def run_job_action_workflow(
+    job_id: str,
+    *,
+    action: str,
+    db_path,
+    settings_json_path,
+) -> Job:
+    title = "Retry job" if action == "retry" else "Rerun job"
+    runner = AdvancedWorkflowRunner(db_path, settings_json_path=settings_json_path)
+    try:
+        run = runner.create_run(
+            AdvancedWorkflowDefinitionRequest.model_validate(
+                {
+                    "name": title,
+                    "nodes": [
+                        {
+                            "id": "job_action",
+                            "type": "job_action",
+                            "title": title,
+                            "config": {
+                                "source_job_id": job_id,
+                                "action": action,
+                            },
+                        }
+                    ],
+                }
+            ),
+            source=f"job_{action}",
+        )
+    finally:
+        runner.close()
+    if not run.node_runs or not run.node_runs[0].job_ids:
+        raise JobNotFoundError(f"job {job_id} was not found")
+    repository = JobRepository(db_path)
+    try:
+        job = repository.get_by_id(run.node_runs[0].job_ids[0])
+    finally:
+        repository.close()
+    if job is None:
+        raise JobNotFoundError(f"job {job_id} was not found")
+    return job
 
 
 @router.post("/bulk-cancel", response_model=JobBulkCancelResponse)
