@@ -15,7 +15,12 @@ from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
-from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunRepository
+from backend.repositories.workflow_run_repository import (
+    WorkflowNodeRun,
+    WorkflowRun,
+    WorkflowRunItem,
+    WorkflowRunRepository,
+)
 from backend.services import scheduled_task_service
 from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
@@ -1717,6 +1722,69 @@ def test_create_artist_queues_sync_job(tmp_path):
     assert run.source == "library_shortcut"
     assert [node.node_id for node in run.node_runs] == ["target", "sync"]
     assert run.node_runs[0].job_ids == [body["job_id"]]
+
+
+def test_workflow_run_reads_advanced_shortcut_node_totals(tmp_path):
+    client = make_client(tmp_path)
+    repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = WorkflowRun(
+            id="advanced-shortcut-run",
+            status="completed",
+            total=2,
+            completed=1,
+            failed=0,
+            skipped=0,
+            concurrency=1,
+            source="library_shortcut",
+            created_at="2026-07-01T00:00:00Z",
+        )
+        repository.create_run(run)
+        repository.create_item(
+            WorkflowRunItem(
+                id=None,
+                run_id=run.id,
+                draft_id="advanced:advanced-shortcut-run",
+                title="Sync artist",
+                status="completed",
+                config={"nodes": []},
+                request={"source": "library_shortcut"},
+                created_at=run.created_at,
+                finished_at="2026-07-01T00:00:01Z",
+            )
+        )
+        for position, node_id in enumerate(("target", "sync")):
+            repository.create_node_run(
+                WorkflowNodeRun(
+                    id=None,
+                    workflow_run_id=run.id,
+                    node_id=node_id,
+                    node_type="sync_metadata" if node_id == "sync" else "artist_target",
+                    title=node_id.title(),
+                    position=position,
+                    status="completed",
+                    output={"completed_jobs": []},
+                    created_at=run.created_at,
+                    started_at=run.created_at,
+                    finished_at="2026-07-01T00:00:01Z",
+                )
+            )
+    finally:
+        repository.close()
+
+    list_response = client.get("/api/workflows/runs")
+    detail_response = client.get(f"/api/workflows/runs/{run.id}")
+
+    assert list_response.status_code == 200
+    list_item = next(item for item in list_response.json()["items"] if item["id"] == run.id)
+    assert list_item["status"] == "completed"
+    assert list_item["completed"] == 2
+    assert list_item["total"] == 2
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["status"] == "completed"
+    assert detail["completed"] == 2
+    assert detail["total"] == 2
 
 
 def test_artist_tags_and_filter_endpoint(tmp_path):

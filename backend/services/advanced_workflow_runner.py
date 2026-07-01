@@ -29,6 +29,10 @@ ADVANCED_WORKFLOW_SOURCES = {
 }
 
 
+def is_advanced_workflow_source(source: str) -> bool:
+    return source in ADVANCED_WORKFLOW_SOURCES
+
+
 class AdvancedWorkflowRunner:
     def __init__(
         self,
@@ -102,7 +106,7 @@ class AdvancedWorkflowRunner:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
-        if run.source not in ADVANCED_WORKFLOW_SOURCES:
+        if not is_advanced_workflow_source(run.source):
             return run
 
         context: dict[str, object] = {}
