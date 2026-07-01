@@ -18,10 +18,8 @@ from backend.schemas.workflows import (
     workflow_run_response,
     workflow_trigger_response,
 )
-from backend.services.advanced_workflow_runner import (
-    AdvancedWorkflowRunner,
-    is_advanced_workflow_source,
-)
+from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
+from backend.services.workflow_read_service import WorkflowReadService
 from backend.services.workflow_run_service import WorkflowRunService
 from backend.services.workflow_schedule_service import WorkflowScheduleService
 
@@ -167,7 +165,11 @@ def list_workflow_runs(
     limit: int = Query(default=5, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
 ) -> WorkflowBatchRunListResponse:
-    runs, total = refresh_workflow_runs(db_path, limit=limit, offset=offset)
+    service = WorkflowReadService(db_path)
+    try:
+        runs, total = service.list_runs(limit=limit, offset=offset)
+    finally:
+        service.close()
     return WorkflowBatchRunListResponse(
         items=[workflow_run_response(run) for run in runs],
         total=total,
@@ -176,45 +178,11 @@ def list_workflow_runs(
 
 @router.get("/runs/{run_id}", response_model=WorkflowBatchRunResponse)
 def get_workflow_run(run_id: str, db_path: DbPath) -> WorkflowBatchRunResponse:
-    run = refresh_workflow_run(db_path, run_id)
+    service = WorkflowReadService(db_path)
+    try:
+        run = service.get_run(run_id)
+    finally:
+        service.close()
     if run is None:
         raise HTTPException(status_code=404, detail="Workflow run not found")
     return workflow_run_response(run)
-
-
-def refresh_workflow_runs(
-    db_path: DbPath,
-    *,
-    limit: int,
-    offset: int,
-):
-    service = WorkflowRunService(db_path)
-    try:
-        runs, total = (
-            service.repository.list_runs(limit=limit, offset=offset),
-            service.repository.count_runs(),
-        )
-    finally:
-        service.close()
-    return [refresh_workflow_run(db_path, run.id) or run for run in runs], total
-
-
-def refresh_workflow_run(db_path: DbPath, run_id: str):
-    service = WorkflowRunService(db_path)
-    try:
-        run = service.repository.get_run(run_id)
-    finally:
-        service.close()
-    if run is None:
-        return None
-    if is_advanced_workflow_source(run.source):
-        runner = AdvancedWorkflowRunner(db_path)
-        try:
-            return runner.process_run(run.id)
-        finally:
-            runner.close()
-    service = WorkflowRunService(db_path)
-    try:
-        return service.refresh_run_status(run)
-    finally:
-        service.close()
