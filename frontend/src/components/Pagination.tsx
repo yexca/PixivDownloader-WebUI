@@ -10,6 +10,7 @@ type PaginationProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   pageSizeOptions?: number[];
+  itemLabel?: string;
 };
 
 export function Pagination({
@@ -18,7 +19,8 @@ export function Pagination({
   pageSize,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [25, 50, 100]
+  pageSizeOptions = [25, 50, 100],
+  itemLabel = "rows"
 }: PaginationProps): JSX.Element {
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(Math.max(page, 1), pageCount);
@@ -38,7 +40,7 @@ export function Pagination({
         >
           {pageSizeOptions.map((option) => (
             <option key={option} value={option}>
-              {option} rows
+              {option} {itemLabel}
             </option>
           ))}
         </Select>

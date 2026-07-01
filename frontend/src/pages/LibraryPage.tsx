@@ -39,7 +39,7 @@ export function LibraryPage(): JSX.Element {
   const updateState = searchParams.get("updateState") ?? "";
   const sort = searchParams.get("sort") ?? "updated_desc";
   const page = Math.max(1, Number(searchParams.get("page") || "1"));
-  const pageSize = Math.max(1, Number(searchParams.get("pageSize") || "50"));
+  const pageSize = Math.max(1, Number(searchParams.get("pageSize") || "25"));
   const [selectedArtistId, setSelectedArtistId] = React.useState<string | null>(
     searchParams.get("artist")
   );

@@ -13,6 +13,7 @@ const AboutPage = React.lazy(() => import("@/pages/AboutPage").then((module) => 
 const ArtistDetailPage = React.lazy(() =>
   import("@/pages/ArtistDetailPage").then((module) => ({ default: module.ArtistDetailPage }))
 );
+const ArtistsPage = React.lazy(() => import("@/pages/ArtistsPage").then((module) => ({ default: module.ArtistsPage })));
 const DashboardPage = React.lazy(() =>
   import("@/pages/DashboardPage").then((module) => ({ default: module.DashboardPage }))
 );
@@ -62,6 +63,7 @@ const router = createBrowserRouter([
       { index: true, element: suspensePage(<DashboardPage />) },
       { path: "workflows", element: suspensePage(<WorkflowsPage />) },
       { path: "runs", element: suspensePage(<RunsPage />) },
+      { path: "artists", element: suspensePage(<ArtistsPage />) },
       { path: "library", element: suspensePage(<LibraryPage />) },
       { path: "artists/:artistId", element: suspensePage(<ArtistDetailPage />) },
       { path: "jobs", element: suspensePage(<JobsPage />) },
