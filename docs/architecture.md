@@ -11,7 +11,7 @@ Browser WebUI
     v
 FastAPI backend
     |
-    +-- workflow runs and scheduled triggers
+    +-- workflow runs and workflow triggers
     +-- job queue and workers
     +-- Pixiv API client
     +-- file downloader
@@ -194,13 +194,12 @@ WorkflowNodeRun
           -> download_service / library_sync_service / Pixiv client
 ```
 
-Basic workflow items are no longer the primary runtime model. They may exist as
-a UI/editor convenience, but the runtime boundary is
-`WorkflowRun -> WorkflowNodeRun -> Job[]`.
+The runtime boundary is `WorkflowRun -> WorkflowNodeRun -> Job[]`.
 
-Scheduled tasks are triggers, not jobs. When a schedule is due, it creates jobs
-from its stored workflow config. One-time workflow runs and scheduled tasks both
-use the same job execution layer.
+Workflow triggers are reusable workflow definitions with schedule rules. When a
+trigger is due, it creates a workflow run from its stored definition. Manual
+runs, shortcut runs, and trigger runs all use the same node-run and job
+execution layer.
 
 Downloads run as persisted jobs.
 

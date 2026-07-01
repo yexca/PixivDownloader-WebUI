@@ -66,7 +66,7 @@ The response keeps the shortcut shape used by the UI:
 ```
 
 The job is linked to the workflow run through `workflow_run_id` and
-`workflow_item_id`.
+`workflow_node_run_id`.
 
 ## Workflows
 
@@ -111,7 +111,24 @@ aggregated from node-run statuses: pending or running nodes keep the run
 }
 ```
 
-Run responses include both compatibility `items` and advanced `node_runs`.
+Run responses include `node_runs`. Each node run records its input, output,
+status, failure detail, and linked job IDs.
+
+Reusable workflow definitions and triggers are managed with:
+
+```text
+GET  /api/workflows/definitions
+POST /api/workflows/definitions
+POST /api/workflows/definitions/{definition_id}/run
+GET  /api/workflows/triggers
+POST /api/workflows/triggers
+PUT  /api/workflows/triggers/{trigger_id}
+POST /api/workflows/triggers/{trigger_id}/run
+DELETE /api/workflows/triggers/{trigger_id}
+```
+
+Workflow triggers contain schedule rules and create workflow runs when they are
+due or manually run.
 
 ## Jobs
 
@@ -131,7 +148,7 @@ workflow shortcut or workflow batch:
 ```json
 {
   "workflow_run_id": "uuid",
-  "workflow_item_id": 1,
+  "workflow_node_run_id": 1,
   "workflow_source": "download_api"
 }
 ```

@@ -68,8 +68,9 @@ Main WebUI tables:
 - `artwork_files`
 - `jobs`
 - `job_events`
+- `workflow_definitions`
+- `workflow_triggers`
 - `workflow_runs`
-- `workflow_run_items`
 - `workflow_node_runs`
 - `settings`
 
@@ -108,20 +109,21 @@ job_ids_json
 error_message
 ```
 
-Workflow items are retained for older/basic entry points, but they are not the
-primary runtime boundary for advanced workflows.
-
 Jobs are persisted so the UI can show execution history and progress. Jobs
 created by workflow nodes store workflow links:
 
 ```text
-jobs.workflow_run_id   -> workflow_runs.id
-jobs.workflow_item_id  -> compatibility item for the run
-jobs.workflow_source   -> advanced_workflow or another source label
+jobs.workflow_run_id      -> workflow_runs.id
+jobs.workflow_node_run_id -> workflow_node_runs.id
+jobs.workflow_source      -> workflow source label
 ```
 
-The canonical advanced node-to-job link is currently
-`workflow_node_runs.job_ids_json`.
+The canonical node-to-job link is `workflow_node_runs.job_ids_json`.
+`jobs.workflow_node_run_id` is a direct lookup aid for jobs created by a node.
+
+Workflow definitions and triggers store reusable workflow configs and their
+schedule rules. A due trigger creates a workflow run; the run then progresses
+through node runs and jobs like any other workflow.
 
 Common job statuses:
 
