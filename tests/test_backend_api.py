@@ -1481,6 +1481,64 @@ def test_workflow_run_reads_advanced_shortcut_node_totals(tmp_path):
     assert detail["total"] == 2
 
 
+def test_workflow_run_node_failure_uses_structured_job_error(tmp_path):
+    client = make_client(tmp_path)
+    repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    run = WorkflowRun(
+        id="advanced-failed-run",
+        status="failed",
+        total=1,
+        completed=0,
+        failed=1,
+        skipped=0,
+        concurrency=1,
+        source="advanced_manual",
+        created_at="2026-07-01T00:00:00Z",
+        finished_at="2026-07-01T00:00:01Z",
+    )
+    try:
+        repository.create_run(run)
+        repository.create_item(
+            WorkflowRunItem(
+                id=None,
+                run_id=run.id,
+                draft_id="advanced:failed",
+                title="Failed workflow",
+                status="running",
+                config={"nodes": []},
+                request={"source": "advanced_manual"},
+                created_at=run.created_at,
+            )
+        )
+        repository.create_node_run(
+            WorkflowNodeRun(
+                id=None,
+                workflow_run_id=run.id,
+                node_id="target",
+                node_type="artist_target",
+                title="Target",
+                position=0,
+                status="failed",
+                error_message="Pixiv artwork 404 does not exist",
+                output={"error_code": "pixiv_artwork_not_found", "error_retryable": False},
+                created_at=run.created_at,
+                started_at=run.created_at,
+                finished_at=run.finished_at,
+            )
+        )
+    finally:
+        repository.close()
+
+    response = client.get(f"/api/workflows/runs/{run.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["failure"]["code"] == "pixiv_artwork_not_found"
+    assert body["failure"]["reason"] == "target"
+    assert body["failure"]["retryable"] is False
+    assert body["node_runs"][0]["failure"] == body["failure"]
+
+
 def test_artist_tags_and_filter_endpoint(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")

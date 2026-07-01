@@ -21,6 +21,7 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.scheduled_task_repository import ScheduledTaskRepository
 from backend.repositories.workflow_run_repository import WorkflowRun
+from backend.schemas.failure_reasons import failure_detail_from_exception
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.job_service import JobService, WorkflowJobLink
@@ -172,12 +173,13 @@ class ScheduledTaskService:
             run = self._create_workflow_run(task, manual=manual)
             jobs = [job for item in run.items for job in self._jobs_for_ids(item.job_ids)]
         except InsufficientDiskSpaceError as exc:
+            failure = failure_detail_from_exception(exc)
             updated = replace(
                 task,
                 status="blocked",
                 last_run_at=now,
                 next_run_at=None,
-                last_error_code="insufficient_disk_space",
+                last_error_code=failure.code,
                 last_error_message=str(exc),
             )
             self.repository.update(updated)
@@ -188,11 +190,12 @@ class ScheduledTaskService:
                 skipped=False,
             )
         except PixivDownloaderError as exc:
+            failure = failure_detail_from_exception(exc)
             updated = replace(
                 task,
                 last_run_at=now,
                 next_run_at=next_time(now, task.interval_days),
-                last_error_code=type(exc).__name__,
+                last_error_code=failure.code,
                 last_error_message=str(exc),
             )
             self.repository.update(updated)

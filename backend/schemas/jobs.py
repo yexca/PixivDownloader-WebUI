@@ -159,8 +159,13 @@ def job_failure_detail(job: Job) -> FailureDetail | None:
         code=string_option(job.options.get("error_code")),
         message=job.error_message,
         status=job.status,
+        retryable=bool_option(job.options.get("error_retryable")),
     )
 
 
 def string_option(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def bool_option(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None

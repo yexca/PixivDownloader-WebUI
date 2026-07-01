@@ -116,6 +116,16 @@ class JobRepository:
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to update job {job.id}") from exc
 
+    def update_options(self, job_id: str, options: dict[str, object]) -> None:
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE jobs SET options_json = ? WHERE id = ?",
+                    (json.dumps(options) if options else None, job_id),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to update job {job_id} options") from exc
+
     def update_workflow_link(
         self,
         job_id: str,

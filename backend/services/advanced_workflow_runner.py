@@ -12,6 +12,7 @@ from backend.repositories.workflow_run_repository import (
     WorkflowRunItem,
     WorkflowRunRepository,
 )
+from backend.schemas.failure_reasons import failure_detail_from_exception
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.workflow_nodes import default_node_registry
 from backend.services.workflow_nodes.base import WorkflowNodeContext, WorkflowNodeExecutor
@@ -140,10 +141,16 @@ class AdvancedWorkflowRunner:
             try:
                 node_run = self._execute_node(node_run, context, item_id=item_id)
             except Exception as exc:
+                failure = failure_detail_from_exception(exc)
                 failed = replace(
                     node_run,
                     status="failed",
                     error_message=str(exc),
+                    output={
+                        **node_run.output,
+                        "error_code": failure.code,
+                        "error_retryable": failure.retryable,
+                    },
                     finished_at=utc_now(),
                 )
                 self.repository.update_node_run(failed)
@@ -215,11 +222,18 @@ class AdvancedWorkflowRunner:
         if any(job.status in ACTIVE_JOB_STATUSES for job in jobs):
             return node_run
         if any(job.status in FAILED_JOB_STATUSES for job in jobs):
-            message = next((job.error_message for job in jobs if job.error_message), None)
+            failed_job = next((job for job in jobs if job.status in FAILED_JOB_STATUSES), jobs[0])
+            message = failed_job.error_message
             failed = replace(
                 node_run,
                 status="failed",
                 error_message=message or node_run.error_message,
+                output={
+                    **node_run.output,
+                    "failed_job_id": failed_job.id,
+                    "error_code": failed_job.options.get("error_code"),
+                    "error_retryable": failed_job.options.get("error_retryable"),
+                },
                 finished_at=utc_now(),
             )
             self.repository.update_node_run(failed)

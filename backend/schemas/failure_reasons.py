@@ -2,6 +2,19 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from backend.core.errors import (
+    ConfigError,
+    DatabaseError,
+    DownloadError,
+    DownloadSkippedError,
+    InsufficientDiskSpaceError,
+    JobCancelledError,
+    JobNotCancellableError,
+    JobNotFoundError,
+    PixivApiError,
+    PixivAuthError,
+    UnconfirmedUnavailableArtistError,
+)
 from backend.domain.types import FailureReason
 
 RETRYABLE_FAILURE_CODES = {
@@ -16,6 +29,21 @@ class FailureDetail(BaseModel):
     reason: FailureReason
     retryable: bool
     message: str | None = None
+
+
+EXCEPTION_FAILURE_CODES: dict[type[Exception], str] = {
+    ConfigError: "config_error",
+    DatabaseError: "database_error",
+    DownloadError: "download_error",
+    DownloadSkippedError: "rule_skipped",
+    InsufficientDiskSpaceError: "insufficient_disk_space",
+    JobCancelledError: "cancelled",
+    JobNotCancellableError: "job_not_cancellable",
+    JobNotFoundError: "job_not_found",
+    PixivApiError: "pixiv_api_error",
+    PixivAuthError: "pixiv_auth_failed",
+    UnconfirmedUnavailableArtistError: "pixiv_target_unavailable",
+}
 
 
 def classify_failure_reason(*values: object) -> FailureReason:
@@ -47,15 +75,33 @@ def failure_detail(
     code: str | None = None,
     message: str | None = None,
     status: str | None = None,
+    retryable: bool | None = None,
 ) -> FailureDetail:
     resolved_code = normalize_failure_code(code, *values, status)
     resolved_message = message or first_string(*values)
     return FailureDetail(
         code=resolved_code,
         reason=classify_failure_reason(resolved_code, resolved_message, *values),
-        retryable=resolved_code in RETRYABLE_FAILURE_CODES,
+        retryable=retryable if retryable is not None else resolved_code in RETRYABLE_FAILURE_CODES,
         message=resolved_message,
     )
+
+
+def failure_detail_from_exception(exc: Exception) -> FailureDetail:
+    message = str(exc).strip() or type(exc).__name__
+    return failure_detail(
+        type(exc).__name__,
+        message,
+        code=failure_code_from_exception(exc),
+        message=message,
+    )
+
+
+def failure_code_from_exception(exc: Exception) -> str:
+    for error_type, code in EXCEPTION_FAILURE_CODES.items():
+        if isinstance(exc, error_type):
+            return code
+    return normalize_failure_code(None, type(exc).__name__, str(exc))
 
 
 def normalize_failure_code(

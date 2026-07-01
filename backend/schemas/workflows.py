@@ -306,7 +306,12 @@ def workflow_item_failure_detail(item: WorkflowRunItem) -> FailureDetail | None:
     if item.status not in {"failed", "cancelled"}:
         return None
     return failure_detail(
-        item.error_message, item.status, message=item.error_message, status=item.status
+        item.error_message,
+        item.status,
+        code=string_option(item.request.get("error_code")),
+        message=item.error_message,
+        status=item.status,
+        retryable=bool_option(item.request.get("error_retryable")),
     )
 
 
@@ -316,6 +321,16 @@ def workflow_node_failure_detail(node_run: WorkflowNodeRun) -> FailureDetail | N
     return failure_detail(
         node_run.error_message,
         node_run.status,
+        code=string_option(node_run.output.get("error_code")),
         message=node_run.error_message,
         status=node_run.status,
+        retryable=bool_option(node_run.output.get("error_retryable")),
     )
+
+
+def string_option(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def bool_option(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None

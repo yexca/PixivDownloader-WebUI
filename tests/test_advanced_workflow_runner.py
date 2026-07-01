@@ -1,3 +1,4 @@
+from backend.core.errors import UnconfirmedUnavailableArtistError
 from backend.db.migrate import migrate_database
 from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.repositories.artist_repository import ArtistRepository
@@ -11,6 +12,11 @@ from backend.repositories.workflow_candidate_repository import (
 from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunRepository
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
+from backend.services.workflow_nodes.base import (
+    WorkflowNodeContext,
+    WorkflowNodeExecutorBase,
+    WorkflowNodeResult,
+)
 from backend.workers.download_worker import DownloadWorker
 
 
@@ -32,6 +38,19 @@ class WorkflowTargetPixivClient:
     ) -> list[Artwork]:
         del stop_at_artwork_id
         return []
+
+
+class FailingNodeExecutor(WorkflowNodeExecutorBase):
+    node_type = "artist_target"
+
+    def execute(
+        self,
+        node_run,
+        config: dict[str, object],
+        context: WorkflowNodeContext,
+    ) -> WorkflowNodeResult:
+        del node_run, config, context
+        raise UnconfirmedUnavailableArtistError("Pixiv user is unavailable")
 
 
 def test_advanced_workflow_creates_node_runs_and_action_job(tmp_path):
@@ -84,6 +103,38 @@ def test_advanced_workflow_creates_node_runs_and_action_job(tmp_path):
     assert job.type == "resolve_workflow_targets"
     assert job.workflow_run_id == run.id
     assert job.workflow_source == "advanced_workflow"
+
+
+def test_advanced_workflow_records_structured_node_exception(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Failing workflow",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {"artist_ids": ["missing"]},
+                }
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(
+        db_path,
+        node_registry={"artist_target": FailingNodeExecutor()},
+    )
+    try:
+        run = runner.create_run(definition, source="advanced_manual")
+    finally:
+        runner.close()
+
+    assert run.status == "failed"
+    assert run.node_runs[0].status == "failed"
+    assert run.node_runs[0].output["error_code"] == "pixiv_target_unavailable"
+    assert run.node_runs[0].output["error_retryable"] is False
 
 
 def test_advanced_workflow_actions_node_creates_candidate_artist_jobs(tmp_path):

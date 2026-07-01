@@ -15,6 +15,7 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_candidate_repository import WorkflowCandidateRepository
 from backend.repositories.workflow_run_repository import WorkflowRunRepository
+from backend.schemas.failure_reasons import failure_detail, failure_detail_from_exception
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.candidate_download_service import (
     CandidateDownloadService,
@@ -157,7 +158,13 @@ class DownloadWorker:
             latest = repository.get_by_id(job_id)
             if latest is None:
                 raise
-            result = self._finish(repository, latest, "cancelled", "Job cancelled")
+            result = self._finish(
+                repository,
+                latest,
+                "cancelled",
+                "Job cancelled",
+                error_code="cancelled",
+            )
             return result
         except Exception as exc:
             logger.exception("download job failed: %s", job_id)
@@ -171,6 +178,7 @@ class DownloadWorker:
                 user_safe_error_message(exc),
                 level="error",
                 payload={"error_type": type(exc).__name__},
+                error_code=failure_detail_from_exception(exc).code,
             )
             return result
         finally:
@@ -550,10 +558,31 @@ class DownloadWorker:
         *,
         level: str = "info",
         payload: dict[str, object] | None = None,
+        error_code: str | None = None,
     ) -> Job:
+        failure = (
+            failure_detail(code=error_code, message=message, status=status)
+            if status in {"failed", "cancelled"}
+            else None
+        )
+        options = job.options
+        if failure is not None:
+            options = {
+                **job.options,
+                "error_code": failure.code,
+                "error_retryable": failure.retryable,
+            }
+            repository.update_options(job.id, options)
+            payload = {
+                **(payload or {}),
+                "error_code": failure.code,
+                "error_reason": failure.reason,
+                "retryable": failure.retryable,
+            }
         finished = replace(
             job,
             status=status,  # type: ignore[arg-type]
+            options=options,
             cancel_requested=job.cancel_requested or status == "cancelled",
             error_message=message if status == "failed" else job.error_message,
             finished_at=utc_now(),

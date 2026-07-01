@@ -404,6 +404,15 @@ def test_worker_requires_confirmation_for_new_manual_unavailable_artist(tmp_path
 
     assert job.status == "failed"
     assert "Confirm the artist ID" in job.error_message
+    assert job.options["error_code"] == "pixiv_target_unavailable"
+    assert job.options["error_retryable"] is False
+    repository = JobRepository(db_path)
+    try:
+        events = repository.list_events("job-1")
+    finally:
+        repository.close()
+    assert events[-1].payload is not None
+    assert events[-1].payload["error_code"] == "pixiv_target_unavailable"
     artist_repository = ArtistRepository(db_path)
     try:
         assert artist_repository.get_by_id("missing") is None

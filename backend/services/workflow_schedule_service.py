@@ -14,6 +14,7 @@ from backend.repositories.workflow_definition_repository import (
     WorkflowTrigger,
 )
 from backend.repositories.workflow_run_repository import WorkflowRun
+from backend.schemas.failure_reasons import failure_detail_from_exception
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 
@@ -103,18 +104,17 @@ class WorkflowScheduleService:
                     trigger_id=trigger.id,
                 )
             except Exception as exc:
+                failure = failure_detail_from_exception(exc)
                 next_run_at = next_run_time(trigger.schedule, from_time=now)
                 updated = replace(
                     trigger,
                     next_run_at=next_run_at,
                     last_run_at=now,
-                    last_error_code=type(exc).__name__,
+                    last_error_code=failure.code,
                     last_error_message=str(exc),
                 )
                 self.repository.update_trigger(updated)
-                results.append(
-                    WorkflowTriggerRunResult(trigger=updated, run=None, created=False)
-                )
+                results.append(WorkflowTriggerRunResult(trigger=updated, run=None, created=False))
                 continue
             next_run_at = next_run_time(trigger.schedule, from_time=now)
             updated = replace(
