@@ -12,7 +12,7 @@ from backend.repositories.workflow_run_repository import WorkflowNodeRun
 class WorkflowNodeContext:
     db_path: Path | str | None
     settings_json_path: Path | str | None
-    workflow_item_id: int | None
+    workflow_node_run_id: int | None
     values: dict[str, object]
 
 

@@ -69,6 +69,7 @@ class JobService:
             options=cleaned_options,
             workflow_run_id=link.run_id,
             workflow_item_id=link.item_id,
+            workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
         self.repository.create(job)
@@ -118,6 +119,7 @@ class JobService:
             options=job_options,
             workflow_run_id=link.run_id,
             workflow_item_id=link.item_id,
+            workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
         self.repository.create(job)
@@ -169,6 +171,7 @@ class JobService:
             options=job_options,
             workflow_run_id=link.run_id,
             workflow_item_id=link.item_id,
+            workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
         self.repository.create(job)
@@ -216,6 +219,7 @@ class JobService:
             options=job_options,
             workflow_run_id=link.run_id,
             workflow_item_id=link.item_id,
+            workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
         self.repository.create(job)
@@ -261,6 +265,7 @@ class JobService:
             options=job_options,
             workflow_run_id=link.run_id,
             workflow_item_id=link.item_id,
+            workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
         self.repository.create(job)
@@ -498,6 +503,7 @@ class JobService:
             options=cleaned_options,
             workflow_run_id=link.run_id,
             workflow_item_id=link.item_id,
+            workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
         self.repository.create(job)
@@ -594,6 +600,7 @@ DOWNLOAD_JOB_TYPES = {
 class WorkflowJobLink:
     run_id: str | None = None
     item_id: int | None = None
+    node_run_id: int | None = None
     source: str | None = None
 
 
@@ -601,6 +608,7 @@ def workflow_link_from_job(job: Job) -> WorkflowJobLink:
     return WorkflowJobLink(
         run_id=job.workflow_run_id,
         item_id=job.workflow_item_id,
+        node_run_id=job.workflow_node_run_id,
         source=job.workflow_source,
     )
 
@@ -609,7 +617,13 @@ def without_workflow_options(options: dict[str, object]) -> dict[str, object]:
     return {
         key: value
         for key, value in options.items()
-        if key not in {"workflow_run_id", "workflow_item_id", "workflow_source"}
+        if key
+        not in {
+            "workflow_run_id",
+            "workflow_item_id",
+            "workflow_node_run_id",
+            "workflow_source",
+        }
     }
 
 

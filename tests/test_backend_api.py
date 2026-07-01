@@ -513,8 +513,9 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert job.type == "hydrate_legacy_import"
     assert job.total_files == 2
     assert job.workflow_run_id is not None
-    assert job.workflow_item_id is not None
-    assert job.workflow_source == "legacy_import"
+    assert job.workflow_item_id is None
+    assert job.workflow_node_run_id is not None
+    assert job.workflow_source == "advanced_workflow"
     assert "workflow_source" not in job.options
     assert job.options["source"] == "legacy_database"
     assert job.options["artist_ids"] == ["100058387", "101013492"]
@@ -526,7 +527,8 @@ def test_import_legacy_database_endpoint(tmp_path):
         workflow_repository.close()
     assert run is not None
     assert run.source == "legacy_import"
-    assert run.items[0].job_ids == [job.id]
+    assert run.node_runs[0].job_ids == [job.id]
+    assert run.items == []
 
 
 def test_create_download_job(tmp_path):
@@ -1762,7 +1764,8 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
     assert retry.type == "hydrate_legacy_import"
     assert retry.workflow_run_id is not None
     assert retry.workflow_run_id != "run-1"
-    assert retry.workflow_item_id is not None
+    assert retry.workflow_item_id is None
+    assert retry.workflow_node_run_id is not None
     assert retry.workflow_source == "advanced_workflow"
     assert retry.options["artist_ids"] == ["222"]
     assert retry.options["legacy_latest_download_id_by_artist"] == {"222": "2000"}
@@ -1774,7 +1777,7 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
         workflow_repository.close()
     assert run is not None
     assert run.source == "job_retry"
-    assert run.items[0].job_ids == [retry.id]
+    assert run.items == []
     assert len(run.node_runs) == 1
     assert run.node_runs[0].node_type == "job_action"
     assert run.node_runs[0].job_ids == [retry.id]
@@ -1813,6 +1816,8 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert rerun.options["max_artworks"] == 5
     assert rerun.options["source_job_id"] == "job-1"
     assert rerun.workflow_run_id is not None
+    assert rerun.workflow_item_id is None
+    assert rerun.workflow_node_run_id is not None
     assert rerun.workflow_source == "advanced_workflow"
     assert "workflow_source" not in rerun.options
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
@@ -1822,7 +1827,7 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
         workflow_repository.close()
     assert run is not None
     assert run.source == "job_rerun"
-    assert run.items[0].job_ids == [rerun.id]
+    assert run.items == []
     assert len(run.node_runs) == 1
     assert run.node_runs[0].node_type == "job_action"
     assert run.node_runs[0].job_ids == [rerun.id]

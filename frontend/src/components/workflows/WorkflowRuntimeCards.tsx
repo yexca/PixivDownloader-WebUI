@@ -10,7 +10,7 @@ import {
   updateScheduledTask
 } from "@/api/scheduledTasks";
 import type { SettingsResponse } from "@/api/settings";
-import type { WorkflowBatchRun, WorkflowNodeRun } from "@/api/workflows";
+import type { WorkflowRun, WorkflowNodeRun } from "@/api/workflows";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -32,7 +32,7 @@ import {
   workflowRunTone
 } from "./runtime";
 
-export function RunWorkflowCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect: () => void }): JSX.Element {
+export function RunWorkflowCard({ run, onInspect }: { run: WorkflowRun; onInspect: () => void }): JSX.Element {
   return (
     <article className="surface p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -138,7 +138,7 @@ export function RunDetailDialog({
   error,
   onOpenChange
 }: {
-  run: WorkflowBatchRun | null;
+  run: WorkflowRun | null;
   jobs: JobDetail[];
   loading: boolean;
   error?: string;
@@ -250,7 +250,7 @@ const nodeDetailTabs: Array<{ value: NodeDetailTab; label: string }> = [
   { value: "jobs", label: "Jobs" }
 ];
 
-function RunDetailHeader({ run }: { run: WorkflowBatchRun }): JSX.Element {
+function RunDetailHeader({ run }: { run: WorkflowRun }): JSX.Element {
   return (
     <section className="rounded-md border bg-muted/20 p-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
@@ -435,7 +435,7 @@ function LegacyRunDetail({
   loading,
   error
 }: {
-  run: WorkflowBatchRun;
+  run: WorkflowRun;
   jobs: JobDetail[];
   loading: boolean;
   error?: string;
@@ -583,7 +583,7 @@ export function ScheduleWorkflowCard({
   onRuntimeChanged
 }: {
   task: ScheduledTask;
-  lastRun: WorkflowBatchRun | null;
+  lastRun: WorkflowRun | null;
   onRuntimeChanged?: () => void;
 }): JSX.Element {
   const queryClient = useQueryClient();
@@ -834,7 +834,7 @@ function WorkflowLimitControl({
   );
 }
 
-function WorkflowRunStatusPill({ status }: { status: WorkflowBatchRun["status"] }): JSX.Element {
+function WorkflowRunStatusPill({ status }: { status: WorkflowRun["status"] }): JSX.Element {
   return <Badge tone={workflowRunTone(status)}>{status}</Badge>;
 }
 
@@ -854,7 +854,7 @@ function clampCustomLimit(value: number): number {
   return Math.max(6, Math.floor(value));
 }
 
-export function loadRunJobs(run: WorkflowBatchRun | null): Promise<JobDetail[]> {
+export function loadRunJobs(run: WorkflowRun | null): Promise<JobDetail[]> {
   if (!run) {
     return Promise.resolve([]);
   }

@@ -17,8 +17,6 @@ export type WorkflowRunCompatItem = {
   finished_at: string | null;
 };
 
-export type WorkflowBatchRunItem = WorkflowRunCompatItem;
-
 export type WorkflowNodeRun = {
   id: number | null;
   workflow_run_id: string;
@@ -56,14 +54,10 @@ export type WorkflowRun = {
   node_runs: WorkflowNodeRun[];
 };
 
-export type WorkflowBatchRun = WorkflowRun;
-
 export type WorkflowRunListResponse = {
   items: WorkflowRun[];
   total: number;
 };
-
-export type WorkflowBatchRunListResponse = WorkflowRunListResponse;
 
 export type AdvancedWorkflowNode = {
   id: string;

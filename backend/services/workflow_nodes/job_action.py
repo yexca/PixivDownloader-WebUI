@@ -32,7 +32,7 @@ class JobActionNodeExecutor(WorkflowNodeExecutorBase):
         try:
             workflow_link = WorkflowJobLink(
                 run_id=node_run.workflow_run_id,
-                item_id=context.workflow_item_id,
+                node_run_id=context.workflow_node_run_id,
                 source="advanced_workflow",
             )
             job = (

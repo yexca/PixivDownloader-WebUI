@@ -70,78 +70,6 @@ class LegacyWorkflowItemRunService:
             )
         return self.process_run(run.id)
 
-    def run_legacy_import_hydration(
-        self,
-        *,
-        artist_ids: tuple[str, ...],
-        legacy_latest_download_id_by_artist: dict[str, str | None],
-    ) -> WorkflowRun | None:
-        if not artist_ids:
-            return None
-        now = utc_now()
-        run = WorkflowRun(
-            id=str(uuid.uuid4()),
-            status="running",
-            total=1,
-            completed=0,
-            failed=0,
-            skipped=0,
-            concurrency=1,
-            source="legacy_import",
-            created_at=now,
-        )
-        self.repository.create_run(run)
-        config = {
-            "target": {"type": "legacy_import", "artist_count": len(artist_ids)},
-            "actions": ["hydrate_legacy_import"],
-        }
-        item_id = self.repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=f"legacy-import:{run.id}",
-                title="Legacy import hydration",
-                status="running",
-                config=config,
-                request={
-                    "source": "legacy_import",
-                    "artist_count": len(artist_ids),
-                },
-                created_at=utc_now(),
-            )
-        )
-        service = JobService(self.db_path, settings_json_path=self.settings_json_path)
-        try:
-            job = service.create_legacy_import_hydration_job(
-                artist_ids=artist_ids,
-                legacy_latest_download_id_by_artist=legacy_latest_download_id_by_artist,
-                workflow_link=WorkflowJobLink(
-                    run_id=run.id,
-                    item_id=item_id,
-                    source="legacy_import",
-                ),
-            )
-        finally:
-            service.close()
-        item = self.repository.list_items(run.id)[0]
-        updated_item = replace(
-            item,
-            id=item_id,
-            status="running" if job is not None else "completed",
-            job_ids=[] if job is None else [job.id],
-            finished_at=None if job is not None else utc_now(),
-        )
-        self.repository.update_item(updated_item)
-        updated_run = replace(
-            run,
-            status="running" if job is not None else "completed",
-            completed=0 if job is not None else 1,
-            finished_at=None if job is not None else utc_now(),
-            items=[updated_item],
-        )
-        self.repository.update_run(updated_run)
-        return self.refresh_run_status(updated_run)
-
     def process_run(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run is None:
@@ -472,7 +400,3 @@ def workflow_run_status(
     if skipped and not completed:
         return "skipped"
     return "completed"
-
-
-# Compatibility name for existing imports that still refer to the old generic service.
-WorkflowRunService = LegacyWorkflowItemRunService

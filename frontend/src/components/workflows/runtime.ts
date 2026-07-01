@@ -1,11 +1,11 @@
 import type { Job } from "@/api/jobs";
 import type { ScheduledTask } from "@/api/scheduledTasks";
-import type { WorkflowBatchRun, WorkflowBatchRunItem } from "@/api/workflows";
+import type { WorkflowRun, WorkflowRunCompatItem } from "@/api/workflows";
 
 export type WorkflowRunGroups = {
-  active: WorkflowBatchRun[];
-  failed: WorkflowBatchRun[];
-  completed: WorkflowBatchRun[];
+  active: WorkflowRun[];
+  failed: WorkflowRun[];
+  completed: WorkflowRun[];
 };
 
 export type WorkflowScheduleGroups = {
@@ -31,7 +31,7 @@ const targetLabels: Record<string, string> = {
   artists_not_checked: "Artists not checked"
 };
 
-export function workflowRunGroups(runs: WorkflowBatchRun[]): WorkflowRunGroups {
+export function workflowRunGroups(runs: WorkflowRun[]): WorkflowRunGroups {
   return {
     active: runs.filter((run) => run.status === "running"),
     failed: runs.filter((run) => run.status === "failed" || run.status === "partial"),
@@ -56,7 +56,7 @@ export function workflowWaitingJobs(jobs: Job[]): Job[] {
   return jobs.filter((job) => isWorkflowLimitedJob(job) && job.status === "inactive");
 }
 
-export function filterWorkflowRuns(runs: WorkflowBatchRun[], search: string): WorkflowBatchRun[] {
+export function filterWorkflowRuns(runs: WorkflowRun[], search: string): WorkflowRun[] {
   const query = normalizeSearch(search);
   if (!query) {
     return runs;
@@ -130,7 +130,7 @@ export function filterWaitingJobs(jobs: Job[], search: string): Job[] {
   );
 }
 
-export function runJobIds(run: WorkflowBatchRun | null): string[] {
+export function runJobIds(run: WorkflowRun | null): string[] {
   if (!run) {
     return [];
   }
@@ -140,7 +140,7 @@ export function runJobIds(run: WorkflowBatchRun | null): string[] {
   return Array.from(new Set(ids));
 }
 
-export function groupRunsByFailureReason(runs: WorkflowBatchRun[]): Array<{ reason: string; items: WorkflowBatchRun[] }> {
+export function groupRunsByFailureReason(runs: WorkflowRun[]): Array<{ reason: string; items: WorkflowRun[] }> {
   return groupedByReason(runs, (run) => run.failure_reason || "unknown");
 }
 
@@ -148,7 +148,7 @@ export function groupSchedulesByFailureReason(tasks: ScheduledTask[]): Array<{ r
   return groupedByReason(tasks, (task) => task.failure_reason || "unknown");
 }
 
-export function latestScheduleRun(task: ScheduledTask, runs: WorkflowBatchRun[]): WorkflowBatchRun | null {
+export function latestScheduleRun(task: ScheduledTask, runs: WorkflowRun[]): WorkflowRun | null {
   const summaryRunId = task.last_run_summary?.workflow_run_id;
   const matchedBySummary = typeof summaryRunId === "string" ? runs.find((run) => run.id === summaryRunId) : null;
   if (matchedBySummary) {
@@ -157,7 +157,7 @@ export function latestScheduleRun(task: ScheduledTask, runs: WorkflowBatchRun[])
   return runs.find((run) => run.schedule_id === task.id) ?? null;
 }
 
-export function lastRunLabel(task: ScheduledTask, run: WorkflowBatchRun | null): string {
+export function lastRunLabel(task: ScheduledTask, run: WorkflowRun | null): string {
   if (run) {
     return `${run.status} · ${run.completed}/${run.total}`;
   }
@@ -208,7 +208,7 @@ export function sourceLabel(source: string): string {
   return source.replaceAll("_", " ");
 }
 
-export function runTitle(run: WorkflowBatchRun): string {
+export function runTitle(run: WorkflowRun): string {
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || "Workflow run";
   }
@@ -224,7 +224,7 @@ export function scheduleSummary(task: ScheduledTask): string {
   return `${target} · ${actions} · every ${task.interval_days} days`;
 }
 
-export function workflowRunTone(status: WorkflowBatchRun["status"]): "default" | "success" | "danger" | "warning" | "muted" {
+export function workflowRunTone(status: WorkflowRun["status"]): "default" | "success" | "danger" | "warning" | "muted" {
   if (status === "completed") {
     return "success";
   }
@@ -237,7 +237,7 @@ export function workflowRunTone(status: WorkflowBatchRun["status"]): "default" |
   return "muted";
 }
 
-export function workflowItemTone(status: WorkflowBatchRunItem["status"]): "default" | "success" | "danger" | "warning" | "muted" {
+export function workflowItemTone(status: WorkflowRunCompatItem["status"]): "default" | "success" | "danger" | "warning" | "muted" {
   if (status === "completed") {
     return "success";
   }

@@ -9,7 +9,6 @@ from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import (
     WorkflowNodeRun,
     WorkflowRun,
-    WorkflowRunItem,
     WorkflowRunRepository,
 )
 from backend.schemas.failure_reasons import failure_detail_from_exception
@@ -32,6 +31,7 @@ ADVANCED_WORKFLOW_SOURCES = {
     "manual_schedule",
     "schedule",
     "startup_recovery",
+    "legacy_import",
 }
 
 
@@ -75,22 +75,6 @@ class AdvancedWorkflowRunner:
             created_at=now,
         )
         self.repository.create_run(run)
-        item_id = self.repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=f"advanced:{run.id}",
-                title=definition.name or "Advanced workflow",
-                status="running",
-                config=definition.model_dump(mode="json"),
-                request={
-                    "source": source,
-                    "schedule_id": schedule_id,
-                    "definition": definition.model_dump(mode="json"),
-                },
-                created_at=now,
-            )
-        )
         for position, node in enumerate(definition.nodes):
             self.repository.create_node_run(
                 WorkflowNodeRun(
@@ -106,9 +90,9 @@ class AdvancedWorkflowRunner:
                 )
             )
         run = self.repository.get_run(run.id) or run
-        return self.process_run(run.id, item_id=item_id)
+        return self.process_run(run.id)
 
-    def process_run(self, run_id: str, *, item_id: int | None = None) -> WorkflowRun:
+    def process_run(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
@@ -124,8 +108,11 @@ class AdvancedWorkflowRunner:
                 continue
             if node_run.status == "failed":
                 break
-            if node_run.status == "running" and node_run.job_ids:
-                refreshed = self._refresh_node_jobs(node_run, context, item_id=item_id)
+            linked_job_ids = self._linked_job_ids(node_run)
+            if node_run.status == "running" and linked_job_ids:
+                if linked_job_ids != node_run.job_ids:
+                    node_run = replace(node_run, job_ids=linked_job_ids)
+                refreshed = self._refresh_node_jobs(node_run, context)
                 if refreshed.status != "completed":
                     break
                 node_run = refreshed
@@ -140,7 +127,7 @@ class AdvancedWorkflowRunner:
             )
             self.repository.update_node_run(node_run)
             try:
-                node_run = self._execute_node(node_run, context, item_id=item_id)
+                node_run = self._execute_node(node_run, context)
             except Exception as exc:
                 failure = failure_detail_from_exception(exc)
                 failed = replace(
@@ -170,8 +157,6 @@ class AdvancedWorkflowRunner:
         self,
         node_run: WorkflowNodeRun,
         context: dict[str, object],
-        *,
-        item_id: int | None,
     ) -> WorkflowNodeRun:
         config = dict_option(node_run.input.get("config"))
         executor = self.node_registry.get(node_run.node_type)
@@ -183,7 +168,7 @@ class AdvancedWorkflowRunner:
             WorkflowNodeContext(
                 db_path=self.db_path,
                 settings_json_path=self.settings_json_path,
-                workflow_item_id=item_id,
+                workflow_node_run_id=node_run.id,
                 values=context,
             ),
         )
@@ -192,19 +177,15 @@ class AdvancedWorkflowRunner:
         running = replace(
             node_run,
             status="running",
-            job_ids=result.job_ids,
             output=result.output,
         )
         self.repository.update_node_run(running)
-        self._sync_item_jobs(node_run.workflow_run_id, item_id, result.job_ids)
-        return running
+        return replace(running, job_ids=result.job_ids)
 
     def _refresh_node_jobs(
         self,
         node_run: WorkflowNodeRun,
         context: dict[str, object],
-        *,
-        item_id: int | None,
     ) -> WorkflowNodeRun:
         repository = JobRepository(self.db_path)
         try:
@@ -254,11 +235,23 @@ class AdvancedWorkflowRunner:
             WorkflowNodeContext(
                 db_path=self.db_path,
                 settings_json_path=self.settings_json_path,
-                workflow_item_id=item_id,
+                workflow_node_run_id=node_run.id,
                 values=context,
             ),
         )
         return self._complete(node_run, result.output)
+
+    def _linked_job_ids(self, node_run: WorkflowNodeRun) -> list[str]:
+        if node_run.id is None:
+            return node_run.job_ids
+        repository = JobRepository(self.db_path)
+        try:
+            linked_job_ids = [
+                job.id for job in repository.list_by_workflow_node_run_id(node_run.id)
+            ]
+        finally:
+            repository.close()
+        return dedupe([*node_run.job_ids, *linked_job_ids])
 
     def _complete(self, node_run: WorkflowNodeRun, output: dict[str, object]) -> WorkflowNodeRun:
         completed = replace(
@@ -275,7 +268,10 @@ class AdvancedWorkflowRunner:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
-        node_runs = self.repository.list_node_runs(run.id)
+        node_runs = [
+            self._hydrate_node_run_jobs(node)
+            for node in self.repository.list_node_runs(run.id)
+        ]
         completed = sum(1 for node in node_runs if node.status == "completed")
         failed = sum(1 for node in node_runs if node.status == "failed")
         skipped = sum(1 for node in node_runs if node.status == "skipped")
@@ -297,25 +293,13 @@ class AdvancedWorkflowRunner:
             node_runs=node_runs,
         )
         self.repository.update_run(refreshed)
-        for item in run.items:
-            self.repository.update_item(
-                replace(
-                    item,
-                    status="running" if has_active else status,
-                    finished_at=None if has_active else item.finished_at or utc_now(),
-                )
-            )
-        return self.repository.get_run(run_id) or refreshed
+        return replace(refreshed, items=self.repository.list_items(run_id))
 
-    def _sync_item_jobs(self, run_id: str, item_id: int | None, job_ids: list[str]) -> None:
-        if item_id is None:
-            return
-        for item in self.repository.list_items(run_id):
-            if item.id != item_id:
-                continue
-            merged = dedupe([*item.job_ids, *job_ids])
-            self.repository.update_item(replace(item, status="running", job_ids=merged))
-            break
+    def _hydrate_node_run_jobs(self, node_run: WorkflowNodeRun) -> WorkflowNodeRun:
+        linked_job_ids = self._linked_job_ids(node_run)
+        if linked_job_ids == node_run.job_ids:
+            return node_run
+        return replace(node_run, job_ids=linked_job_ids)
 
 
 def dedupe(values: list[str]) -> list[str]:

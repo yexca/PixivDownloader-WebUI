@@ -23,6 +23,7 @@ class JobResponse(BaseModel):
     options: dict[str, object]
     workflow_run_id: str | None
     workflow_item_id: int | None
+    workflow_node_run_id: int | None
     workflow_source: str | None
     total_files: int
     completed_files: int
@@ -114,6 +115,7 @@ def job_response(job: Job, *, related_jobs: list[Job] | None = None) -> JobRespo
         options=job.options,
         workflow_run_id=job.workflow_run_id,
         workflow_item_id=job.workflow_item_id,
+        workflow_node_run_id=job.workflow_node_run_id,
         workflow_source=job.workflow_source,
         total_files=job.total_files,
         completed_files=job.completed_files,

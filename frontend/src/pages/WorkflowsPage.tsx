@@ -22,7 +22,7 @@ import {
   listWorkflowRuns,
   runWorkflowDefinition,
   type AdvancedWorkflowNode,
-  type WorkflowBatchRun,
+  type WorkflowRun,
   type WorkflowDefinition,
   type WorkflowNodeRun
 } from "@/api/workflows";
@@ -79,7 +79,7 @@ export function WorkflowsPage(): JSX.Element {
   const [builderOpen, setBuilderOpen] = React.useState(false);
   const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
-  const [selectedRun, setSelectedRun] = React.useState<WorkflowBatchRun | null>(null);
+  const [selectedRun, setSelectedRun] = React.useState<WorkflowRun | null>(null);
 
   const definitions = useQuery({
     queryKey: ["workflow-definitions"],
@@ -382,11 +382,11 @@ function DefinitionWorkbench({
   onInspectRun
 }: {
   definition: WorkflowDefinition;
-  latestRun: WorkflowBatchRun | null;
+  latestRun: WorkflowRun | null;
   running: boolean;
   onEdit: () => void;
   onRun: () => void;
-  onInspectRun: (run: WorkflowBatchRun) => void;
+  onInspectRun: (run: WorkflowRun) => void;
 }): JSX.Element {
   const nodes = workflowNodes(definition);
   return (
@@ -442,7 +442,7 @@ function DefinitionWorkbench({
   );
 }
 
-function WorkflowGraph({ nodes, latestRun }: { nodes: AdvancedWorkflowNode[]; latestRun: WorkflowBatchRun | null }): JSX.Element {
+function WorkflowGraph({ nodes, latestRun }: { nodes: AdvancedWorkflowNode[]; latestRun: WorkflowRun | null }): JSX.Element {
   if (!nodes.length) {
     return <DataState title="Workflow has no nodes" variant="error" />;
   }
@@ -506,8 +506,8 @@ function RunExplorer({
   onInspect
 }: {
   title: string;
-  runs: WorkflowBatchRun[];
-  onInspect: (run: WorkflowBatchRun) => void;
+  runs: WorkflowRun[];
+  onInspect: (run: WorkflowRun) => void;
 }): JSX.Element {
   return (
     <section className="space-y-3">
@@ -529,9 +529,9 @@ function RunList({
   selectedRunId,
   onInspect
 }: {
-  runs: WorkflowBatchRun[];
+  runs: WorkflowRun[];
   selectedRunId: string | null;
-  onInspect: (run: WorkflowBatchRun) => void;
+  onInspect: (run: WorkflowRun) => void;
 }): JSX.Element {
   if (!runs.length) {
     return <DataState title="No recent runs" description="Workflow executions will appear here." />;
@@ -564,7 +564,7 @@ function RunList({
   );
 }
 
-function RunCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect: () => void }): JSX.Element {
+function RunCard({ run, onInspect }: { run: WorkflowRun; onInspect: () => void }): JSX.Element {
   return (
     <article className="surface p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -590,7 +590,7 @@ function RunCard({ run, onInspect }: { run: WorkflowBatchRun; onInspect: () => v
   );
 }
 
-function RunNodeTimeline({ run }: { run: WorkflowBatchRun }): JSX.Element {
+function RunNodeTimeline({ run }: { run: WorkflowRun }): JSX.Element {
   const nodes = run.node_runs;
   if (!nodes.length) {
     return (
@@ -633,7 +633,7 @@ function RuntimeSummary({
   jobs
 }: {
   definitions: WorkflowDefinition[];
-  runs: WorkflowBatchRun[];
+  runs: WorkflowRun[];
   jobs: Job[];
 }): JSX.Element {
   const activeRuns = runs.filter((run) => run.status === "running").length;
@@ -676,9 +676,9 @@ function RecentShortcutPanel({
   jobs,
   onInspect
 }: {
-  runs: WorkflowBatchRun[];
+  runs: WorkflowRun[];
   jobs: Job[];
-  onInspect: (run: WorkflowBatchRun) => void;
+  onInspect: (run: WorkflowRun) => void;
 }): JSX.Element {
   const activeShortcutJobs = jobs.filter((job) => isShortcutJob(job) && isActiveJob(job)).slice(0, 4);
   return (
@@ -800,7 +800,7 @@ function filterDefinitions(definitions: WorkflowDefinition[], search: string): W
   );
 }
 
-function filterRuns(runs: WorkflowBatchRun[], search: string): WorkflowBatchRun[] {
+function filterRuns(runs: WorkflowRun[], search: string): WorkflowRun[] {
   const query = search.trim().toLowerCase();
   if (!query) {
     return runs;
@@ -831,17 +831,13 @@ function filterShortcutJobs(jobs: Job[], search: string): Job[] {
     );
 }
 
-function latestDefinitionRun(definition: WorkflowDefinition, runs: WorkflowBatchRun[]): WorkflowBatchRun | null {
-  const matches = runs.filter((run) =>
-    run.items.some((item) => {
-      const request = item.request as { definition?: { name?: string; nodes?: unknown[] } };
-      return request.definition?.name === definition.name;
-    })
-  );
+function latestDefinitionRun(definition: WorkflowDefinition, runs: WorkflowRun[]): WorkflowRun | null {
+  const triggerIds = new Set(definition.triggers.map((trigger) => trigger.id));
+  const matches = runs.filter((run) => run.schedule_id !== null && triggerIds.has(run.schedule_id));
   return matches[0] ?? null;
 }
 
-function isShortcutRun(run: WorkflowBatchRun): boolean {
+function isShortcutRun(run: WorkflowRun): boolean {
   if (run.source.includes("shortcut") || run.source.includes("api")) {
     return true;
   }
@@ -875,7 +871,7 @@ function sourceLabel(source: string): string {
   return sourceLabels[source] ?? source.replaceAll("_", " ");
 }
 
-function runSourceLabel(run: WorkflowBatchRun): string {
+function runSourceLabel(run: WorkflowRun): string {
   const requestSource = run.items
     .map((item) => {
       const request = item.request as { source?: unknown };
@@ -885,7 +881,7 @@ function runSourceLabel(run: WorkflowBatchRun): string {
   return sourceLabel(requestSource || run.source);
 }
 
-function runTitle(run: WorkflowBatchRun): string {
+function runTitle(run: WorkflowRun): string {
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || `${run.node_runs.length} node workflow`;
   }

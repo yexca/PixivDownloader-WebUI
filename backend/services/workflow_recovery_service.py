@@ -10,7 +10,6 @@ from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import (
     WorkflowNodeRun,
     WorkflowRun,
-    WorkflowRunItem,
     WorkflowRunRepository,
 )
 from backend.services.advanced_workflow_runner import (
@@ -63,14 +62,14 @@ class WorkflowRecoveryService:
             settings_json_path=self.settings_json_path,
         )
         try:
-            return runner.process_run(run.id, item_id=first_item_id(run))
+            return runner.process_run(run.id)
         finally:
             runner.close()
 
     def _requeue_interrupted_node_jobs(self, run: WorkflowRun) -> None:
         running_job_ids = [
             job.id
-            for job in self._jobs_for_ids(node_job_ids(run.node_runs))
+            for job in self._jobs_for_node_runs(run.node_runs)
             if job.status == "running"
         ]
         self._requeue_jobs(running_job_ids)
@@ -93,25 +92,6 @@ class WorkflowRecoveryService:
             created_at=now,
         )
         self.repository.create_run(run)
-        item_id = self.repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id=f"startup-recovery:{run.id}",
-                title="Startup recovery",
-                status="running",
-                job_ids=[job.id for job in orphan_jobs],
-                config={
-                    "target": {"type": "orphan_jobs", "job_count": len(orphan_jobs)},
-                    "actions": ["recover_jobs"],
-                },
-                request={
-                    "source": "startup_recovery",
-                    "job_ids": [job.id for job in orphan_jobs],
-                },
-                created_at=now,
-            )
-        )
         node_id = self.repository.create_node_run(
             WorkflowNodeRun(
                 id=None,
@@ -123,31 +103,31 @@ class WorkflowRecoveryService:
                 status="running",
                 input={"source": "startup_recovery"},
                 output={"job_count": len(orphan_jobs)},
-                job_ids=[job.id for job in orphan_jobs],
                 created_at=now,
                 started_at=now,
             )
         )
-        self._link_orphan_jobs(orphan_jobs, run_id=run.id, item_id=item_id)
-        self._requeue_jobs([job.id for job in orphan_jobs if job.status == "running"])
-        return self.repository.get_run(run.id) or replace(
-            run,
-            items=self.repository.list_items(run.id),
-            node_runs=[
-                WorkflowNodeRun(
-                    id=node_id,
-                    workflow_run_id=run.id,
-                    node_id="recover_jobs",
-                    node_type="job_recovery",
-                    title="Recover jobs",
-                    position=0,
-                    status="running",
-                    job_ids=[job.id for job in orphan_jobs],
-                    created_at=now,
-                    started_at=now,
-                )
-            ],
+        self._link_orphan_jobs(
+            orphan_jobs,
+            run_id=run.id,
+            node_run_id=node_id,
         )
+        self._requeue_jobs([job.id for job in orphan_jobs if job.status == "running"])
+        created = self.repository.get_run(run.id)
+        node_run = WorkflowNodeRun(
+            id=node_id,
+            workflow_run_id=run.id,
+            node_id="recover_jobs",
+            node_type="job_recovery",
+            title="Recover jobs",
+            position=0,
+            status="running",
+            output={"job_count": len(orphan_jobs)},
+            job_ids=[job.id for job in orphan_jobs],
+            created_at=now,
+            started_at=now,
+        )
+        return replace(created or run, node_runs=[node_run])
 
     def _active_orphan_jobs(self) -> list[Job]:
         repository = JobRepository(self.db_path)
@@ -163,7 +143,31 @@ class WorkflowRecoveryService:
         finally:
             repository.close()
 
-    def _link_orphan_jobs(self, jobs: list[Job], *, run_id: str, item_id: int) -> None:
+    def _jobs_for_node_runs(self, node_runs: list[WorkflowNodeRun]) -> list[Job]:
+        repository = JobRepository(self.db_path)
+        try:
+            job_ids = node_job_ids(node_runs)
+            jobs = repository.list_by_ids(job_ids)
+            seen = {job.id for job in jobs}
+            for node_run in node_runs:
+                if node_run.id is None:
+                    continue
+                for job in repository.list_by_workflow_node_run_id(node_run.id):
+                    if job.id in seen:
+                        continue
+                    jobs.append(job)
+                    seen.add(job.id)
+            return jobs
+        finally:
+            repository.close()
+
+    def _link_orphan_jobs(
+        self,
+        jobs: list[Job],
+        *,
+        run_id: str,
+        node_run_id: int,
+    ) -> None:
         repository = JobRepository(self.db_path)
         try:
             for job in jobs:
@@ -171,7 +175,8 @@ class WorkflowRecoveryService:
                     replace(
                         job,
                         workflow_run_id=run_id,
-                        workflow_item_id=item_id,
+                        workflow_item_id=None,
+                        workflow_node_run_id=node_run_id,
                         workflow_source="startup_recovery",
                     )
                 )
@@ -186,10 +191,6 @@ class WorkflowRecoveryService:
             service.requeue_interrupted_jobs(job_ids)
         finally:
             service.close()
-
-
-def first_item_id(run: WorkflowRun) -> int | None:
-    return run.items[0].id if run.items else None
 
 
 def node_job_ids(node_runs: list[WorkflowNodeRun]) -> list[str]:

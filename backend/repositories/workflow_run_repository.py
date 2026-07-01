@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import suppress
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from backend.core.errors import DatabaseError
@@ -339,7 +339,7 @@ class WorkflowRunRepository:
             ).fetchall()
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to list workflow node runs for {run_id}") from exc
-        return [workflow_node_run_from_row(row) for row in rows]
+        return self._hydrate_node_job_ids([workflow_node_run_from_row(row) for row in rows])
 
     def last_item_status(self, draft_id: str, *, exclude_run_id: str | None = None) -> str | None:
         params: list[object] = [draft_id]
@@ -364,6 +364,35 @@ class WorkflowRunRepository:
 
     def close(self) -> None:
         self.conn.close()
+
+    def _hydrate_node_job_ids(self, node_runs: list[WorkflowNodeRun]) -> list[WorkflowNodeRun]:
+        node_ids = [node.id for node in node_runs if node.id is not None]
+        if not node_ids:
+            return node_runs
+        placeholders = ", ".join("?" for _ in node_ids)
+        try:
+            rows = self.conn.execute(
+                f"""
+                SELECT workflow_node_run_id, id
+                FROM jobs
+                WHERE workflow_node_run_id IN ({placeholders})
+                ORDER BY created_at, id
+                """,
+                node_ids,
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to hydrate workflow node job links") from exc
+        job_ids_by_node: dict[int, list[str]] = {}
+        for row in rows:
+            node_id = int(row["workflow_node_run_id"])
+            job_ids_by_node.setdefault(node_id, []).append(str(row["id"]))
+        return [
+            replace(
+                node,
+                job_ids=dedupe([*node.job_ids, *job_ids_by_node.get(node.id or 0, [])]),
+            )
+            for node in node_runs
+        ]
 
 
 def workflow_run_from_row(
@@ -451,3 +480,14 @@ def parse_json_dict(value: object) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def dedupe(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        result.append(value)
+        seen.add(value)
+    return result

@@ -35,6 +35,7 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "015",
         "016",
         "017",
+        "018",
     ]
     assert {
         "schema_migrations",
@@ -71,6 +72,6 @@ def test_migration_is_idempotent(tmp_path):
     finally:
         conn.close()
 
-    assert len(first_applied) == 17
+    assert len(first_applied) == 18
     assert second_applied == []
-    assert migration_count == 17
+    assert migration_count == 18

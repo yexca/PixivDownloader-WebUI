@@ -101,6 +101,7 @@ class Job:
     options: dict[str, object] = field(default_factory=dict)
     workflow_run_id: str | None = None
     workflow_item_id: int | None = None
+    workflow_node_run_id: int | None = None
     workflow_source: str | None = None
     artist_id: str | None = None
     total_files: int = 0

@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getDashboardSummary } from "@/api/dashboard";
 import { listJobs } from "@/api/jobs";
 import { listScheduledTasks } from "@/api/scheduledTasks";
-import { listWorkflowRuns, type WorkflowBatchRun } from "@/api/workflows";
+import { listWorkflowRuns, type WorkflowRun } from "@/api/workflows";
 import { Button } from "@/components/ui/button";
 import { DataState } from "@/components/DataState";
 import { JobProgress } from "@/components/JobProgress";
@@ -32,7 +32,7 @@ import { useJobStream } from "@/hooks/useJobStream";
 
 export function DashboardPage(): JSX.Element {
   const navigate = useNavigate();
-  const [selectedRun, setSelectedRun] = React.useState<WorkflowBatchRun | null>(null);
+  const [selectedRun, setSelectedRun] = React.useState<WorkflowRun | null>(null);
   const summary = useQuery({
     queryKey: ["dashboard"],
     queryFn: getDashboardSummary,

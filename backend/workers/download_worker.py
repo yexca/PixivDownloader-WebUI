@@ -457,7 +457,7 @@ class DownloadWorker:
             settings_json_path=self.settings_json_path,
         )
         try:
-            runner.process_run(job.workflow_run_id, item_id=job.workflow_item_id)
+            runner.process_run(job.workflow_run_id)
         except Exception:
             logger.exception("advanced workflow continuation failed: %s", job.workflow_run_id)
         finally:

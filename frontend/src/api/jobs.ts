@@ -20,6 +20,7 @@ export type Job = {
   options: Record<string, unknown>;
   workflow_run_id: string | null;
   workflow_item_id: number | null;
+  workflow_node_run_id: number | null;
   workflow_source: string | null;
   total_files: number;
   completed_files: number;

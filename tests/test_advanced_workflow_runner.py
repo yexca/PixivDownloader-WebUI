@@ -102,6 +102,7 @@ def test_advanced_workflow_creates_node_runs_and_action_job(tmp_path):
     assert job is not None
     assert job.type == "resolve_workflow_targets"
     assert job.workflow_run_id == run.id
+    assert job.workflow_node_run_id == run.node_runs[0].id
     assert job.workflow_source == "advanced_workflow"
 
 
@@ -180,7 +181,7 @@ def test_advanced_workflow_actions_node_creates_candidate_artist_jobs(tmp_path):
             pixiv_client_factory=WorkflowTargetPixivClient,
         )
         worker.run_job(target_job_id)
-        run = runner.process_run(run.id, item_id=run.items[0].id)
+        run = runner.process_run(run.id)
     finally:
         runner.close()
 
@@ -240,7 +241,7 @@ def test_advanced_workflow_actions_node_creates_candidate_set_job(tmp_path):
             pixiv_client_factory=WorkflowTargetPixivClient,
         )
         worker.run_job(run.node_runs[0].job_ids[0])
-        run = runner.process_run(run.id, item_id=run.items[0].id)
+        run = runner.process_run(run.id)
     finally:
         runner.close()
 
@@ -295,7 +296,7 @@ def test_advanced_workflow_sync_node_creates_artist_sync_jobs(tmp_path):
             pixiv_client_factory=WorkflowTargetPixivClient,
         )
         worker.run_job(run.node_runs[0].job_ids[0])
-        run = runner.process_run(run.id, item_id=run.items[0].id)
+        run = runner.process_run(run.id)
     finally:
         runner.close()
 
@@ -413,7 +414,7 @@ def test_advanced_workflow_collect_node_materializes_candidate_set(tmp_path):
             pixiv_client_factory=WorkflowTargetPixivClient,
         )
         worker.run_job(run.node_runs[0].job_ids[0])
-        run = runner.process_run(run.id, item_id=run.items[0].id)
+        run = runner.process_run(run.id)
     finally:
         runner.close()
 
@@ -476,7 +477,7 @@ def test_advanced_workflow_filter_node_materializes_filtered_candidate_set(tmp_p
             pixiv_client_factory=WorkflowTargetPixivClient,
         )
         worker.run_job(run.node_runs[0].job_ids[0])
-        run = runner.process_run(run.id, item_id=run.items[0].id)
+        run = runner.process_run(run.id)
     finally:
         runner.close()
 
@@ -531,7 +532,7 @@ def test_advanced_workflow_filter_node_stops_above_limit(tmp_path):
             pixiv_client_factory=WorkflowTargetPixivClient,
         )
         worker.run_job(run.node_runs[0].job_ids[0])
-        run = runner.process_run(run.id, item_id=run.items[0].id)
+        run = runner.process_run(run.id)
     finally:
         runner.close()
 

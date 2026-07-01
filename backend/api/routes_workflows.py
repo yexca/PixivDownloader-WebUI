@@ -78,7 +78,11 @@ def save_workflow_definition(
                 schedule=request.trigger.schedule,
             )
         run = (
-            service.run_definition(definition.id, source="advanced_manual")
+            service.run_definition(
+                definition.id,
+                source="advanced_manual",
+                trigger_id=trigger.id if trigger is not None else None,
+            )
             if request.trigger is not None and request.trigger.run_now
             else None
         )

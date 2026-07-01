@@ -8,10 +8,14 @@ from backend.repositories.workflow_run_repository import (
     WorkflowRunItem,
     WorkflowRunRepository,
 )
-from backend.schemas.workflows import WorkflowBatchItemRequest
+from backend.schemas.workflows import (
+    AdvancedWorkflowDefinitionRequest,
+    WorkflowRunCompatItemRequest,
+)
+from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.workflow_recovery_service import WorkflowRecoveryService
 from backend.services.workflow_run_service import (
-    WorkflowRunService,
+    LegacyWorkflowItemRunService,
     workflow_item_request_to_dict,
 )
 
@@ -48,7 +52,7 @@ def test_recover_interrupted_workflow_run_processes_pending_item(tmp_path):
     finally:
         repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = LegacyWorkflowItemRunService(db_path, settings_json_path=settings_path)
     try:
         recovered = service.recover_interrupted_runs()
     finally:
@@ -112,7 +116,7 @@ def test_recover_interrupted_workflow_run_does_not_duplicate_existing_item_jobs(
         repository.close()
         job_repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = LegacyWorkflowItemRunService(db_path, settings_json_path=settings_path)
     try:
         recovered = service.recover_interrupted_runs()
     finally:
@@ -246,8 +250,7 @@ def test_startup_recovery_wraps_active_orphan_jobs(tmp_path):
     assert run.status == "running"
     assert run.node_runs[0].node_type == "job_recovery"
     assert run.node_runs[0].job_ids == ["running-orphan", "queued-orphan"]
-    assert run.items[0].status == "running"
-    assert run.items[0].job_ids == ["running-orphan", "queued-orphan"]
+    assert run.items == []
     job_repository = JobRepository(db_path)
     try:
         running = job_repository.get_by_id("running-orphan")
@@ -258,12 +261,14 @@ def test_startup_recovery_wraps_active_orphan_jobs(tmp_path):
     assert running is not None
     assert running.status == "queued"
     assert running.workflow_run_id == run.id
-    assert running.workflow_item_id == run.items[0].id
+    assert running.workflow_item_id is None
+    assert running.workflow_node_run_id == run.node_runs[0].id
     assert running.workflow_source == "startup_recovery"
     assert queued is not None
     assert queued.status == "queued"
     assert queued.workflow_run_id == run.id
-    assert queued.workflow_item_id == run.items[0].id
+    assert queued.workflow_item_id is None
+    assert queued.workflow_node_run_id == run.node_runs[0].id
     assert queued.workflow_source == "startup_recovery"
     assert done is not None
     assert done.workflow_run_id is None
@@ -321,7 +326,7 @@ def test_recover_interrupted_workflow_run_fails_legacy_item_without_request(tmp_
     finally:
         repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = LegacyWorkflowItemRunService(db_path, settings_json_path=settings_path)
     try:
         recovered = service.recover_interrupted_runs()
     finally:
@@ -337,7 +342,7 @@ def test_process_run_respects_skip_if_last_run_failed_without_matching_current_i
     db_path = tmp_path / "pixiv.sqlite3"
     settings_path = write_settings(tmp_path)
     migrate_database(db_path, settings_json_path=settings_path)
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = LegacyWorkflowItemRunService(db_path, settings_json_path=settings_path)
     try:
         first = service.run_batch(
             items=[workflow_request("draft-1", "First", "123")],
@@ -375,33 +380,52 @@ def test_process_run_respects_skip_if_last_run_failed_without_matching_current_i
     assert second.items[0].status == "skipped"
 
 
-def test_legacy_import_hydration_runs_inside_workflow_boundary(tmp_path):
+def test_legacy_import_hydration_runs_inside_advanced_workflow_boundary(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     settings_path = write_settings(tmp_path)
     migrate_database(db_path, settings_json_path=settings_path)
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    runner = AdvancedWorkflowRunner(db_path, settings_json_path=settings_path)
     try:
-        run = service.run_legacy_import_hydration(
-            artist_ids=("111", "222"),
-            legacy_latest_download_id_by_artist={"111": "1000", "222": "2000"},
+        run = runner.create_run(
+            AdvancedWorkflowDefinitionRequest.model_validate(
+                {
+                    "name": "Legacy import hydration",
+                    "nodes": [
+                        {
+                            "id": "hydrate",
+                            "type": "legacy_import_hydration",
+                            "title": "Legacy import hydration",
+                            "config": {
+                                "artist_ids": ["111", "222"],
+                                "legacy_latest_download_id_by_artist": {
+                                    "111": "1000",
+                                    "222": "2000",
+                                },
+                            },
+                        }
+                    ],
+                }
+            ),
+            source="legacy_import",
         )
     finally:
-        service.close()
+        runner.close()
 
-    assert run is not None
     assert run.source == "legacy_import"
     assert run.status == "running"
-    assert run.items[0].job_ids
+    assert run.items == []
+    assert run.node_runs[0].job_ids
     job_repository = JobRepository(db_path)
     try:
-        job = job_repository.get_by_id(run.items[0].job_ids[0])
+        job = job_repository.get_by_id(run.node_runs[0].job_ids[0])
     finally:
         job_repository.close()
     assert job is not None
     assert job.type == "hydrate_legacy_import"
     assert job.workflow_run_id == run.id
-    assert job.workflow_item_id == run.items[0].id
-    assert job.workflow_source == "legacy_import"
+    assert job.workflow_item_id is None
+    assert job.workflow_node_run_id == run.node_runs[0].id
+    assert job.workflow_source == "advanced_workflow"
     assert job.options["source"] == "legacy_database"
 
 
@@ -411,8 +435,8 @@ def workflow_request(
     artist_id: str,
     *,
     skip_if_last_run_failed: bool = False,
-) -> WorkflowBatchItemRequest:
-    return WorkflowBatchItemRequest.model_validate(
+) -> WorkflowRunCompatItemRequest:
+    return WorkflowRunCompatItemRequest.model_validate(
         {
             "draft_id": draft_id,
             "title": title,

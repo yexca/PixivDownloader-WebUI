@@ -31,10 +31,6 @@ class WorkflowRunCompatItemRequest(BaseModel):
     run_after_startup: bool = True
 
 
-# Compatibility name for the old batch/item workflow request shape.
-WorkflowBatchItemRequest = WorkflowRunCompatItemRequest
-
-
 AdvancedWorkflowNodeType = Literal[
     "artist_target",
     "sync_metadata",
@@ -42,6 +38,7 @@ AdvancedWorkflowNodeType = Literal[
     "filter_artworks",
     "execute_actions",
     "job_action",
+    "legacy_import_hydration",
 ]
 
 
@@ -164,11 +161,6 @@ class WorkflowDefinitionSaveResponse(BaseModel):
     definition: WorkflowDefinitionResponse
     trigger: WorkflowTriggerResponse | None = None
     run: WorkflowRunResponse | None = None
-
-
-# Compatibility names for the old batch-oriented API vocabulary.
-WorkflowBatchRunResponse = WorkflowRunResponse
-WorkflowBatchRunListResponse = WorkflowRunListResponse
 
 
 def workflow_run_response(run: WorkflowRun) -> WorkflowRunResponse:

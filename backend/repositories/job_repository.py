@@ -29,6 +29,7 @@ class JobRepository:
                         options_json,
                         workflow_run_id,
                         workflow_item_id,
+                        workflow_node_run_id,
                         workflow_source,
                         artist_id,
                         total_files,
@@ -41,7 +42,7 @@ class JobRepository:
                         started_at,
                         finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job.id,
@@ -52,6 +53,7 @@ class JobRepository:
                         json.dumps(job.options) if job.options else None,
                         job.workflow_run_id,
                         job.workflow_item_id,
+                        job.workflow_node_run_id,
                         job.workflow_source,
                         job.artist_id,
                         job.total_files,
@@ -91,6 +93,7 @@ class JobRepository:
                         error_message = ?,
                         workflow_run_id = ?,
                         workflow_item_id = ?,
+                        workflow_node_run_id = ?,
                         workflow_source = ?,
                         started_at = ?,
                         finished_at = ?
@@ -107,6 +110,7 @@ class JobRepository:
                         job.error_message,
                         job.workflow_run_id,
                         job.workflow_item_id,
+                        job.workflow_node_run_id,
                         job.workflow_source,
                         job.started_at,
                         job.finished_at,
@@ -133,6 +137,7 @@ class JobRepository:
         workflow_run_id: str,
         workflow_item_id: int,
         workflow_source: str,
+        workflow_node_run_id: int | None = None,
     ) -> None:
         try:
             with self.conn:
@@ -141,12 +146,14 @@ class JobRepository:
                     UPDATE jobs
                     SET workflow_run_id = ?,
                         workflow_item_id = ?,
+                        workflow_node_run_id = ?,
                         workflow_source = ?
                     WHERE id = ?
                     """,
                     (
                         workflow_run_id,
                         workflow_item_id,
+                        workflow_node_run_id,
                         workflow_source,
                         job_id,
                     ),
@@ -196,6 +203,20 @@ class JobRepository:
             ).fetchall()
         except sqlite3.Error as exc:
             raise DatabaseError(f"failed to list child jobs for {job_id}") from exc
+        return [job_from_row(row) for row in rows]
+
+    def list_by_workflow_node_run_id(self, node_run_id: int) -> list[Job]:
+        try:
+            rows = self.conn.execute(
+                """
+                SELECT * FROM jobs
+                WHERE workflow_node_run_id = ?
+                ORDER BY created_at, id
+                """,
+                (node_run_id,),
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to list jobs for workflow node run {node_run_id}") from exc
         return [job_from_row(row) for row in rows]
 
     def next_queued(self) -> Job | None:
@@ -451,6 +472,7 @@ def job_from_row(row: sqlite3.Row) -> Job:
         options=options,
         workflow_run_id=optional_row_str(row, "workflow_run_id"),
         workflow_item_id=optional_row_int(row, "workflow_item_id"),
+        workflow_node_run_id=optional_row_int(row, "workflow_node_run_id"),
         workflow_source=optional_row_str(row, "workflow_source"),
         artist_id=str(row["artist_id"]) if row["artist_id"] else None,
         total_files=int(row["total_files"]),
