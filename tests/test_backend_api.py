@@ -1378,6 +1378,12 @@ def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     assert body["task"]["status"] == "blocked"
     assert body["task"]["last_error_code"] == "insufficient_disk_space"
     assert body["task"]["failure_reason"] == "disk"
+    assert body["task"]["failure"] == {
+        "code": "insufficient_disk_space",
+        "reason": "disk",
+        "retryable": False,
+        "message": body["task"]["last_error_message"],
+    }
 
 
 def test_create_artist_queues_sync_job(tmp_path):
@@ -1794,6 +1800,33 @@ def test_job_detail_reports_related_retry_and_rerun_jobs(tmp_path):
     assert {job["id"]: job["action"] for job in related} == {
         "retry-job": "retry",
         "rerun-job": "rerun",
+    }
+
+
+def test_job_detail_reports_failure_detail(tmp_path):
+    client = make_client(tmp_path)
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        repository.create(
+            Job(
+                id="job-1",
+                type="download_artist",
+                status="failed",
+                error_message="failed to fetch Pixiv user 123",
+            )
+        )
+    finally:
+        repository.close()
+
+    response = client.get("/api/jobs/job-1")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["failure"] == {
+        "code": "pixiv_artist_fetch_failed",
+        "reason": "target",
+        "retryable": False,
+        "message": "failed to fetch Pixiv user 123",
     }
 
 

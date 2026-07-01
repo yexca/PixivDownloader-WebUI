@@ -16,7 +16,7 @@ from backend.domain.types import (
     ScheduledTaskStatus,
     ScheduledTaskTargetType,
 )
-from backend.schemas.failure_reasons import classify_failure_reason
+from backend.schemas.failure_reasons import FailureDetail, classify_failure_reason, failure_detail
 
 
 class ScheduledTaskTargetRequest(BaseModel):
@@ -103,6 +103,7 @@ class ScheduledTaskResponse(BaseModel):
     last_error_code: str | None
     last_error_message: str | None
     failure_reason: FailureReason
+    failure: FailureDetail | None
     config: dict[str, object]
     last_run_summary: dict[str, object] | None
     created_at: str | None
@@ -141,10 +142,23 @@ def scheduled_task_response(task: ScheduledTask) -> ScheduledTaskResponse:
         last_error_code=task.last_error_code,
         last_error_message=task.last_error_message,
         failure_reason=classify_failure_reason(task.last_error_code, task.last_error_message),
+        failure=scheduled_task_failure_detail(task),
         config=scheduled_task_config_to_dict(task.config),
         last_run_summary=task.last_run_summary,
         created_at=task.created_at,
         updated_at=task.updated_at,
+    )
+
+
+def scheduled_task_failure_detail(task: ScheduledTask) -> FailureDetail | None:
+    if not task.last_error_code and not task.last_error_message:
+        return None
+    return failure_detail(
+        task.last_error_code,
+        task.last_error_message,
+        code=task.last_error_code,
+        message=task.last_error_message,
+        status=task.status,
     )
 
 

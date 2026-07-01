@@ -1,4 +1,5 @@
 import { apiRequest } from "./client";
+import type { FailureDetail } from "./scheduledTasks";
 
 export type JobStatus = "inactive" | "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -29,6 +30,7 @@ export type Job = {
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
+  failure: FailureDetail | null;
   related_jobs: RelatedJob[];
 };
 

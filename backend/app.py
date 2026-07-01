@@ -35,6 +35,7 @@ from backend.core.errors import (
 )
 from backend.core.paths import project_root
 from backend.db.migrate import migrate_database
+from backend.schemas.failure_reasons import failure_detail
 from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
 from backend.services.pixiv_oauth import PixivOAuthFlowStore
 from backend.services.workflow_run_service import WorkflowRunService
@@ -191,6 +192,7 @@ def error_response(
             "error": {
                 "code": code,
                 "message": message,
+                "failure": failure_detail(code, message, code=code, message=message).model_dump(),
                 "details": details or {},
             }
         },

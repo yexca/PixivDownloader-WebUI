@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from backend.domain.entities import Job, JobEvent
+from backend.schemas.failure_reasons import FailureDetail, failure_detail
 
 
 class RelatedJobResponse(BaseModel):
@@ -32,6 +33,7 @@ class JobResponse(BaseModel):
     started_at: str | None
     finished_at: str | None
     error_message: str | None
+    failure: FailureDetail | None
     related_jobs: list[RelatedJobResponse] = Field(default_factory=list)
 
 
@@ -122,6 +124,7 @@ def job_response(job: Job, *, related_jobs: list[Job] | None = None) -> JobRespo
         started_at=job.started_at,
         finished_at=job.finished_at,
         error_message=job.error_message,
+        failure=job_failure_detail(job),
         related_jobs=[related_job_response(child) for child in related_jobs or []],
     )
 
@@ -145,3 +148,19 @@ def job_event_response(event: JobEvent) -> JobEventResponse:
         payload=event.payload,
         created_at=event.created_at,
     )
+
+
+def job_failure_detail(job: Job) -> FailureDetail | None:
+    if job.status not in {"failed", "cancelled"}:
+        return None
+    return failure_detail(
+        job.error_message,
+        job.options.get("error_code"),
+        code=string_option(job.options.get("error_code")),
+        message=job.error_message,
+        status=job.status,
+    )
+
+
+def string_option(value: object) -> str | None:
+    return value if isinstance(value, str) else None

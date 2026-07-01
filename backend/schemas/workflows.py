@@ -15,7 +15,7 @@ from backend.repositories.workflow_run_repository import (
     WorkflowRun,
     WorkflowRunItem,
 )
-from backend.schemas.failure_reasons import classify_failure_reason
+from backend.schemas.failure_reasons import FailureDetail, classify_failure_reason, failure_detail
 from backend.schemas.scheduled_tasks import ScheduledTaskConfigRequest
 
 
@@ -106,6 +106,7 @@ class WorkflowRunItemResponse(BaseModel):
     job_ids: list[str]
     error_message: str | None
     failure_reason: FailureReason
+    failure: FailureDetail | None
     config: dict[str, object]
     request: dict[str, object]
     created_at: str | None
@@ -125,6 +126,7 @@ class WorkflowNodeRunResponse(BaseModel):
     job_ids: list[str]
     error_message: str | None
     failure_reason: FailureReason
+    failure: FailureDetail | None
     created_at: str | None
     started_at: str | None
     finished_at: str | None
@@ -141,6 +143,7 @@ class WorkflowBatchRunResponse(BaseModel):
     source: str
     schedule_id: int | None
     failure_reason: FailureReason
+    failure: FailureDetail | None
     created_at: str | None
     finished_at: str | None
     items: list[WorkflowRunItemResponse]
@@ -172,6 +175,7 @@ def workflow_run_response(run: WorkflowRun) -> WorkflowBatchRunResponse:
         source=run.source,
         schedule_id=run.schedule_id,
         failure_reason=workflow_run_failure_reason(run, items),
+        failure=workflow_run_failure_detail(run, items, node_runs),
         created_at=run.created_at,
         finished_at=run.finished_at,
         items=items,
@@ -229,6 +233,7 @@ def workflow_run_item_response(item: WorkflowRunItem) -> WorkflowRunItemResponse
             item.error_message,
             item.status if item.status == "failed" else None,
         ),
+        failure=workflow_item_failure_detail(item),
         config=item.config,
         request=item.request,
         created_at=item.created_at,
@@ -253,6 +258,7 @@ def workflow_node_run_response(node_run: WorkflowNodeRun) -> WorkflowNodeRunResp
             node_run.error_message,
             node_run.status if node_run.status == "failed" else None,
         ),
+        failure=workflow_node_failure_detail(node_run),
         created_at=node_run.created_at,
         started_at=node_run.started_at,
         finished_at=node_run.finished_at,
@@ -277,4 +283,39 @@ def workflow_run_failure_reason(
     return classify_failure_reason(
         *(item.error_message for item in items if item.status == "failed"),
         run.status,
+    )
+
+
+def workflow_run_failure_detail(
+    run: WorkflowRun,
+    items: list[WorkflowRunItemResponse],
+    node_runs: list[WorkflowNodeRunResponse],
+) -> FailureDetail | None:
+    if run.status not in {"failed", "partial", "cancelled"}:
+        return None
+    for node_run in node_runs:
+        if node_run.status == "failed" and node_run.failure is not None:
+            return node_run.failure
+    for item in items:
+        if item.status == "failed" and item.failure is not None:
+            return item.failure
+    return failure_detail(run.status, status=run.status)
+
+
+def workflow_item_failure_detail(item: WorkflowRunItem) -> FailureDetail | None:
+    if item.status not in {"failed", "cancelled"}:
+        return None
+    return failure_detail(
+        item.error_message, item.status, message=item.error_message, status=item.status
+    )
+
+
+def workflow_node_failure_detail(node_run: WorkflowNodeRun) -> FailureDetail | None:
+    if node_run.status not in {"failed", "cancelled"}:
+        return None
+    return failure_detail(
+        node_run.error_message,
+        node_run.status,
+        message=node_run.error_message,
+        status=node_run.status,
     )
