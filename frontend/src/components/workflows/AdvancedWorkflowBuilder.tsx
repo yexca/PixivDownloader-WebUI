@@ -22,7 +22,9 @@ import { useToast } from "@/components/ToastProvider";
 import {
   createAdvancedWorkflowRun,
   saveWorkflowDefinition,
+  type AdvancedWorkflowNode,
   type AdvancedWorkflowRunRequest,
+  type WorkflowDefinition,
   type WorkflowScheduleRule
 } from "@/api/workflows";
 import { cn } from "@/lib/utils";
@@ -46,6 +48,12 @@ type PreviewTab = "summary" | "json";
 
 type WorkflowDraft = {
   name: string;
+  modules: {
+    sync: boolean;
+    collect: boolean;
+    filters: boolean;
+    actions: boolean;
+  };
   triggerMode: TriggerMode;
   saveIntent: SaveIntent;
   scheduleType: ScheduleType;
@@ -81,6 +89,12 @@ type StageKey = "trigger" | "target" | "sync" | "collect" | "filters" | "actions
 
 const initialDraft: WorkflowDraft = {
   name: "Artist download pipeline",
+  modules: {
+    sync: true,
+    collect: true,
+    filters: true,
+    actions: true
+  },
   triggerMode: "manual",
   saveIntent: "run_now",
   scheduleType: "interval",
@@ -126,15 +140,51 @@ const stages: Array<{ key: StageKey; title: string; icon: React.ComponentType<{ 
   { key: "actions", title: "Actions", icon: Play }
 ];
 
-export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => void }): JSX.Element {
+type AdvancedWorkflowBuilderProps = {
+  definition?: WorkflowDefinition | null;
+  onSubmitted?: () => void;
+};
+
+export function AdvancedWorkflowBuilder({ definition, onSubmitted }: AdvancedWorkflowBuilderProps): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const [draft, setDraft] = React.useState<WorkflowDraft>(initialDraft);
+  const hydratedDraft = React.useMemo(() => draftFromDefinition(definition), [definition]);
+  const [draft, setDraft] = React.useState<WorkflowDraft>(hydratedDraft);
   const [selectedStage, setSelectedStage] = React.useState<StageKey>("target");
   const [previewTab, setPreviewTab] = React.useState<PreviewTab>("summary");
 
+  React.useEffect(() => {
+    setDraft(hydratedDraft);
+    setSelectedStage("target");
+  }, [hydratedDraft]);
+
   const update = <K extends keyof WorkflowDraft>(key: K, value: WorkflowDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
+  };
+  const updateModule = (module: keyof WorkflowDraft["modules"], enabled: boolean) => {
+    setDraft((current) => {
+      const modules = { ...current.modules, [module]: enabled };
+      if (module === "collect" && !enabled) {
+        modules.filters = false;
+        modules.actions = false;
+      }
+      if ((module === "filters" || module === "actions") && enabled) {
+        modules.collect = true;
+      }
+      if (module === "sync" && !enabled && selectedStage === "sync") {
+        setSelectedStage("target");
+      }
+      if (module === "collect" && !enabled && selectedStage === "collect") {
+        setSelectedStage("target");
+      }
+      if (module === "filters" && !enabled && selectedStage === "filters") {
+        setSelectedStage("target");
+      }
+      if (module === "actions" && !enabled && selectedStage === "actions") {
+        setSelectedStage("target");
+      }
+      return { ...current, modules };
+    });
   };
 
   const candidateSummary = candidateText(draft);
@@ -173,12 +223,13 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
 
   const submitting = runMutation.isPending || saveMutation.isPending;
   const submitAdvanced = () => {
-    if (draft.saveIntent === "run_now") {
+    if (!definition && draft.saveIntent === "run_now") {
       runMutation.mutate(workflowJson);
       return;
     }
     const shouldSchedule = draft.saveIntent === "save_and_schedule" || draft.saveIntent === "run_and_schedule";
     saveMutation.mutate({
+      definition_id: definition?.id ?? null,
       definition: workflowJson.definition,
       trigger: shouldSchedule
         ? {
@@ -196,13 +247,15 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
         <div className="rounded-md border bg-muted/20 p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold">Advanced Linear Workflow</h3>
+              <h3 className="text-sm font-semibold">
+                {definition ? "Edit Workflow Definition" : "Advanced Linear Workflow"}
+              </h3>
               <p className="mt-1 text-sm text-muted-foreground">
                 Build the real workflow nodes that the backend will execute.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="outline" onClick={() => setDraft(initialDraft)}>
+            <Button type="button" variant="outline" onClick={() => setDraft(hydratedDraft)}>
               <RotateCcw className="h-4 w-4" aria-hidden="true" />
               Reset
             </Button>
@@ -216,6 +269,7 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
             </Button>
             </div>
           </div>
+          <ModuleSwitches draft={draft} onChange={updateModule} />
         </div>
           <div className="surface p-4">
             <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)]">
@@ -226,6 +280,7 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
                     index={index + 1}
                     stage={stage}
                     selected={selectedStage === stage.key}
+                    enabled={stageEnabled(stage.key, draft)}
                     detail={stageDetail(stage.key, draft)}
                     onClick={() => setSelectedStage(stage.key)}
                   />
@@ -259,6 +314,7 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
 
             <div className="mt-4 space-y-3">
               {stages.map((stage, index) => (
+                stageEnabled(stage.key, draft) ? (
                 <div key={stage.key} className="flex gap-3">
                   <div className="flex flex-col items-center">
                     <span className="flex h-7 w-7 items-center justify-center rounded-md border bg-muted text-xs font-semibold">
@@ -274,6 +330,7 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
                     <p className="mt-1 truncate text-xs text-muted-foreground">{stageDetail(stage.key, draft)}</p>
                   </div>
                 </div>
+                ) : null
               ))}
             </div>
           </section>
@@ -288,10 +345,10 @@ export function AdvancedWorkflowBuilder({ onSubmitted }: { onSubmitted?: () => v
               <dl className="mt-4 space-y-3 text-sm">
                 <PreviewRow label="Trigger" value={triggerDetail(draft)} />
                 <PreviewRow label="Target" value={targetDetail(draft)} />
-                <PreviewRow label="Sync" value={syncDetail(draft)} />
-                <PreviewRow label="Collect" value={collectDetail(draft)} />
-                <PreviewRow label="Filters" value={filtersDetail(draft)} />
-                <PreviewRow label="Actions" value={actionDetail(draft)} />
+                {draft.modules.sync ? <PreviewRow label="Sync" value={syncDetail(draft)} /> : null}
+                {draft.modules.collect ? <PreviewRow label="Collect" value={collectDetail(draft)} /> : null}
+                {draft.modules.filters ? <PreviewRow label="Filters" value={filtersDetail(draft)} /> : null}
+                {draft.modules.actions ? <PreviewRow label="Actions" value={actionDetail(draft)} /> : null}
               </dl>
             ) : (
               <pre className="mt-4 max-h-[520px] overflow-auto rounded-md border bg-muted/30 p-3 text-xs leading-relaxed">
@@ -615,12 +672,14 @@ function StageButton({
   stage,
   detail,
   selected,
+  enabled,
   onClick
 }: {
   index: number;
   stage: { key: StageKey; title: string; icon: React.ComponentType<{ className?: string }> };
   detail: string;
   selected: boolean;
+  enabled: boolean;
   onClick: () => void;
 }): JSX.Element {
   return (
@@ -628,8 +687,10 @@ function StageButton({
       type="button"
       className={cn(
         "flex min-h-16 w-full items-center gap-3 rounded-md border bg-background p-3 text-left transition-colors hover:bg-muted/60",
-        selected && "border-primary bg-primary/5"
+        selected && "border-primary bg-primary/5",
+        !enabled && "opacity-50"
       )}
+      disabled={!enabled}
       onClick={onClick}
     >
       <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted", selected && "border-primary bg-primary/10 text-primary")}>
@@ -644,6 +705,40 @@ function StageButton({
       </span>
       {selected ? <Check className="h-4 w-4 text-primary" aria-hidden="true" /> : null}
     </button>
+  );
+}
+
+function ModuleSwitches({
+  draft,
+  onChange
+}: {
+  draft: WorkflowDraft;
+  onChange: (module: keyof WorkflowDraft["modules"], enabled: boolean) => void;
+}): JSX.Element {
+  const items: Array<{ key: keyof WorkflowDraft["modules"]; label: string; detail: string }> = [
+    { key: "sync", label: "Sync", detail: "Refresh Pixiv metadata" },
+    { key: "collect", label: "Collect", detail: "Build artwork candidates" },
+    { key: "filters", label: "Filters", detail: "Prune candidates" },
+    { key: "actions", label: "Actions", detail: "Download or retry files" }
+  ];
+  return (
+    <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      {items.map((item) => (
+        <label key={item.key} className="flex min-h-14 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+          <span className="min-w-0">
+            <span className="block font-medium">{item.label}</span>
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">{item.detail}</span>
+          </span>
+          <input
+            type="checkbox"
+            className="h-4 w-4 shrink-0 accent-[hsl(var(--primary))]"
+            checked={draft.modules[item.key]}
+            disabled={(item.key === "filters" || item.key === "actions") && !draft.modules.collect}
+            onChange={(event) => onChange(item.key, event.target.checked)}
+          />
+        </label>
+      ))}
+    </div>
   );
 }
 
@@ -788,6 +883,13 @@ function stageDetail(stage: StageKey, draft: WorkflowDraft): string {
   return details[stage];
 }
 
+function stageEnabled(stage: StageKey, draft: WorkflowDraft): boolean {
+  if (stage === "trigger" || stage === "target") {
+    return true;
+  }
+  return draft.modules[stage];
+}
+
 function triggerDetail(draft: WorkflowDraft): string {
   if (draft.triggerMode !== "schedule") {
     return draft.saveIntent === "save_only" ? "Saved definition" : "Manual run";
@@ -842,6 +944,9 @@ function targetDetail(draft: WorkflowDraft): string {
 }
 
 function syncDetail(draft: WorkflowDraft): string {
+  if (!draft.modules.sync) {
+    return "Disabled";
+  }
   if (draft.syncMode === "none") {
     return "Use local database only";
   }
@@ -849,6 +954,9 @@ function syncDetail(draft: WorkflowDraft): string {
 }
 
 function collectDetail(draft: WorkflowDraft): string {
+  if (!draft.modules.collect) {
+    return "Disabled";
+  }
   const modes: Record<CollectMode, string> = {
     new_since_last_download: "New since last download",
     pending_files: "Pending files",
@@ -860,6 +968,9 @@ function collectDetail(draft: WorkflowDraft): string {
 }
 
 function filtersDetail(draft: WorkflowDraft): string {
+  if (!draft.modules.filters) {
+    return "Disabled";
+  }
   const parts = [];
   if (draft.filterAi !== "include") {
     parts.push(draft.filterAi === "exclude" ? "exclude AI" : "AI only");
@@ -874,6 +985,9 @@ function filtersDetail(draft: WorkflowDraft): string {
 }
 
 function actionDetail(draft: WorkflowDraft): string {
+  if (!draft.modules.actions) {
+    return "Disabled";
+  }
   const unit = draft.executionUnit === "artist" ? "per artist" : "whole set";
   const naming = draft.namingRule ? "custom naming" : "default naming";
   return `${draft.downloadEnabled ? "download" : "no action"}, ${unit}, ${draft.conflictMode}, ${naming}`;
@@ -887,6 +1001,9 @@ function targetMetric(draft: WorkflowDraft): string {
 }
 
 function candidateText(draft: WorkflowDraft): { value: string; detail: string } {
+  if (!draft.modules.collect) {
+    return { value: "-", detail: "Candidate collection disabled" };
+  }
   return {
     value: draft.collectLimitMode === "limit" ? draft.maxArtworks || "-" : "All",
     detail: collectDetail(draft)
@@ -894,6 +1011,9 @@ function candidateText(draft: WorkflowDraft): { value: string; detail: string } 
 }
 
 function actionMetric(draft: WorkflowDraft): string {
+  if (!draft.modules.actions) {
+    return "None";
+  }
   return draft.downloadEnabled ? "Download" : "None";
 }
 
@@ -924,7 +1044,7 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       }
     }
   ];
-  if (draft.syncMode !== "none") {
+  if (draft.modules.sync && draft.syncMode !== "none") {
     nodes.push({
       id: "sync",
       type: "sync_metadata",
@@ -934,8 +1054,8 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       }
     });
   }
-  nodes.push(
-    {
+  if (draft.modules.collect) {
+    nodes.push({
       id: "collect",
       type: "collect_artworks",
       title: "Collect candidates",
@@ -946,8 +1066,10 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
         max_artwork_id: draft.maxArtworkId || null,
         sort_order: draft.collectSortOrder
       }
-    },
-    {
+    });
+  }
+  if (draft.modules.filters) {
+    nodes.push({
       id: "filters",
       type: "filter_artworks",
       title: "Filter candidates",
@@ -957,8 +1079,10 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
         blocked_tags: commaList(draft.blockedTags),
         stop_above_limit: draft.stopAboveLimit ? numberOrNull(draft.stopLimit) : null
       }
-    },
-    {
+    });
+  }
+  if (draft.modules.actions) {
+    nodes.push({
       id: "actions",
       type: "execute_actions",
       title: "Execute actions",
@@ -968,8 +1092,8 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
         conflict_mode: draft.conflictMode,
         naming_rule: draft.namingRule
       }
-    }
-  );
+    });
+  }
   return {
     definition: {
       name: draft.name,
@@ -1001,6 +1125,138 @@ function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
     every: Math.max(1, Number(draft.intervalEvery) || 1),
     unit: draft.intervalUnit
   };
+}
+
+function draftFromDefinition(definition?: WorkflowDefinition | null): WorkflowDraft {
+  if (!definition) {
+    return initialDraft;
+  }
+  const nodes = workflowNodesFromDefinition(definition);
+  const target = findNode(nodes, "artist_target");
+  const sync = findNode(nodes, "sync_metadata");
+  const collect = findNode(nodes, "collect_artworks");
+  const filters = findNode(nodes, "filter_artworks");
+  const actions = findNode(nodes, "execute_actions");
+  const targetConfig = target?.config ?? {};
+  const syncConfig = sync?.config ?? {};
+  const collectConfig = collect?.config ?? {};
+  const filterConfig = filters?.config ?? {};
+  const actionConfig = actions?.config ?? {};
+  const scope = stringOption(targetConfig.scope, initialDraft.targetScope) as TargetScope;
+  const maxArtworks = collectConfig.max_artworks;
+  return {
+    ...initialDraft,
+    name: definition.name,
+    saveIntent: "save_only",
+    modules: {
+      sync: Boolean(sync),
+      collect: Boolean(collect),
+      filters: Boolean(filters),
+      actions: Boolean(actions)
+    },
+    targetScope: isTargetScope(scope) ? scope : initialDraft.targetScope,
+    artistIds: arrayText(targetConfig.artist_ids),
+    artistTag: stringOption(targetConfig.tag, ""),
+    staleDays: numberText(targetConfig.stale_days),
+    maxArtists: numberText(targetConfig.max_artists) || initialDraft.maxArtists,
+    syncMode: sync ? syncModeOption(syncConfig.mode) : initialDraft.syncMode,
+    collectMode: collectModeOption(collectConfig.mode),
+    collectLimitMode: maxArtworks === null || maxArtworks === undefined || maxArtworks === "" ? "none" : "limit",
+    maxArtworks: numberText(maxArtworks),
+    minArtworkId: stringOption(collectConfig.min_artwork_id, ""),
+    maxArtworkId: stringOption(collectConfig.max_artwork_id, ""),
+    collectSortOrder: collectSortOption(collectConfig.sort_order),
+    filterAi: filterAiOption(filterConfig.ai),
+    requiredTags: arrayText(filterConfig.required_tags, ", "),
+    blockedTags: arrayText(filterConfig.blocked_tags, ", "),
+    stopAboveLimit: filterConfig.stop_above_limit !== null && filterConfig.stop_above_limit !== undefined,
+    stopLimit: numberText(filterConfig.stop_above_limit) || initialDraft.stopLimit,
+    downloadEnabled: Boolean(actionConfig.download ?? initialDraft.downloadEnabled),
+    executionUnit: executionUnitOption(actionConfig.execution_unit),
+    conflictMode: conflictModeOption(actionConfig.conflict_mode),
+    namingRule: stringOption(actionConfig.naming_rule, initialDraft.namingRule)
+  };
+}
+
+function workflowNodesFromDefinition(definition: WorkflowDefinition): AdvancedWorkflowNode[] {
+  const nodes = (definition.definition as { nodes?: unknown }).nodes;
+  if (!Array.isArray(nodes)) {
+    return [];
+  }
+  return nodes.filter(isAdvancedWorkflowNode);
+}
+
+function isAdvancedWorkflowNode(value: unknown): value is AdvancedWorkflowNode {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const node = value as Partial<AdvancedWorkflowNode>;
+  return typeof node.id === "string" && typeof node.type === "string" && typeof node.config === "object";
+}
+
+function findNode(nodes: AdvancedWorkflowNode[], type: AdvancedWorkflowNode["type"]): AdvancedWorkflowNode | undefined {
+  return nodes.find((node) => node.type === type);
+}
+
+function isTargetScope(value: string): value is TargetScope {
+  return value === "selected" || value === "all" || value === "tagged" || value === "stale";
+}
+
+function syncModeOption(value: unknown): SyncMode {
+  return value === "full" || value === "incremental" || value === "none" ? value : initialDraft.syncMode;
+}
+
+function collectModeOption(value: unknown): CollectMode {
+  if (value === "pending_files" || value === "all_synced" || value === "failed_files" || value === "new_since_last_download") {
+    return value;
+  }
+  return initialDraft.collectMode;
+}
+
+function collectSortOption(value: unknown): CollectSortOrder {
+  if (value === "oldest_first" || value === "local_order" || value === "newest_first") {
+    return value;
+  }
+  return initialDraft.collectSortOrder;
+}
+
+function filterAiOption(value: unknown): WorkflowDraft["filterAi"] {
+  if (value === "exclude" || value === "only" || value === "include") {
+    return value;
+  }
+  return initialDraft.filterAi;
+}
+
+function executionUnitOption(value: unknown): ExecutionUnit {
+  if (value === "set" || value === "artist") {
+    return value;
+  }
+  return initialDraft.executionUnit;
+}
+
+function conflictModeOption(value: unknown): ConflictMode {
+  if (value === "overwrite" || value === "rename" || value === "skip") {
+    return value;
+  }
+  return initialDraft.conflictMode;
+}
+
+function stringOption(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function numberText(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  return typeof value === "string" ? value : "";
+}
+
+function arrayText(value: unknown, separator = "\n"): string {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value.map((item) => String(item)).filter(Boolean).join(separator);
 }
 
 function countLines(value: string): number {

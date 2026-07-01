@@ -77,6 +77,7 @@ export function WorkflowsPage(): JSX.Element {
   const [view, setViewState] = React.useState<WorkflowView>(initialView);
   const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
   const [builderOpen, setBuilderOpen] = React.useState(false);
+  const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
   const [selectedRun, setSelectedRun] = React.useState<WorkflowBatchRun | null>(null);
 
@@ -165,6 +166,14 @@ export function WorkflowsPage(): JSX.Element {
     nextParams.set("view", view);
     setSearchParams(nextParams, { replace: true });
   };
+  const openNewBuilder = () => {
+    setEditingDefinition(null);
+    setBuilderOpen(true);
+  };
+  const openEditBuilder = (definition: WorkflowDefinition) => {
+    setEditingDefinition(definition);
+    setBuilderOpen(true);
+  };
 
   return (
     <>
@@ -197,7 +206,7 @@ export function WorkflowsPage(): JSX.Element {
                   {definitionItems.length} definition(s), {runItems.length} recent run(s)
                 </p>
               </div>
-              <Button type="button" size="sm" onClick={() => setBuilderOpen(true)}>
+              <Button type="button" size="sm" onClick={openNewBuilder}>
                 <Plus className="h-4 w-4" aria-hidden="true" />
                 New
               </Button>
@@ -236,13 +245,14 @@ export function WorkflowsPage(): JSX.Element {
                 definition={selectedDefinition}
                 latestRun={latestDefinitionRun(selectedDefinition, runItems)}
                 running={runDefinition.isPending}
+                onEdit={() => openEditBuilder(selectedDefinition)}
                 onRun={() => runDefinition.mutate(selectedDefinition.id)}
                 onInspectRun={(run) => setSelectedRun(run)}
               />
             ) : definitions.isLoading ? (
               <DataState title="Loading workflows" variant="loading" />
             ) : (
-              <EmptyDefinitionState onCreate={() => setBuilderOpen(true)} />
+              <EmptyDefinitionState onCreate={openNewBuilder} />
             )
           ) : (
             <RunExplorer
@@ -261,15 +271,25 @@ export function WorkflowsPage(): JSX.Element {
 
       <Dialog
         open={builderOpen}
-        title="Workflow Builder"
-        description="Create a saved definition, a trigger, or a one-off advanced run."
+        title={editingDefinition ? "Edit Workflow" : "Workflow Builder"}
+        description={editingDefinition ? editingDefinition.name : "Create a saved definition, a trigger, or a one-off advanced run."}
         className="flex h-[90vh] max-w-6xl flex-col overflow-hidden"
         bodyClassName="min-h-0 flex-1 overflow-hidden"
-        onOpenChange={setBuilderOpen}
+        onOpenChange={(open) => {
+          setBuilderOpen(open);
+          if (!open) {
+            setEditingDefinition(null);
+          }
+        }}
       >
         <AdvancedWorkflowBuilder
+          definition={editingDefinition}
           onSubmitted={() => {
             setBuilderOpen(false);
+            if (editingDefinition) {
+              setSelectedDefinitionId(editingDefinition.id);
+            }
+            setEditingDefinition(null);
             void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
             void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
             void queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -357,12 +377,14 @@ function DefinitionWorkbench({
   definition,
   latestRun,
   running,
+  onEdit,
   onRun,
   onInspectRun
 }: {
   definition: WorkflowDefinition;
   latestRun: WorkflowBatchRun | null;
   running: boolean;
+  onEdit: () => void;
   onRun: () => void;
   onInspectRun: (run: WorkflowBatchRun) => void;
 }): JSX.Element {
@@ -383,7 +405,7 @@ function DefinitionWorkbench({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" disabled>
+            <Button type="button" variant="outline" onClick={onEdit}>
               <Save className="h-4 w-4" aria-hidden="true" />
               Edit
             </Button>
