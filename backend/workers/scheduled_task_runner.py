@@ -5,7 +5,6 @@ import contextlib
 import logging
 from pathlib import Path
 
-from backend.services.scheduled_task_service import ScheduledTaskService
 from backend.services.workflow_schedule_service import WorkflowScheduleService
 from backend.workers.job_queue import JobQueue
 
@@ -64,24 +63,16 @@ class ScheduledTaskRunner:
                 )
 
     def _run_due_once(self, startup_scan: bool) -> bool:
-        legacy_service = ScheduledTaskService(
-            self.db_path,
-            settings_json_path=self.settings_json_path,
-        )
         workflow_service = WorkflowScheduleService(
             self.db_path,
             settings_json_path=self.settings_json_path,
         )
         try:
-            legacy_service.activate_inactive_tasks()
-            results = legacy_service.run_due_tasks(startup_scan=startup_scan)
+            _ = startup_scan
             workflow_results = workflow_service.run_due_triggers()
         except Exception:
             logger.exception("scheduled task scan failed")
             return False
         finally:
-            legacy_service.close()
             workflow_service.close()
-        return any(result.created for result in results) or any(
-            result.created for result in workflow_results
-        )
+        return any(result.created for result in workflow_results)

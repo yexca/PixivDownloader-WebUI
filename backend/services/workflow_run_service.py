@@ -16,7 +16,7 @@ from backend.schemas.scheduled_tasks import (
     scheduled_task_config_from_request,
     scheduled_task_config_to_dict,
 )
-from backend.schemas.workflows import WorkflowBatchItemRequest
+from backend.schemas.workflows import WorkflowRunCompatItemRequest
 from backend.services.job_service import JobService, WorkflowJobLink
 from backend.services.scheduled_task_service import ScheduledTaskService
 
@@ -24,7 +24,7 @@ ACTIVE_JOB_STATUSES = {"inactive", "queued", "running"}
 FAILED_JOB_STATUSES = {"failed", "cancelled"}
 
 
-class WorkflowRunService:
+class LegacyWorkflowItemRunService:
     def __init__(
         self,
         db_path: Path | str | None = None,
@@ -38,7 +38,7 @@ class WorkflowRunService:
     def run_batch(
         self,
         *,
-        items: list[WorkflowBatchItemRequest],
+        items: list[WorkflowRunCompatItemRequest],
         concurrency: int,
     ) -> WorkflowRun:
         now = utc_now()
@@ -252,9 +252,15 @@ class WorkflowRunService:
     def recover_interrupted_runs(self) -> list[WorkflowRun]:
         recovered: list[WorkflowRun] = []
         for run in self.repository.list_runs_by_status("running"):
-            self._requeue_interrupted_item_jobs(run)
-            recovered.append(self.process_run(run.id))
+            recovered.append(self.recover_run(run.id))
         return recovered
+
+    def recover_run(self, run_id: str) -> WorkflowRun:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise ValueError(f"workflow run not found: {run_id}")
+        self._requeue_interrupted_item_jobs(run)
+        return self.process_run(run.id)
 
     def recover_startup(self) -> list[WorkflowRun]:
         recovered = self.recover_interrupted_runs()
@@ -427,7 +433,7 @@ def request_config_to_dict(request: ScheduledTaskConfigRequest) -> dict[str, obj
     return scheduled_task_config_to_dict(scheduled_task_config_from_request(request))
 
 
-def workflow_item_request_to_dict(request: WorkflowBatchItemRequest) -> dict[str, object]:
+def workflow_item_request_to_dict(request: WorkflowRunCompatItemRequest) -> dict[str, object]:
     return {
         "draft_id": request.draft_id,
         "title": request.title,
@@ -441,11 +447,11 @@ def workflow_item_request_to_dict(request: WorkflowBatchItemRequest) -> dict[str
     }
 
 
-def workflow_item_request_from_dict(data: dict[str, object]) -> WorkflowBatchItemRequest | None:
+def workflow_item_request_from_dict(data: dict[str, object]) -> WorkflowRunCompatItemRequest | None:
     if not data:
         return None
     try:
-        return WorkflowBatchItemRequest.model_validate(data)
+        return WorkflowRunCompatItemRequest.model_validate(data)
     except ValueError:
         return None
 
@@ -466,3 +472,7 @@ def workflow_run_status(
     if skipped and not completed:
         return "skipped"
     return "completed"
+
+
+# Compatibility name for existing imports that still refer to the old generic service.
+WorkflowRunService = LegacyWorkflowItemRunService

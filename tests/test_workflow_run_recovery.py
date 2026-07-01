@@ -9,6 +9,7 @@ from backend.repositories.workflow_run_repository import (
     WorkflowRunRepository,
 )
 from backend.schemas.workflows import WorkflowBatchItemRequest
+from backend.services.workflow_recovery_service import WorkflowRecoveryService
 from backend.services.workflow_run_service import (
     WorkflowRunService,
     workflow_item_request_to_dict,
@@ -176,7 +177,7 @@ def test_startup_recovery_requeues_linked_running_job(tmp_path):
         repository.close()
         job_repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = WorkflowRecoveryService(db_path, settings_json_path=settings_path)
     try:
         recovered = service.recover_startup()
     finally:
@@ -233,7 +234,7 @@ def test_startup_recovery_wraps_active_orphan_jobs(tmp_path):
     finally:
         job_repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = WorkflowRecoveryService(db_path, settings_json_path=settings_path)
     try:
         recovered = service.recover_startup()
     finally:
@@ -243,6 +244,8 @@ def test_startup_recovery_wraps_active_orphan_jobs(tmp_path):
     run = recovered[0]
     assert run.source == "startup_recovery"
     assert run.status == "running"
+    assert run.node_runs[0].node_type == "job_recovery"
+    assert run.node_runs[0].job_ids == ["running-orphan", "queued-orphan"]
     assert run.items[0].status == "running"
     assert run.items[0].job_ids == ["running-orphan", "queued-orphan"]
     job_repository = JobRepository(db_path)
@@ -271,7 +274,7 @@ def test_startup_recovery_does_not_create_empty_run(tmp_path):
     settings_path = write_settings(tmp_path)
     migrate_database(db_path, settings_json_path=settings_path)
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_path)
+    service = WorkflowRecoveryService(db_path, settings_json_path=settings_path)
     try:
         recovered = service.recover_startup()
     finally:

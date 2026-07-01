@@ -31,6 +31,7 @@ ADVANCED_WORKFLOW_SOURCES = {
     "job_rerun",
     "manual_schedule",
     "schedule",
+    "startup_recovery",
 }
 
 

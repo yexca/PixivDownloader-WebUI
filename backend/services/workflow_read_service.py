@@ -7,7 +7,7 @@ from backend.services.advanced_workflow_runner import (
     AdvancedWorkflowRunner,
     is_advanced_workflow_source,
 )
-from backend.services.workflow_run_service import WorkflowRunService
+from backend.services.workflow_run_service import LegacyWorkflowItemRunService
 
 
 class WorkflowReadService:
@@ -42,7 +42,7 @@ class WorkflowReadService:
                 return runner.process_run(run.id)
             finally:
                 runner.close()
-        service = WorkflowRunService(
+        service = LegacyWorkflowItemRunService(
             self.db_path,
             settings_json_path=self.settings_json_path,
         )

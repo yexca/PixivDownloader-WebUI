@@ -67,6 +67,17 @@ export function filterWorkflowRuns(runs: WorkflowBatchRun[], search: string): Wo
       run.status,
       run.source,
       run.failure_reason,
+      run.node_runs
+        .flatMap((node) => [
+          node.title,
+          node.node_id,
+          node.node_type,
+          node.status,
+          node.failure_reason,
+          node.error_message,
+          node.job_ids.join(" ")
+        ])
+        .join(" "),
       run.items
         .flatMap((item) => [
           item.title,
@@ -123,7 +134,10 @@ export function runJobIds(run: WorkflowBatchRun | null): string[] {
   if (!run) {
     return [];
   }
-  return Array.from(new Set(run.items.flatMap((item) => item.job_ids)));
+  const ids = run.node_runs.length
+    ? run.node_runs.flatMap((node) => node.job_ids)
+    : run.items.flatMap((item) => item.job_ids);
+  return Array.from(new Set(ids));
 }
 
 export function groupRunsByFailureReason(runs: WorkflowBatchRun[]): Array<{ reason: string; items: WorkflowBatchRun[] }> {
@@ -195,6 +209,9 @@ export function sourceLabel(source: string): string {
 }
 
 export function runTitle(run: WorkflowBatchRun): string {
+  if (run.node_runs.length) {
+    return run.node_runs[0]?.title || "Workflow run";
+  }
   if (run.items.length === 1) {
     return run.items[0].title;
   }

@@ -21,9 +21,10 @@ from backend.repositories.workflow_run_repository import (
     WorkflowRunItem,
     WorkflowRunRepository,
 )
-from backend.services import scheduled_task_service
 from backend.services.job_service import JobService
+from backend.services.scheduled_task_facade_service import ScheduledTaskFacadeService
 from backend.services.settings_service import AppSettingsService
+from backend.services.workflow_nodes import target as workflow_target_node
 
 
 class NoopQueue:
@@ -834,7 +835,7 @@ def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
             "run_after_startup": True,
         },
     )
-    service = scheduled_task_service.ScheduledTaskService(
+    service = ScheduledTaskFacadeService(
         tmp_path / "pixiv.sqlite3",
         settings_json_path=tmp_path / "config" / "settings.json",
     )
@@ -1128,7 +1129,7 @@ def test_scheduled_task_builder_can_randomly_select_artists(tmp_path, monkeypatc
         assert k == len(artists)
         return sorted(artists, key=lambda artist: artist.id, reverse=True)
 
-    monkeypatch.setattr(scheduled_task_service.random, "sample", reverse_id_sample)
+    monkeypatch.setattr(workflow_target_node.random, "sample", reverse_id_sample)
     create_response = client.post(
         "/api/scheduled-tasks",
         json={

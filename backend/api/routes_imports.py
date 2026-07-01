@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, UploadFile
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.imports import LegacyDatabaseImportResponse
 from backend.services.legacy_import_service import LegacyDatabaseImportService
-from backend.services.workflow_run_service import WorkflowRunService
+from backend.services.workflow_run_service import LegacyWorkflowItemRunService
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -23,7 +23,10 @@ def import_legacy_database(
         summary = LegacyDatabaseImportService(db_path).import_file(file.file)
     finally:
         file.file.close()
-    workflow_service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
+    workflow_service = LegacyWorkflowItemRunService(
+        db_path,
+        settings_json_path=settings_json_path,
+    )
     try:
         run = workflow_service.run_legacy_import_hydration(
             artist_ids=summary.imported_artist_ids,
@@ -31,7 +34,7 @@ def import_legacy_database(
         )
     finally:
         workflow_service.close()
-    job_id = run.items[0].job_ids[0] if run is not None and run.items[0].job_ids else None
+    job_id = first_workflow_job_id(run)
     if job_id is not None:
         queue.wake()
     return LegacyDatabaseImportResponse(
@@ -41,3 +44,19 @@ def import_legacy_database(
         hydration_job_id=job_id,
         message=f"Imported {summary.imported_artists} artists from legacy database.",
     )
+
+
+def first_workflow_job_id(run: object) -> str | None:
+    if run is None:
+        return None
+    node_runs = getattr(run, "node_runs", [])
+    for node_run in node_runs:
+        job_ids = getattr(node_run, "job_ids", [])
+        if job_ids:
+            return str(job_ids[0])
+    items = getattr(run, "items", [])
+    for item in items:
+        job_ids = getattr(item, "job_ids", [])
+        if job_ids:
+            return str(job_ids[0])
+    return None

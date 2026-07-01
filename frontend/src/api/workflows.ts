@@ -1,7 +1,7 @@
 import { apiRequest } from "./client";
 import type { FailureDetail, FailureReason } from "./scheduledTasks";
 
-export type WorkflowBatchRunItem = {
+export type WorkflowRunCompatItem = {
   id: number | null;
   run_id: string;
   draft_id: string;
@@ -16,6 +16,8 @@ export type WorkflowBatchRunItem = {
   created_at: string | null;
   finished_at: string | null;
 };
+
+export type WorkflowBatchRunItem = WorkflowRunCompatItem;
 
 export type WorkflowNodeRun = {
   id: number | null;
@@ -36,7 +38,7 @@ export type WorkflowNodeRun = {
   finished_at: string | null;
 };
 
-export type WorkflowBatchRun = {
+export type WorkflowRun = {
   id: string;
   status: "running" | "completed" | "failed" | "partial" | "skipped";
   total: number;
@@ -50,14 +52,18 @@ export type WorkflowBatchRun = {
   failure: FailureDetail | null;
   created_at: string | null;
   finished_at: string | null;
-  items: WorkflowBatchRunItem[];
+  items: WorkflowRunCompatItem[];
   node_runs: WorkflowNodeRun[];
 };
 
-export type WorkflowBatchRunListResponse = {
-  items: WorkflowBatchRun[];
+export type WorkflowBatchRun = WorkflowRun;
+
+export type WorkflowRunListResponse = {
+  items: WorkflowRun[];
   total: number;
 };
+
+export type WorkflowBatchRunListResponse = WorkflowRunListResponse;
 
 export type AdvancedWorkflowNode = {
   id: string;
@@ -120,7 +126,7 @@ export type WorkflowDefinitionSaveRequest = {
 export type WorkflowDefinitionSaveResponse = {
   definition: WorkflowDefinition;
   trigger: WorkflowTrigger | null;
-  run: WorkflowBatchRun | null;
+  run: WorkflowRun | null;
 };
 
 export type WorkflowDefinitionListResponse = {
@@ -128,8 +134,8 @@ export type WorkflowDefinitionListResponse = {
   total: number;
 };
 
-export function createAdvancedWorkflowRun(request: AdvancedWorkflowRunRequest): Promise<WorkflowBatchRun> {
-  return apiRequest<WorkflowBatchRun>("/workflows/advanced/runs", {
+export function createAdvancedWorkflowRun(request: AdvancedWorkflowRunRequest): Promise<WorkflowRun> {
+  return apiRequest<WorkflowRun>("/workflows/advanced/runs", {
     method: "POST",
     body: request
   });
@@ -142,8 +148,8 @@ export function saveWorkflowDefinition(request: WorkflowDefinitionSaveRequest): 
   });
 }
 
-export function runWorkflowDefinition(definitionId: string): Promise<WorkflowBatchRun> {
-  return apiRequest<WorkflowBatchRun>(`/workflows/definitions/${definitionId}/run`, {
+export function runWorkflowDefinition(definitionId: string): Promise<WorkflowRun> {
+  return apiRequest<WorkflowRun>(`/workflows/definitions/${definitionId}/run`, {
     method: "POST"
   });
 }
@@ -152,6 +158,6 @@ export function listWorkflowDefinitions(): Promise<WorkflowDefinitionListRespons
   return apiRequest<WorkflowDefinitionListResponse>("/workflows/definitions");
 }
 
-export function listWorkflowRuns(limit = 5): Promise<WorkflowBatchRunListResponse> {
-  return apiRequest<WorkflowBatchRunListResponse>(`/workflows/runs?limit=${limit}`);
+export function listWorkflowRuns(limit = 5): Promise<WorkflowRunListResponse> {
+  return apiRequest<WorkflowRunListResponse>(`/workflows/runs?limit=${limit}`);
 }

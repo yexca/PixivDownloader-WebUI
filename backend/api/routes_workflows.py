@@ -5,11 +5,11 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.workflows import (
     AdvancedWorkflowRunRequest,
-    WorkflowBatchRunListResponse,
-    WorkflowBatchRunResponse,
     WorkflowDefinitionListResponse,
     WorkflowDefinitionSaveRequest,
     WorkflowDefinitionSaveResponse,
+    WorkflowRunListResponse,
+    WorkflowRunResponse,
     workflow_definition_response,
     workflow_run_response,
     workflow_trigger_response,
@@ -21,13 +21,13 @@ from backend.services.workflow_schedule_service import WorkflowScheduleService
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
 
-@router.post("/advanced/runs", response_model=WorkflowBatchRunResponse)
+@router.post("/advanced/runs", response_model=WorkflowRunResponse)
 def create_advanced_workflow_run(
     request: AdvancedWorkflowRunRequest,
     db_path: DbPath,
     settings_json_path: SettingsJsonPath,
     queue: Queue,
-) -> WorkflowBatchRunResponse:
+) -> WorkflowRunResponse:
     runner = AdvancedWorkflowRunner(db_path, settings_json_path=settings_json_path)
     try:
         run = runner.create_run(request.definition)
@@ -93,13 +93,13 @@ def save_workflow_definition(
     )
 
 
-@router.post("/definitions/{definition_id}/run", response_model=WorkflowBatchRunResponse)
+@router.post("/definitions/{definition_id}/run", response_model=WorkflowRunResponse)
 def run_workflow_definition(
     definition_id: str,
     db_path: DbPath,
     settings_json_path: SettingsJsonPath,
     queue: Queue,
-) -> WorkflowBatchRunResponse:
+) -> WorkflowRunResponse:
     service = WorkflowScheduleService(db_path, settings_json_path=settings_json_path)
     try:
         run = service.run_definition(definition_id, source="advanced_manual")
@@ -110,25 +110,25 @@ def run_workflow_definition(
     return workflow_run_response(run)
 
 
-@router.get("/runs", response_model=WorkflowBatchRunListResponse)
+@router.get("/runs", response_model=WorkflowRunListResponse)
 def list_workflow_runs(
     db_path: DbPath,
     limit: int = Query(default=5, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
-) -> WorkflowBatchRunListResponse:
+) -> WorkflowRunListResponse:
     service = WorkflowReadService(db_path)
     try:
         runs, total = service.list_runs(limit=limit, offset=offset)
     finally:
         service.close()
-    return WorkflowBatchRunListResponse(
+    return WorkflowRunListResponse(
         items=[workflow_run_response(run) for run in runs],
         total=total,
     )
 
 
-@router.get("/runs/{run_id}", response_model=WorkflowBatchRunResponse)
-def get_workflow_run(run_id: str, db_path: DbPath) -> WorkflowBatchRunResponse:
+@router.get("/runs/{run_id}", response_model=WorkflowRunResponse)
+def get_workflow_run(run_id: str, db_path: DbPath) -> WorkflowRunResponse:
     service = WorkflowReadService(db_path)
     try:
         run = service.get_run(run_id)

@@ -19,7 +19,7 @@ from backend.schemas.failure_reasons import FailureDetail, classify_failure_reas
 from backend.schemas.scheduled_tasks import ScheduledTaskConfigRequest
 
 
-class WorkflowBatchItemRequest(BaseModel):
+class WorkflowRunCompatItemRequest(BaseModel):
     draft_id: str
     title: str
     config: ScheduledTaskConfigRequest
@@ -29,6 +29,10 @@ class WorkflowBatchItemRequest(BaseModel):
     interval_days: int = Field(default=30, ge=1)
     enabled: bool = True
     run_after_startup: bool = True
+
+
+# Compatibility name for the old batch/item workflow request shape.
+WorkflowBatchItemRequest = WorkflowRunCompatItemRequest
 
 
 AdvancedWorkflowNodeType = Literal[
@@ -51,6 +55,7 @@ class AdvancedWorkflowNodeRequest(BaseModel):
 class AdvancedWorkflowDefinitionRequest(BaseModel):
     name: str = ""
     nodes: list[AdvancedWorkflowNodeRequest] = Field(default_factory=list)
+    metadata: dict[str, object] = Field(default_factory=dict)
 
 
 class AdvancedWorkflowRunRequest(BaseModel):
@@ -132,7 +137,7 @@ class WorkflowNodeRunResponse(BaseModel):
     finished_at: str | None
 
 
-class WorkflowBatchRunResponse(BaseModel):
+class WorkflowRunResponse(BaseModel):
     id: str
     status: str
     total: int
@@ -150,21 +155,26 @@ class WorkflowBatchRunResponse(BaseModel):
     node_runs: list[WorkflowNodeRunResponse] = Field(default_factory=list)
 
 
-class WorkflowBatchRunListResponse(BaseModel):
-    items: list[WorkflowBatchRunResponse]
+class WorkflowRunListResponse(BaseModel):
+    items: list[WorkflowRunResponse]
     total: int
 
 
 class WorkflowDefinitionSaveResponse(BaseModel):
     definition: WorkflowDefinitionResponse
     trigger: WorkflowTriggerResponse | None = None
-    run: WorkflowBatchRunResponse | None = None
+    run: WorkflowRunResponse | None = None
 
 
-def workflow_run_response(run: WorkflowRun) -> WorkflowBatchRunResponse:
+# Compatibility names for the old batch-oriented API vocabulary.
+WorkflowBatchRunResponse = WorkflowRunResponse
+WorkflowBatchRunListResponse = WorkflowRunListResponse
+
+
+def workflow_run_response(run: WorkflowRun) -> WorkflowRunResponse:
     items = [workflow_run_item_response(item) for item in run.items]
     node_runs = [workflow_node_run_response(node_run) for node_run in run.node_runs]
-    return WorkflowBatchRunResponse(
+    return WorkflowRunResponse(
         id=run.id,
         status=run.status,
         total=run.total,

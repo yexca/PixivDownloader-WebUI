@@ -38,7 +38,7 @@ from backend.db.migrate import migrate_database
 from backend.schemas.failure_reasons import failure_detail
 from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
 from backend.services.pixiv_oauth import PixivOAuthFlowStore
-from backend.services.workflow_run_service import WorkflowRunService
+from backend.services.workflow_recovery_service import WorkflowRecoveryService
 from backend.workers.job_queue import JobQueue
 from backend.workers.scheduled_task_runner import ScheduledTaskRunner
 
@@ -110,7 +110,7 @@ def recover_interrupted_workflow_runs(
     *,
     settings_json_path: Path | str | None,
 ):
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
+    service = WorkflowRecoveryService(db_path, settings_json_path=settings_json_path)
     try:
         runs = service.recover_startup()
         if runs:

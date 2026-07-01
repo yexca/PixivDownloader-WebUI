@@ -12,7 +12,6 @@ from backend.domain.entities import (
     ScheduledTask,
     ScheduledTaskConfig,
     ScheduledTaskFilter,
-    ScheduledTaskTarget,
 )
 from backend.domain.types import ScheduledTaskAction, ScheduledTaskStatus
 from backend.repositories._time import utc_now
@@ -25,6 +24,12 @@ from backend.schemas.failure_reasons import failure_detail_from_exception
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.job_service import JobService, WorkflowJobLink
+from backend.services.scheduled_workflow_compiler import (
+    default_task_name,
+    legacy_config,
+    scheduled_task_definition,
+    scheduled_task_downloads,
+)
 from backend.services.settings_service import AppSettingsService
 from backend.services.storage_service import check_free_space
 
@@ -171,7 +176,7 @@ class ScheduledTaskService:
         now = utc_now()
         try:
             run = self._create_workflow_run(task, manual=manual)
-            jobs = [job for item in run.items for job in self._jobs_for_ids(item.job_ids)]
+            jobs = self._workflow_run_jobs(run)
         except InsufficientDiskSpaceError as exc:
             failure = failure_detail_from_exception(exc)
             updated = replace(
@@ -260,76 +265,12 @@ class ScheduledTaskService:
         task: ScheduledTask,
         config: ScheduledTaskConfig,
     ) -> AdvancedWorkflowDefinitionRequest:
-        actions = tuple(config.actions) or ("download_artist",)
-        nodes: list[dict[str, object]] = [
-            {
-                "id": "target",
-                "type": "artist_target",
-                "title": "Target artists",
-                "config": self._scheduled_target_config(config),
-            }
-        ]
-        if any(
-            action in {"sync_artist", "download_artist", "retry_failed_artist"}
-            for action in actions
-        ):
-            nodes.append(
-                {
-                    "id": "sync",
-                    "type": "sync_metadata",
-                    "title": "Sync metadata",
-                    "config": {
-                        "mode": "full"
-                        if config.download_options.get("full_download")
-                        else "incremental"
-                    },
-                }
-            )
-        if actions == ("sync_artist",):
-            return AdvancedWorkflowDefinitionRequest.model_validate(
-                {
-                    "name": task.name
-                    or default_task_name("sync_artist", task.target_artist_id, config),
-                    "nodes": nodes,
-                }
-            )
-
-        download_options = dict(config.download_options)
-        if "download_artist" in actions:
-            nodes.extend(
-                scheduled_download_nodes(
-                    download_options,
-                    suffix="",
-                    collect_mode=scheduled_download_collect_mode(download_options),
-                    title="Download files",
-                )
-            )
-        if "retry_failed_artist" in actions:
-            nodes.extend(
-                scheduled_download_nodes(
-                    download_options,
-                    suffix="_retry",
-                    collect_mode="failed_files",
-                    title="Retry failed files",
-                )
-            )
-        return AdvancedWorkflowDefinitionRequest.model_validate(
-            {
-                "name": task.name or default_task_name(actions[0], task.target_artist_id, config),
-                "nodes": nodes,
-            }
+        return scheduled_task_definition(
+            task,
+            config,
+            artist_ids=self._scheduled_artist_ids(config),
+            artwork_ids=self._scheduled_artwork_ids(config),
         )
-
-    def _scheduled_target_config(self, config: ScheduledTaskConfig) -> dict[str, object]:
-        target = config.target
-        artist_ids = self._scheduled_artist_ids(config)
-        artwork_ids = self._scheduled_artwork_ids(config)
-        return {
-            "scope": target.type,
-            "artist_ids": artist_ids,
-            "artwork_ids": artwork_ids,
-            "max_artists": config.max_artists_per_run,
-        }
 
     def _scheduled_artist_ids(self, config: ScheduledTaskConfig) -> list[str]:
         target = config.target
@@ -355,6 +296,10 @@ class ScheduledTaskService:
             return repository.list_by_ids(job_ids)
         finally:
             repository.close()
+
+    def _workflow_run_jobs(self, run: WorkflowRun) -> list[Job]:
+        job_ids = workflow_run_job_ids(run)
+        return self._jobs_for_ids(job_ids)
 
     def _create_jobs(
         self,
@@ -610,95 +555,6 @@ def job_type_for_action(action: str) -> str:
     return "download_artist"
 
 
-def default_task_name(
-    action: ScheduledTaskAction,
-    artist_id: str,
-    config: ScheduledTaskConfig | None = None,
-) -> str:
-    labels = {
-        "sync_artist": "Sync artist",
-        "download_artist": "Download artist",
-        "retry_failed_artist": "Retry failed artist",
-    }
-    if config is not None:
-        target = config.target
-        if target.type == "artists":
-            if target.artist_source == "artwork_ids":
-                return "Download artists from artworks"
-            return "Download artists"
-        if target.type == "artworks":
-            return "Download artworks"
-        if target.type == "single_artwork" and target.artwork_id:
-            return f"Download artwork {target.artwork_id}"
-        if target.type == "all_artists":
-            return f"{labels[action]} all artists"
-        if target.type == "artists_with_tag":
-            tag_label = ", ".join(target.tags) if target.tags else target.tag or "tag"
-            return f"{labels[action]} artists tagged {tag_label}"
-        if target.type == "artists_not_checked":
-            return f"{labels[action]} unchecked artists"
-    return f"{labels[action]} {artist_id}"
-
-
-def legacy_config(task: ScheduledTask) -> ScheduledTaskConfig:
-    return ScheduledTaskConfig(
-        target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
-        actions=(task.action,),
-    )
-
-
-def scheduled_task_downloads(config: ScheduledTaskConfig) -> bool:
-    return any(action in {"download_artist", "retry_failed_artist"} for action in config.actions)
-
-
-def scheduled_download_collect_mode(download_options: dict[str, object]) -> str:
-    if download_options.get("full_download"):
-        return "all_synced"
-    if download_options.get("pending_only"):
-        return "pending_files"
-    return "new_since_last_download"
-
-
-def scheduled_download_nodes(
-    download_options: dict[str, object],
-    *,
-    suffix: str,
-    collect_mode: str,
-    title: str,
-) -> list[dict[str, object]]:
-    return [
-        {
-            "id": f"collect{suffix}",
-            "type": "collect_artworks",
-            "title": "Collect artworks" if not suffix else "Collect failed files",
-            "config": {
-                "mode": collect_mode,
-                "max_artworks": download_options.get("max_artworks"),
-                "min_artwork_id": download_options.get("min_artwork_id"),
-                "max_artwork_id": download_options.get("max_artwork_id"),
-            },
-        },
-        {
-            "id": f"filters{suffix}",
-            "type": "filter_artworks",
-            "title": "Filter artworks",
-            "config": {
-                "stop_above_limit": download_options.get("stop_if_artwork_count_above"),
-            },
-        },
-        {
-            "id": f"actions{suffix}",
-            "type": "execute_actions",
-            "title": title,
-            "config": {
-                "download": True,
-                "execution_unit": "artist",
-                "naming_rule": download_options.get("naming_rule"),
-            },
-        },
-    ]
-
-
 def artist_is_stale(artist: Artist, days: int) -> bool:
     if artist.last_checked_at is None:
         return True
@@ -712,6 +568,24 @@ def select_artists(artists: list[Artist], config: ScheduledTaskConfig) -> list[A
         return random.sample(artists, k=len(artists))
     reverse = config.artist_selection == "newest_checked_first"
     return sorted(artists, key=artist_checked_sort_key, reverse=reverse)
+
+
+def workflow_run_job_ids(run: WorkflowRun) -> list[str]:
+    ids = [job_id for node in run.node_runs for job_id in node.job_ids]
+    if not ids:
+        ids = [job_id for item in run.items for job_id in item.job_ids]
+    return dedupe_preserve_order(ids)
+
+
+def dedupe_preserve_order(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value in seen:
+            continue
+        result.append(value)
+        seen.add(value)
+    return result
 
 
 def artist_checked_sort_key(artist: Artist) -> datetime:

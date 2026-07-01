@@ -860,8 +860,9 @@ export function loadRunJobs(run: WorkflowBatchRun | null): Promise<JobDetail[]> 
   }
   const ids = Array.from(
     new Set([
-      ...run.items.flatMap((item) => item.job_ids),
-      ...run.node_runs.flatMap((node) => node.job_ids)
+      ...(run.node_runs.length
+        ? run.node_runs.flatMap((node) => node.job_ids)
+        : run.items.flatMap((item) => item.job_ids))
     ])
   );
   return Promise.all(ids.map((jobId) => getJob(jobId)));

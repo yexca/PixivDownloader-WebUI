@@ -809,10 +809,10 @@ function filterRuns(runs: WorkflowBatchRun[], search: string): WorkflowBatchRun[
     [
       run.id,
       run.status,
-        run.source,
-        runSourceLabel(run),
-      run.items.map((item) => `${item.title} ${item.draft_id}`).join(" "),
-      run.node_runs.map((node) => `${node.title} ${node.node_type}`).join(" ")
+      run.source,
+      runSourceLabel(run),
+      run.node_runs.map((node) => `${node.title} ${node.node_id} ${node.node_type}`).join(" "),
+      run.items.map((item) => `${item.title} ${item.draft_id}`).join(" ")
     ]
       .join(" ")
       .toLowerCase()
@@ -886,11 +886,11 @@ function runSourceLabel(run: WorkflowBatchRun): string {
 }
 
 function runTitle(run: WorkflowBatchRun): string {
+  if (run.node_runs.length) {
+    return run.node_runs[0]?.title || `${run.node_runs.length} node workflow`;
+  }
   if (run.items.length === 1) {
     return run.items[0].title;
-  }
-  if (run.node_runs.length) {
-    return `${run.node_runs.length} node workflow`;
   }
   return `${run.items.length} workflow item run`;
 }

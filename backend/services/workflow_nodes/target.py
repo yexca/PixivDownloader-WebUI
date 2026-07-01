@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import random
+from datetime import UTC, datetime, timedelta
+
 from backend.domain.entities import Job
+from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
 from backend.services.job_service import JobService, WorkflowJobLink
@@ -21,8 +25,8 @@ class ArtistTargetNodeExecutor(WorkflowNodeExecutorBase):
         config: dict[str, object],
         context: WorkflowNodeContext,
     ) -> WorkflowNodeResult:
-        artist_ids = tuple(string_list(config.get("artist_ids")))
-        artwork_ids = tuple(string_list(config.get("artwork_ids")))
+        artist_ids = tuple(resolve_artist_ids(config, context.db_path))
+        artwork_ids = tuple(resolve_artwork_ids(config))
         max_artists = positive_int(config.get("max_artists")) or max(
             1,
             len(artist_ids) + len(artwork_ids),
@@ -99,3 +103,108 @@ def latest_resolver_payload(db_path: object, job_ids: list[str]) -> dict[str, ob
     finally:
         repository.close()
     return {}
+
+
+def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
+    explicit_ids = string_list(config.get("artist_ids"))
+    scope = str(config.get("scope") or "selected")
+    single_artist = config.get("artist_id")
+    if isinstance(single_artist, str) and single_artist.strip():
+        explicit_ids = [single_artist.strip(), *explicit_ids]
+    if explicit_ids and scope in {"selected", "artists", "single_artist"}:
+        return explicit_ids[: max_targets(config, len(explicit_ids))]
+    if scope == "artists":
+        return explicit_ids[: max_targets(config, len(explicit_ids))]
+    if scope not in {"all_artists", "artists_with_tag", "artists_not_checked"}:
+        return explicit_ids[: max_targets(config, len(explicit_ids))]
+
+    repository = ArtistRepository(db_path)
+    try:
+        artists = repository.list(limit=1000)
+    finally:
+        repository.close()
+    if scope == "artists_with_tag":
+        tags = string_list(config.get("tags"))
+        tag = config.get("tag")
+        if isinstance(tag, str) and tag.strip():
+            tags = [*tags, tag.strip()]
+        if tags:
+            repository = ArtistRepository(db_path)
+            try:
+                artists = []
+                seen: set[str] = set()
+                for item in tags:
+                    for artist in repository.list(limit=1000, local_tag=item):
+                        if artist.id in seen:
+                            continue
+                        artists.append(artist)
+                        seen.add(artist.id)
+            finally:
+                repository.close()
+    if scope == "artists_not_checked":
+        days = positive_int(config.get("days")) or 30
+        artists = [artist for artist in artists if artist_is_stale(artist, days)]
+    filters = config.get("filters")
+    if isinstance(filters, list):
+        for item in filters:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") == "last_checked_before_days":
+                days = positive_int(item.get("days")) or 30
+                artists = [artist for artist in artists if artist_is_stale(artist, days)]
+    scheduled_config = scheduled_config_for_selection(config)
+    return [
+        artist.id
+        for artist in select_artists(artists, scheduled_config)[: scheduled_config["max_artists"]]
+    ]
+
+
+def resolve_artwork_ids(config: dict[str, object]) -> list[str]:
+    artwork_ids = string_list(config.get("artwork_ids"))
+    artwork_id = config.get("artwork_id")
+    if isinstance(artwork_id, str) and artwork_id.strip():
+        return [artwork_id.strip(), *artwork_ids]
+    return artwork_ids
+
+
+def max_targets(config: dict[str, object], default: int) -> int:
+    return positive_int(config.get("max_artists")) or max(1, default)
+
+
+def scheduled_config_for_selection(config: dict[str, object]):
+    selection = config.get("artist_selection")
+    if selection not in {"oldest_checked_first", "newest_checked_first", "random"}:
+        selection = "oldest_checked_first"
+    return {
+        "max_artists": max_targets(config, 25),
+        "artist_selection": selection,
+        "skip_unavailable_artists": bool(config.get("skip_unavailable_artists", True)),
+    }
+
+
+def select_artists(artists, config: dict[str, object]):
+    if config["skip_unavailable_artists"]:
+        artists = [artist for artist in artists if artist.account_status != "unavailable"]
+    if config["artist_selection"] == "random":
+        return random.sample(artists, k=len(artists))
+    reverse = config["artist_selection"] == "newest_checked_first"
+    return sorted(artists, key=artist_checked_sort_key, reverse=reverse)
+
+
+def artist_is_stale(artist, days: int) -> bool:
+    if artist.last_checked_at is None:
+        return True
+    return parse_time(artist.last_checked_at) <= datetime.now(UTC) - timedelta(days=days)
+
+
+def artist_checked_sort_key(artist) -> datetime:
+    if artist.last_checked_at is None:
+        return datetime.min.replace(tzinfo=UTC)
+    try:
+        return parse_time(artist.last_checked_at)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+
+
+def parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)

@@ -13,7 +13,7 @@ from backend.schemas.scheduled_tasks import (
     scheduled_task_config_from_request,
     scheduled_task_response,
 )
-from backend.services.scheduled_task_service import ScheduledTaskService
+from backend.services.scheduled_task_facade_service import ScheduledTaskFacadeService
 
 router = APIRouter(prefix="/api/scheduled-tasks", tags=["scheduled-tasks"])
 
@@ -23,7 +23,7 @@ def list_scheduled_tasks(
     db_path: DbPath,
     settings_json_path: SettingsJsonPath,
 ) -> ScheduledTaskListResponse:
-    service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    service = ScheduledTaskFacadeService(db_path, settings_json_path=settings_json_path)
     try:
         tasks = service.list_tasks()
         return ScheduledTaskListResponse(
@@ -42,7 +42,7 @@ def create_scheduled_task(
     scheduler: Scheduler,
     queue: Queue,
 ) -> ScheduledTaskResponse:
-    service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    service = ScheduledTaskFacadeService(db_path, settings_json_path=settings_json_path)
     config = (
         scheduled_task_config_from_request(request.config)
         if request.config is not None
@@ -77,7 +77,7 @@ def update_scheduled_task(
     settings_json_path: SettingsJsonPath,
     scheduler: Scheduler,
 ) -> ScheduledTaskResponse:
-    service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    service = ScheduledTaskFacadeService(db_path, settings_json_path=settings_json_path)
     config = (
         scheduled_task_config_from_request(request.config)
         if request.config is not None
@@ -109,7 +109,7 @@ def run_scheduled_task(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> ScheduledTaskRunResponse:
-    service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    service = ScheduledTaskFacadeService(db_path, settings_json_path=settings_json_path)
     try:
         result = service.run_task(task_id, manual=True)
     finally:
@@ -133,7 +133,7 @@ def delete_scheduled_task(
     settings_json_path: SettingsJsonPath,
     scheduler: Scheduler,
 ) -> None:
-    service = ScheduledTaskService(db_path, settings_json_path=settings_json_path)
+    service = ScheduledTaskFacadeService(db_path, settings_json_path=settings_json_path)
     try:
         if not service.delete_task(task_id):
             raise JobNotFoundError(f"scheduled task {task_id} was not found")
