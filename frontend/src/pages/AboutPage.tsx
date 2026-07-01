@@ -33,14 +33,19 @@ const dependencies = [
 
 const references = [
   {
-    name: "Applio",
-    url: "https://github.com/IAHispano/Applio",
-    detail: "Referenced for the dependency installation and local startup flow."
+    name: "ComfyUI",
+    url: "https://github.com/comfy-org/comfyui",
+    detail: "Referenced for workflow design ideas, especially the node-based workflow model and execution view."
   },
   {
     name: "PixivBatchDownloader",
     url: "https://github.com/xuejianxianzun/PixivBatchDownloader",
     detail: "Referenced for Pixiv API pacing ideas, including request sleeps and gentler crawling behavior."
+  },
+  {
+    name: "Applio",
+    url: "https://github.com/IAHispano/Applio",
+    detail: "Referenced for the dependency installation and local startup flow."
   }
 ];
 
@@ -57,7 +62,7 @@ export function AboutPage(): JSX.Element {
             <Info className="mt-0.5 h-5 w-5 shrink-0 text-primary" aria-hidden="true" />
             <div className="min-w-0">
               <h2 className="text-base font-semibold">Pixiv Downloader WebUI</h2>
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">
                 Pixiv Downloader WebUI is a local Pixiv download and library management tool backed by a
                 FastAPI backend, a React frontend, and a local SQLite database. It is designed for personal
                 archiving workflows, queue inspection, retry handling, and legacy database migration from the
@@ -95,7 +100,7 @@ export function AboutPage(): JSX.Element {
 
         <section className="surface p-4">
           <SectionTitle icon={<BookOpen className="h-4 w-4" aria-hidden="true" />} title="References" />
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <div className="mt-3 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
             {references.map((reference) => (
               <div key={reference.name} className="rounded-md border bg-muted/20 p-3">
                 <h3 className="text-sm font-semibold">
