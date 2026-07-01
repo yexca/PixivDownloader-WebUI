@@ -450,8 +450,9 @@ function WorkflowLimitControl({
     <div className="flex flex-wrap items-center gap-2">
       <span className="whitespace-nowrap text-xs font-medium">{label}</span>
       <span className="whitespace-nowrap text-xs text-muted-foreground">
-        {active}/{waiting}
+        {active}/{value}
       </span>
+      {waiting ? <Badge tone="warning">{waiting} waiting</Badge> : null}
       <div className="flex flex-wrap items-center gap-1">
         {[1, 2, 3, 4, 5].map((item) => (
           <Button

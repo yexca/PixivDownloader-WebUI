@@ -53,7 +53,7 @@ export function workflowScheduleGroups(tasks: ScheduledTask[]): WorkflowSchedule
 }
 
 export function workflowWaitingJobs(jobs: Job[]): Job[] {
-  return jobs.filter((job) => job.options.activation_scope === "one_time" && job.status === "inactive");
+  return jobs.filter((job) => isWorkflowLimitedJob(job) && job.status === "inactive");
 }
 
 export function filterWorkflowRuns(runs: WorkflowBatchRun[], search: string): WorkflowBatchRun[] {
@@ -156,11 +156,15 @@ export function lastRunLabel(task: ScheduledTask, run: WorkflowBatchRun | null):
 }
 
 export function workflowJobStats(jobs: Job[]): { active: number; waiting: number } {
-  const oneTimeJobs = jobs.filter((job) => job.options.activation_scope === "one_time");
+  const oneTimeJobs = jobs.filter(isWorkflowLimitedJob);
   return {
     active: oneTimeJobs.filter((job) => job.status === "queued" || job.status === "running").length,
     waiting: oneTimeJobs.filter((job) => job.status === "inactive").length
   };
+}
+
+function isWorkflowLimitedJob(job: Job): boolean {
+  return job.options.activation_scope === "one_time" || Boolean(job.workflow_run_id);
 }
 
 export function jobLabel(job: Job): string {
