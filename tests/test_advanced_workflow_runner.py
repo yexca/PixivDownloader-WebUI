@@ -266,6 +266,65 @@ def test_advanced_workflow_sync_node_creates_artist_sync_jobs(tmp_path):
     assert [job.options.get("full_sync") for job in sync_jobs if job is not None] == [True, True]
 
 
+def test_worker_continues_advanced_manual_workflow_after_target_job(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Artist download pipeline",
+            "nodes": [
+                {
+                    "id": "target",
+                    "type": "artist_target",
+                    "title": "Target artists",
+                    "config": {"artist_ids": ["123"], "max_artists": 10},
+                },
+                {
+                    "id": "sync",
+                    "type": "sync_metadata",
+                    "title": "Sync metadata",
+                    "config": {"mode": "incremental"},
+                },
+            ],
+        }
+    )
+
+    runner = AdvancedWorkflowRunner(db_path)
+    try:
+        run = runner.create_run(definition, source="advanced_manual")
+        target_job_id = run.node_runs[0].job_ids[0]
+    finally:
+        runner.close()
+
+    worker = DownloadWorker(
+        db_path=db_path,
+        pixiv_client_factory=WorkflowTargetPixivClient,
+    )
+    worker.run_job(target_job_id)
+
+    run_repository = WorkflowRunRepository(db_path)
+    job_repository = JobRepository(db_path)
+    try:
+        refreshed = run_repository.get_run(run.id)
+        sync_jobs = [
+            job_repository.get_by_id(job_id)
+            for job_id in (refreshed.node_runs[1].job_ids if refreshed is not None else [])
+        ]
+    finally:
+        run_repository.close()
+        job_repository.close()
+
+    assert refreshed is not None
+    assert refreshed.source == "advanced_manual"
+    assert refreshed.status == "running"
+    assert refreshed.node_runs[0].status == "completed"
+    assert refreshed.node_runs[1].status == "running"
+    assert [(job.type, job.input_user_id) for job in sync_jobs if job is not None] == [
+        ("sync_artist", "123")
+    ]
+
+
 def test_advanced_workflow_collect_node_materializes_candidate_set(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path)

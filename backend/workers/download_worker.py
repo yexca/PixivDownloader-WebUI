@@ -15,6 +15,7 @@ from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_candidate_repository import WorkflowCandidateRepository
 from backend.repositories.workflow_run_repository import WorkflowRunRepository
+from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.candidate_download_service import (
     CandidateDownloadService,
     existing_file_behavior_from_conflict_mode,
@@ -72,24 +73,31 @@ class DownloadWorker:
 
     def run_job(self, job_id: str) -> Job:
         repository = JobRepository(self.db_path)
+        result: Job | None = None
         try:
             job = repository.get_by_id(job_id)
             if job is None:
                 raise ValueError(f"job not found: {job_id}")
             if job.cancel_requested or job.status == "cancelled":
-                return self._finish(repository, job, "cancelled", "Job cancelled before start")
+                result = self._finish(repository, job, "cancelled", "Job cancelled before start")
+                return result
 
             job = self._start(repository, job)
             if job.type == "hydrate_legacy_import":
-                return self._run_legacy_import_hydration_job(repository, job)
+                result = self._run_legacy_import_hydration_job(repository, job)
+                return result
             if job.type == "resolve_workflow_targets":
-                return self._run_resolve_workflow_targets_job(repository, job)
+                result = self._run_resolve_workflow_targets_job(repository, job)
+                return result
             if job.type == "resolve_artist_targets":
-                return self._run_resolve_artist_targets_job(repository, job)
+                result = self._run_resolve_artist_targets_job(repository, job)
+                return result
             if job.type == "sync_artist":
-                return self._run_sync_job(repository, job)
+                result = self._run_sync_job(repository, job)
+                return result
             if job.type in {"download_candidate_artist", "download_candidate_set"}:
-                return self._run_candidate_download_job(repository, job)
+                result = self._run_candidate_download_job(repository, job)
+                return result
             service = DownloadService(
                 pixiv_client=self.pixiv_client_factory(),
                 file_downloader=self.file_downloader_factory(),
@@ -143,18 +151,20 @@ class DownloadWorker:
             )
             repository.update(finished)
             repository.add_event(JobEvent(job_id=job.id, level="info", message="Job completed"))
-            return repository.get_by_id(job.id) or finished
+            result = repository.get_by_id(job.id) or finished
+            return result
         except JobCancelledError:
             latest = repository.get_by_id(job_id)
             if latest is None:
                 raise
-            return self._finish(repository, latest, "cancelled", "Job cancelled")
+            result = self._finish(repository, latest, "cancelled", "Job cancelled")
+            return result
         except Exception as exc:
             logger.exception("download job failed: %s", job_id)
             latest = repository.get_by_id(job_id)
             if latest is None:
                 raise
-            return self._finish(
+            result = self._finish(
                 repository,
                 latest,
                 "failed",
@@ -162,8 +172,11 @@ class DownloadWorker:
                 level="error",
                 payload={"error_type": type(exc).__name__},
             )
+            return result
         finally:
             repository.close()
+            if result is not None:
+                self._continue_advanced_workflow(result)
 
     def _run_legacy_import_hydration_job(self, repository: JobRepository, job: Job) -> Job:
         targets = legacy_hydration_targets_from_options(job.options)
@@ -425,6 +438,22 @@ class DownloadWorker:
                 break
         finally:
             repository.close()
+
+    def _continue_advanced_workflow(self, job: Job) -> None:
+        if job.workflow_source != "advanced_workflow" or not job.workflow_run_id:
+            return
+        if job.status not in {"completed", "failed", "cancelled"}:
+            return
+        runner = AdvancedWorkflowRunner(
+            self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        try:
+            runner.process_run(job.workflow_run_id, item_id=job.workflow_item_id)
+        except Exception:
+            logger.exception("advanced workflow continuation failed: %s", job.workflow_run_id)
+        finally:
+            runner.close()
 
     def _record_legacy_hydration_progress(
         self,
@@ -737,11 +766,7 @@ def string_list_option(value: object) -> list[str]:
 
 def action_list_option(value: object) -> list[str]:
     valid_actions = {"download_artist", "sync_artist", "retry_failed_artist"}
-    actions = [
-        item
-        for item in string_list_option(value)
-        if item in valid_actions
-    ]
+    actions = [item for item in string_list_option(value) if item in valid_actions]
     return actions or ["download_artist"]
 
 
