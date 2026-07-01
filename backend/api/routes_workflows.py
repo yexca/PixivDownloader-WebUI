@@ -141,6 +141,23 @@ def save_workflow_definition(
     )
 
 
+@router.post("/definitions/{definition_id}/run", response_model=WorkflowBatchRunResponse)
+def run_workflow_definition(
+    definition_id: str,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+    queue: Queue,
+) -> WorkflowBatchRunResponse:
+    service = WorkflowScheduleService(db_path, settings_json_path=settings_json_path)
+    try:
+        run = service.run_definition(definition_id, source="advanced_manual")
+    finally:
+        service.close()
+    if any(node.job_ids for node in run.node_runs):
+        queue.wake()
+    return workflow_run_response(run)
+
+
 @router.get("/runs", response_model=WorkflowBatchRunListResponse)
 def list_workflow_runs(
     db_path: DbPath,

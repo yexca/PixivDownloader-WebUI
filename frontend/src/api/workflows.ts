@@ -177,6 +177,12 @@ export function saveWorkflowDefinition(request: WorkflowDefinitionSaveRequest): 
   });
 }
 
+export function runWorkflowDefinition(definitionId: string): Promise<WorkflowBatchRun> {
+  return apiRequest<WorkflowBatchRun>(`/workflows/definitions/${definitionId}/run`, {
+    method: "POST"
+  });
+}
+
 export function listWorkflowDefinitions(): Promise<WorkflowDefinitionListResponse> {
   return apiRequest<WorkflowDefinitionListResponse>("/workflows/definitions");
 }

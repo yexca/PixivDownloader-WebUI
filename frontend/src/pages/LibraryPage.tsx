@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { AlertCircle, AlertTriangle, Check, Download, ExternalLink, Images, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Check, Download, ExternalLink, Images, Info, Plus, RefreshCw, RotateCcw, Search, Trash2, Workflow as WorkflowLinkIcon, X } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
@@ -650,6 +650,24 @@ function ArtistDetailPanel({
             Retry Failed
           </Button>
         </div>
+        {hasActiveJob ? (
+          <div className="mt-3 rounded-md border bg-muted/20 p-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Shortcut workflow active</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Library actions run through the workflow runtime.
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" asChild>
+                <Link to={`/workflows?view=shortcuts&q=${artist.id}`}>
+                  <WorkflowLinkIcon />
+                  Workflow
+                </Link>
+              </Button>
+            </div>
+          </div>
+        ) : null}
         <Tabs<ArtistDetailTab>
           value={activeTab}
           onValueChange={setActiveTab}
