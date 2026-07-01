@@ -14,7 +14,6 @@ from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_candidate_repository import WorkflowCandidateRepository
-from backend.repositories.workflow_run_repository import WorkflowRunRepository
 from backend.schemas.failure_reasons import failure_detail, failure_detail_from_exception
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.candidate_download_service import (
@@ -288,14 +287,12 @@ class DownloadWorker:
             )
         )
 
-        created_jobs = self._create_resolved_artist_jobs(
+        self._create_resolved_artist_jobs(
             source_job=finished,
             artist_ids=resolved.artist_ids,
             actions=actions,
             download_options=download_options,
         )
-        if created_jobs:
-            self._append_workflow_item_jobs(finished, [created.id for created in created_jobs])
         return repository.get_by_id(job.id) or finished
 
     def _run_candidate_download_job(self, repository: JobRepository, job: Job) -> Job:
@@ -432,20 +429,6 @@ class DownloadWorker:
             return jobs
         finally:
             service.close()
-
-    def _append_workflow_item_jobs(self, job: Job, job_ids: list[str]) -> None:
-        if not job.workflow_run_id or job.workflow_item_id is None:
-            return
-        repository = WorkflowRunRepository(self.db_path)
-        try:
-            for item in repository.list_items(job.workflow_run_id):
-                if item.id != job.workflow_item_id:
-                    continue
-                next_job_ids = dedupe_preserve_order([*item.job_ids, *job_ids])
-                repository.update_item(replace(item, status="running", job_ids=next_job_ids))
-                break
-        finally:
-            repository.close()
 
     def _continue_advanced_workflow(self, job: Job) -> None:
         if job.workflow_source != "advanced_workflow" or not job.workflow_run_id:

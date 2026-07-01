@@ -3,24 +3,24 @@ from __future__ import annotations
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.domain.entities import (
-    ScheduledTask,
-    ScheduledTaskConfig,
-    ScheduledTaskFilter,
-    ScheduledTaskTarget,
+    WorkflowTriggerConfig,
+    WorkflowTriggerFilter,
+    WorkflowTriggerRuntime,
+    WorkflowTriggerTarget,
 )
 from backend.domain.types import (
     FailureReason,
-    ScheduledTaskAction,
-    ScheduledTaskArtistSelection,
-    ScheduledTaskFilterType,
-    ScheduledTaskStatus,
-    ScheduledTaskTargetType,
+    WorkflowTriggerAction,
+    WorkflowTriggerArtistSelection,
+    WorkflowTriggerFilterType,
+    WorkflowTriggerStatus,
+    WorkflowTriggerTargetType,
 )
 from backend.schemas.failure_reasons import FailureDetail, classify_failure_reason, failure_detail
 
 
-class ScheduledTaskTargetRequest(BaseModel):
-    type: ScheduledTaskTargetType
+class WorkflowTriggerTargetRequest(BaseModel):
+    type: WorkflowTriggerTargetType
     artist_id: str | None = None
     artwork_id: str | None = None
     artist_ids: list[str] = Field(default_factory=list)
@@ -31,22 +31,22 @@ class ScheduledTaskTargetRequest(BaseModel):
     days: int | None = Field(default=None, ge=1)
 
 
-class ScheduledTaskFilterRequest(BaseModel):
-    type: ScheduledTaskFilterType
+class WorkflowTriggerFilterRequest(BaseModel):
+    type: WorkflowTriggerFilterType
     days: int | None = Field(default=None, ge=1)
 
 
-class ScheduledTaskConfigRequest(BaseModel):
-    target: ScheduledTaskTargetRequest
-    filters: list[ScheduledTaskFilterRequest] = Field(default_factory=list)
-    actions: list[ScheduledTaskAction] = Field(default_factory=lambda: ["download_artist"])
+class WorkflowTriggerConfigRequest(BaseModel):
+    target: WorkflowTriggerTargetRequest
+    filters: list[WorkflowTriggerFilterRequest] = Field(default_factory=list)
+    actions: list[WorkflowTriggerAction] = Field(default_factory=lambda: ["download_artist"])
     download_options: dict[str, object] = Field(default_factory=dict)
     max_artists_per_run: int = Field(default=25, ge=1, le=500)
-    artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
+    artist_selection: WorkflowTriggerArtistSelection = "oldest_checked_first"
     skip_unavailable_artists: bool = True
 
     @model_validator(mode="after")
-    def validate_target_actions(self) -> ScheduledTaskConfigRequest:
+    def validate_target_actions(self) -> WorkflowTriggerConfigRequest:
         if self.target.type in {"single_artwork", "artworks"} and any(
             action != "download_artist" for action in self.actions
         ):
@@ -54,14 +54,14 @@ class ScheduledTaskConfigRequest(BaseModel):
         return self
 
 
-class ScheduledTaskCreateRequest(BaseModel):
+class WorkflowTriggerCreateRequest(BaseModel):
     name: str = ""
-    action: ScheduledTaskAction | None = None
+    action: WorkflowTriggerAction | None = None
     target_artist_id: str | None = Field(default=None, min_length=1)
     interval_days: int = Field(ge=1)
     enabled: bool = True
     run_after_startup: bool = True
-    config: ScheduledTaskConfigRequest | None = None
+    config: WorkflowTriggerConfigRequest | None = None
 
     @field_validator("target_artist_id", mode="before")
     @classmethod
@@ -71,14 +71,14 @@ class ScheduledTaskCreateRequest(BaseModel):
         return value
 
 
-class ScheduledTaskUpdateRequest(BaseModel):
+class WorkflowTriggerUpdateRequest(BaseModel):
     name: str | None = None
-    action: ScheduledTaskAction | None = None
-    status: ScheduledTaskStatus | None = None
+    action: WorkflowTriggerAction | None = None
+    status: WorkflowTriggerStatus | None = None
     target_artist_id: str | None = Field(default=None, min_length=1)
     interval_days: int | None = Field(default=None, ge=1)
     run_after_startup: bool | None = None
-    config: ScheduledTaskConfigRequest | None = None
+    config: WorkflowTriggerConfigRequest | None = None
 
     @field_validator("target_artist_id", mode="before")
     @classmethod
@@ -88,7 +88,7 @@ class ScheduledTaskUpdateRequest(BaseModel):
         return value
 
 
-class ScheduledTaskResponse(BaseModel):
+class WorkflowTriggerResponse(BaseModel):
     id: int
     name: str
     action: str
@@ -110,13 +110,13 @@ class ScheduledTaskResponse(BaseModel):
     updated_at: str | None
 
 
-class ScheduledTaskListResponse(BaseModel):
-    items: list[ScheduledTaskResponse]
+class WorkflowTriggerListResponse(BaseModel):
+    items: list[WorkflowTriggerResponse]
     total: int
 
 
-class ScheduledTaskRunResponse(BaseModel):
-    task: ScheduledTaskResponse
+class WorkflowTriggerRunResponse(BaseModel):
+    trigger: WorkflowTriggerResponse
     job_id: str | None
     job_ids: list[str]
     workflow_run_id: str | None
@@ -124,10 +124,10 @@ class ScheduledTaskRunResponse(BaseModel):
     skipped: bool
 
 
-def scheduled_task_response(task: ScheduledTask) -> ScheduledTaskResponse:
+def workflow_trigger_runtime_response(task: WorkflowTriggerRuntime) -> WorkflowTriggerResponse:
     if task.id is None:
-        raise ValueError("scheduled task id is required")
-    return ScheduledTaskResponse(
+        raise ValueError("workflow trigger id is required")
+    return WorkflowTriggerResponse(
         id=task.id,
         name=task.name,
         action=task.action,
@@ -142,15 +142,15 @@ def scheduled_task_response(task: ScheduledTask) -> ScheduledTaskResponse:
         last_error_code=task.last_error_code,
         last_error_message=task.last_error_message,
         failure_reason=classify_failure_reason(task.last_error_code, task.last_error_message),
-        failure=scheduled_task_failure_detail(task),
-        config=scheduled_task_config_to_dict(task.config),
+        failure=workflow_trigger_failure_detail(task),
+        config=workflow_trigger_config_to_dict(task.config),
         last_run_summary=task.last_run_summary,
         created_at=task.created_at,
         updated_at=task.updated_at,
     )
 
 
-def scheduled_task_failure_detail(task: ScheduledTask) -> FailureDetail | None:
+def workflow_trigger_failure_detail(task: WorkflowTriggerRuntime) -> FailureDetail | None:
     if not task.last_error_code and not task.last_error_message:
         return None
     return failure_detail(
@@ -162,11 +162,11 @@ def scheduled_task_failure_detail(task: ScheduledTask) -> FailureDetail | None:
     )
 
 
-def scheduled_task_config_from_request(
-    request: ScheduledTaskConfigRequest,
-) -> ScheduledTaskConfig:
-    return ScheduledTaskConfig(
-        target=ScheduledTaskTarget(
+def workflow_trigger_config_from_request(
+    request: WorkflowTriggerConfigRequest,
+) -> WorkflowTriggerConfig:
+    return WorkflowTriggerConfig(
+        target=WorkflowTriggerTarget(
             type=request.target.type,
             artist_id=request.target.artist_id,
             artwork_id=request.target.artwork_id,
@@ -178,7 +178,7 @@ def scheduled_task_config_from_request(
             days=request.target.days,
         ),
         filters=tuple(
-            ScheduledTaskFilter(type=item.type, days=item.days) for item in request.filters
+            WorkflowTriggerFilter(type=item.type, days=item.days) for item in request.filters
         ),
         actions=tuple(request.actions) or ("download_artist",),
         download_options=clean_download_options(request.download_options),
@@ -188,7 +188,7 @@ def scheduled_task_config_from_request(
     )
 
 
-def scheduled_task_config_to_dict(config: ScheduledTaskConfig | None) -> dict[str, object]:
+def workflow_trigger_config_to_dict(config: WorkflowTriggerConfig | None) -> dict[str, object]:
     if config is None:
         return {}
     return {

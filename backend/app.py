@@ -20,8 +20,8 @@ from backend.api import (
     routes_imports,
     routes_jobs,
     routes_logs,
-    routes_scheduled_tasks,
     routes_settings,
+    routes_workflow_triggers,
     routes_workflows,
 )
 from backend.core.errors import (
@@ -40,7 +40,7 @@ from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
 from backend.services.pixiv_oauth import PixivOAuthFlowStore
 from backend.services.workflow_recovery_service import WorkflowRecoveryService
 from backend.workers.job_queue import JobQueue
-from backend.workers.scheduled_task_runner import ScheduledTaskRunner
+from backend.workers.workflow_trigger_runner import WorkflowTriggerRunner
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         migrate_database(db_path, settings_json_path=settings_json_path)
         queue = app.state.job_queue
-        scheduler = app.state.scheduled_task_runner
+        scheduler = app.state.workflow_trigger_runner
         recovered_workflow_runs = recover_interrupted_workflow_runs(
             db_path,
             settings_json_path=settings_json_path,
@@ -82,7 +82,7 @@ def create_app(
         db_path=db_path,
         settings_json_path=settings_json_path,
     )
-    app.state.scheduled_task_runner = ScheduledTaskRunner(
+    app.state.workflow_trigger_runner = WorkflowTriggerRunner(
         db_path=db_path,
         settings_json_path=settings_json_path,
         queue=app.state.job_queue,
@@ -96,7 +96,7 @@ def create_app(
     app.include_router(routes_imports.router)
     app.include_router(routes_jobs.router)
     app.include_router(routes_workflows.router)
-    app.include_router(routes_scheduled_tasks.router)
+    app.include_router(routes_workflow_triggers.router)
     app.include_router(routes_artists.router)
     app.include_router(routes_artwork_files.router)
     app.include_router(routes_logs.router)

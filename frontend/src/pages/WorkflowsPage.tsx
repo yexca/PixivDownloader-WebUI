@@ -60,8 +60,10 @@ const nodeTypeLabels: Record<string, string> = {
 const sourceLabels: Record<string, string> = {
   advanced: "one-off",
   advanced_manual: "manual",
-  workflow_trigger: "trigger",
-  workflow_batch: "legacy batch",
+  workflow_trigger: "workflow trigger",
+  manual_workflow_trigger: "manual workflow trigger",
+  manual_schedule: "workflow trigger",
+  schedule: "workflow trigger",
   download_api: "download shortcut",
   library_shortcut: "library shortcut",
   artist_api: "library shortcut",
@@ -595,7 +597,7 @@ function RunNodeTimeline({ run }: { run: WorkflowRun }): JSX.Element {
   if (!nodes.length) {
     return (
       <div className="mt-4 rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
-        Legacy run item view · {run.items.length} item(s)
+        No workflow nodes were recorded.
       </div>
     );
   }
@@ -811,8 +813,7 @@ function filterRuns(runs: WorkflowRun[], search: string): WorkflowRun[] {
       run.status,
       run.source,
       runSourceLabel(run),
-      run.node_runs.map((node) => `${node.title} ${node.node_id} ${node.node_type}`).join(" "),
-      run.items.map((item) => `${item.title} ${item.draft_id}`).join(" ")
+      run.node_runs.map((node) => `${node.title} ${node.node_id} ${node.node_type}`).join(" ")
     ]
       .join(" ")
       .toLowerCase()
@@ -838,20 +839,7 @@ function latestDefinitionRun(definition: WorkflowDefinition, runs: WorkflowRun[]
 }
 
 function isShortcutRun(run: WorkflowRun): boolean {
-  if (run.source.includes("shortcut") || run.source.includes("api")) {
-    return true;
-  }
-  return run.items.some((item) => {
-    const request = item.request as { source?: unknown };
-    const requestSource = typeof request.source === "string" ? request.source : "";
-    return (
-      requestSource.includes("shortcut") ||
-      requestSource.includes("api") ||
-      item.draft_id.includes("shortcut") ||
-      item.draft_id.includes("download") ||
-      item.draft_id.includes("library-sync")
-    );
-  });
+  return run.source.includes("shortcut") || run.source.includes("api");
 }
 
 function isShortcutJob(job: Job): boolean {
@@ -872,23 +860,14 @@ function sourceLabel(source: string): string {
 }
 
 function runSourceLabel(run: WorkflowRun): string {
-  const requestSource = run.items
-    .map((item) => {
-      const request = item.request as { source?: unknown };
-      return typeof request.source === "string" ? request.source : "";
-    })
-    .find(Boolean);
-  return sourceLabel(requestSource || run.source);
+  return sourceLabel(run.source);
 }
 
 function runTitle(run: WorkflowRun): string {
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || `${run.node_runs.length} node workflow`;
   }
-  if (run.items.length === 1) {
-    return run.items[0].title;
-  }
-  return `${run.items.length} workflow item run`;
+  return "Workflow run";
 }
 
 function jobTarget(job: Job): string {

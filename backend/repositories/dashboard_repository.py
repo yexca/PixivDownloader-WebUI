@@ -94,7 +94,7 @@ class DashboardRepository:
             schedule_rows = self.conn.execute(
                 """
                 SELECT status, COUNT(*) AS total
-                FROM scheduled_tasks
+                FROM workflow_triggers
                 GROUP BY status
                 """
             ).fetchall()

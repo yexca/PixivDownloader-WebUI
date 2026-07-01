@@ -1,21 +1,5 @@
 import { apiRequest } from "./client";
-import type { FailureDetail, FailureReason } from "./scheduledTasks";
-
-export type WorkflowRunCompatItem = {
-  id: number | null;
-  run_id: string;
-  draft_id: string;
-  title: string;
-  status: "pending" | "completed" | "failed" | "skipped" | "running";
-  job_ids: string[];
-  error_message: string | null;
-  failure_reason: FailureReason;
-  failure: FailureDetail | null;
-  config: Record<string, unknown>;
-  request: Record<string, unknown>;
-  created_at: string | null;
-  finished_at: string | null;
-};
+import type { FailureDetail, FailureReason } from "./workflowTriggers";
 
 export type WorkflowNodeRun = {
   id: number | null;
@@ -50,7 +34,6 @@ export type WorkflowRun = {
   failure: FailureDetail | null;
   created_at: string | null;
   finished_at: string | null;
-  items: WorkflowRunCompatItem[];
   node_runs: WorkflowNodeRun[];
 };
 

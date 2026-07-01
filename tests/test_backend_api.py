@@ -18,13 +18,12 @@ from backend.repositories.tag_repository import LocalTagRepository
 from backend.repositories.workflow_run_repository import (
     WorkflowNodeRun,
     WorkflowRun,
-    WorkflowRunItem,
     WorkflowRunRepository,
 )
 from backend.services.job_service import JobService
-from backend.services.scheduled_task_facade_service import ScheduledTaskFacadeService
 from backend.services.settings_service import AppSettingsService
 from backend.services.workflow_nodes import target as workflow_target_node
+from backend.services.workflow_trigger_facade_service import WorkflowTriggerFacadeService
 
 
 class NoopQueue:
@@ -141,12 +140,28 @@ def test_dashboard_summary_endpoint_returns_runtime_and_library_counts(tmp_path)
         with job_repository.conn:
             job_repository.conn.execute(
                 """
-                INSERT INTO scheduled_tasks(
-                    name, action, status, target_artist_id, interval_days,
-                    run_after_startup, created_at, updated_at
+                INSERT INTO workflow_definitions(id, name, definition_json, created_at, updated_at)
+                VALUES(
+                    'definition-1',
+                    'Daily sync',
+                    '{"nodes":[]}',
+                    '2026-06-29T00:00:00Z',
+                    '2026-06-29T00:00:00Z'
                 )
-                VALUES('Daily sync', 'sync_artist', 'blocked', '123', 1, 1,
-                    '2026-06-29T00:00:00Z', '2026-06-29T00:00:00Z')
+                """
+            )
+            job_repository.conn.execute(
+                """
+                INSERT INTO workflow_triggers(
+                    workflow_definition_id, status, schedule_json, created_at, updated_at
+                )
+                VALUES(
+                    'definition-1',
+                    'blocked',
+                    '{"type":"interval","every":1,"unit":"days"}',
+                    '2026-06-29T00:00:00Z',
+                    '2026-06-29T00:00:00Z'
+                )
                 """
             )
     finally:
@@ -194,7 +209,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
             "file_download_base_delay_seconds": 0.4,
             "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 2,
-            "max_active_scheduled_tasks": 3,
+            "max_active_workflow_triggers": 3,
             "max_active_run_jobs": 4,
             "min_free_space_gb": 10.0,
             "library_stale_check_days": 14,
@@ -207,7 +222,7 @@ def test_settings_get_and_update_masks_refresh_token(tmp_path):
     assert body["download_path"].endswith("new-downloads")
     assert body["download_path_editable"] is True
     assert body["runtime_mode"] == "local"
-    assert body["max_active_scheduled_tasks"] == 3
+    assert body["max_active_workflow_triggers"] == 3
     assert body["max_active_run_jobs"] == 4
     assert body["file_download_base_delay_seconds"] == 0.4
     assert body["file_download_random_delay_seconds"] == 0.5
@@ -513,7 +528,6 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert job.type == "hydrate_legacy_import"
     assert job.total_files == 2
     assert job.workflow_run_id is not None
-    assert job.workflow_item_id is None
     assert job.workflow_node_run_id is not None
     assert job.workflow_source == "advanced_workflow"
     assert "workflow_source" not in job.options
@@ -528,7 +542,6 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert run is not None
     assert run.source == "legacy_import"
     assert run.node_runs[0].job_ids == [job.id]
-    assert run.items == []
 
 
 def test_create_download_job(tmp_path):
@@ -722,12 +735,12 @@ def test_inactive_one_time_job_activates_when_capacity_opens(tmp_path):
         service.close()
 
 
-def test_scheduled_task_create_and_run_queues_job(tmp_path):
+def test_workflow_trigger_create_and_run_queues_job(tmp_path):
     queue = NoopQueue()
     client = make_client(tmp_path, queue=queue)
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Artist updates",
             "action": "download_artist",
@@ -743,16 +756,16 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     assert task["status"] == "active"
     assert queue.wake_count == 1
 
-    run_response = client.post(f"/api/scheduled-tasks/{task['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{task['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
     assert body["created"] is True
     assert body["job_id"]
     assert body["workflow_run_id"]
-    assert body["task"]["last_job_id"] == body["job_id"]
-    assert body["task"]["last_run_summary"]["workflow_run_id"] == body["workflow_run_id"]
-    assert body["task"]["last_run_summary"]["workflow_run_source"] == "manual_schedule"
+    assert body["trigger"]["last_job_id"] == body["job_id"]
+    assert body["trigger"]["last_run_summary"]["workflow_run_id"] == body["workflow_run_id"]
+    assert body["trigger"]["last_run_summary"]["workflow_run_source"] == "manual_workflow_trigger"
     assert queue.wake_count == 2
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -770,7 +783,7 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     finally:
         workflow_repository.close()
     assert run is not None
-    assert run.source == "manual_schedule"
+    assert run.source == "manual_workflow_trigger"
     assert [node.node_id for node in run.node_runs] == [
         "target",
         "sync",
@@ -780,11 +793,11 @@ def test_scheduled_task_create_and_run_queues_job(tmp_path):
     ]
 
 
-def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
+def test_workflow_trigger_creation_keeps_enabled_schedules_active(tmp_path):
     client = make_client(tmp_path)
 
     first_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "First",
             "action": "download_artist",
@@ -795,7 +808,7 @@ def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
         },
     )
     second_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Second",
             "action": "download_artist",
@@ -812,11 +825,11 @@ def test_scheduled_task_creation_keeps_enabled_schedules_active(tmp_path):
     assert second_response.json()["status"] == "active"
 
 
-def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
+def test_inactive_workflow_trigger_activation_is_legacy_noop(tmp_path):
     client = make_client(tmp_path)
 
     first_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "First",
             "action": "download_artist",
@@ -827,7 +840,7 @@ def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
         },
     )
     second_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Second",
             "action": "download_artist",
@@ -837,31 +850,31 @@ def test_inactive_scheduled_task_activation_is_legacy_noop(tmp_path):
             "run_after_startup": True,
         },
     )
-    service = ScheduledTaskFacadeService(
+    service = WorkflowTriggerFacadeService(
         tmp_path / "pixiv.sqlite3",
         settings_json_path=tmp_path / "config" / "settings.json",
     )
     try:
         assert second_response.json()["status"] == "active"
         paused_response = client.put(
-            f"/api/scheduled-tasks/{first_response.json()['id']}",
+            f"/api/workflows/triggers/{first_response.json()['id']}",
             json={"status": "paused"},
         )
         assert paused_response.status_code == 200
 
-        activated = service.activate_inactive_tasks()
+        activated = service.activate_inactive_triggers()
 
         assert activated == []
-        assert service.get_task(second_response.json()["id"]).status == "active"
+        assert service.get_trigger(second_response.json()["id"]).status == "active"
     finally:
         service.close()
 
 
-def test_scheduled_task_can_be_archived(tmp_path):
+def test_workflow_trigger_can_be_archived(tmp_path):
     client = make_client(tmp_path)
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Archive me",
             "action": "download_artist",
@@ -873,13 +886,13 @@ def test_scheduled_task_can_be_archived(tmp_path):
     )
     task_id = create_response.json()["id"]
 
-    archive_response = client.put(f"/api/scheduled-tasks/{task_id}", json={"status": "archived"})
+    archive_response = client.put(f"/api/workflows/triggers/{task_id}", json={"status": "archived"})
 
     assert archive_response.status_code == 200
     assert archive_response.json()["status"] == "archived"
 
 
-def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
+def test_workflow_trigger_builder_runs_all_artists_with_filter(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -901,7 +914,7 @@ def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
         artist_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Stale sync",
             "interval_days": 30,
@@ -917,7 +930,7 @@ def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
     )
 
     assert create_response.status_code == 200
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -940,11 +953,11 @@ def test_scheduled_task_builder_runs_all_artists_with_filter(tmp_path):
     assert [node.node_id for node in run.node_runs] == ["target", "sync"]
 
 
-def test_scheduled_task_builder_targets_single_artwork(tmp_path):
+def test_workflow_trigger_builder_targets_single_artwork(tmp_path):
     client = make_client(tmp_path)
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Artwork workflow",
             "interval_days": 30,
@@ -961,7 +974,7 @@ def test_scheduled_task_builder_targets_single_artwork(tmp_path):
     )
 
     assert create_response.status_code == 200
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -985,11 +998,11 @@ def test_scheduled_task_builder_targets_single_artwork(tmp_path):
     assert run.node_runs[2].input["config"]["mode"] == "all_synced"
 
 
-def test_scheduled_task_builder_accepts_empty_legacy_target_artist_id(tmp_path):
+def test_workflow_trigger_builder_accepts_empty_legacy_target_artist_id(tmp_path):
     client = make_client(tmp_path)
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "All artists",
             "action": "sync_artist",
@@ -1012,7 +1025,7 @@ def test_scheduled_task_builder_accepts_empty_legacy_target_artist_id(tmp_path):
     assert create_response.json()["config"]["target"]["type"] == "all_artists"
 
 
-def test_scheduled_task_builder_uses_oldest_checked_artists_first(tmp_path):
+def test_workflow_trigger_builder_uses_oldest_checked_artists_first(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -1034,7 +1047,7 @@ def test_scheduled_task_builder_uses_oldest_checked_artists_first(tmp_path):
         artist_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Oldest first",
             "interval_days": 30,
@@ -1052,7 +1065,7 @@ def test_scheduled_task_builder_uses_oldest_checked_artists_first(tmp_path):
 
     assert create_response.status_code == 200
     assert create_response.json()["config"]["artist_selection"] == "oldest_checked_first"
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1065,7 +1078,7 @@ def test_scheduled_task_builder_uses_oldest_checked_artists_first(tmp_path):
         repository.close()
 
 
-def test_scheduled_task_builder_uses_newest_checked_artists_first(tmp_path):
+def test_workflow_trigger_builder_uses_newest_checked_artists_first(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -1087,7 +1100,7 @@ def test_scheduled_task_builder_uses_newest_checked_artists_first(tmp_path):
         artist_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Newest first",
             "interval_days": 30,
@@ -1105,7 +1118,7 @@ def test_scheduled_task_builder_uses_newest_checked_artists_first(tmp_path):
 
     assert create_response.status_code == 200
     assert create_response.json()["config"]["artist_selection"] == "newest_checked_first"
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1118,7 +1131,7 @@ def test_scheduled_task_builder_uses_newest_checked_artists_first(tmp_path):
         repository.close()
 
 
-def test_scheduled_task_builder_can_randomly_select_artists(tmp_path, monkeypatch):
+def test_workflow_trigger_builder_can_randomly_select_artists(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -1133,7 +1146,7 @@ def test_scheduled_task_builder_can_randomly_select_artists(tmp_path, monkeypatc
 
     monkeypatch.setattr(workflow_target_node.random, "sample", reverse_id_sample)
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Random",
             "interval_days": 30,
@@ -1151,7 +1164,7 @@ def test_scheduled_task_builder_can_randomly_select_artists(tmp_path, monkeypatc
 
     assert create_response.status_code == 200
     assert create_response.json()["config"]["artist_selection"] == "random"
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1164,7 +1177,7 @@ def test_scheduled_task_builder_can_randomly_select_artists(tmp_path, monkeypatc
         repository.close()
 
 
-def test_scheduled_task_builder_targets_local_tag(tmp_path):
+def test_workflow_trigger_builder_targets_local_tag(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     tag_repository = LocalTagRepository(tmp_path / "pixiv.sqlite3")
@@ -1177,7 +1190,7 @@ def test_scheduled_task_builder_targets_local_tag(tmp_path):
         tag_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Tagged download",
             "interval_days": 7,
@@ -1193,7 +1206,7 @@ def test_scheduled_task_builder_targets_local_tag(tmp_path):
     )
     assert create_response.status_code == 200
 
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1222,7 +1235,7 @@ def test_scheduled_task_builder_targets_local_tag(tmp_path):
     ]
 
 
-def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
+def test_workflow_trigger_builder_targets_multiple_local_tags(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     tag_repository = LocalTagRepository(tmp_path / "pixiv.sqlite3")
@@ -1237,7 +1250,7 @@ def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
         tag_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Multi-tag sync",
             "interval_days": 7,
@@ -1260,7 +1273,7 @@ def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
         "reference",
     ]
 
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1273,7 +1286,7 @@ def test_scheduled_task_builder_targets_multiple_local_tags(tmp_path):
         repository.close()
 
 
-def test_scheduled_task_builder_skips_unavailable_artists_by_default(tmp_path):
+def test_workflow_trigger_builder_skips_unavailable_artists_by_default(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -1283,7 +1296,7 @@ def test_scheduled_task_builder_skips_unavailable_artists_by_default(tmp_path):
         artist_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Skip unavailable",
             "interval_days": 30,
@@ -1300,7 +1313,7 @@ def test_scheduled_task_builder_skips_unavailable_artists_by_default(tmp_path):
     assert create_response.status_code == 200
     assert create_response.json()["config"]["skip_unavailable_artists"] is True
 
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1313,7 +1326,7 @@ def test_scheduled_task_builder_skips_unavailable_artists_by_default(tmp_path):
         repository.close()
 
 
-def test_scheduled_task_builder_can_include_unavailable_artists(tmp_path):
+def test_workflow_trigger_builder_can_include_unavailable_artists(tmp_path):
     client = make_client(tmp_path)
     artist_repository = ArtistRepository(tmp_path / "pixiv.sqlite3")
     try:
@@ -1323,7 +1336,7 @@ def test_scheduled_task_builder_can_include_unavailable_artists(tmp_path):
         artist_repository.close()
 
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Include unavailable",
             "interval_days": 30,
@@ -1340,7 +1353,7 @@ def test_scheduled_task_builder_can_include_unavailable_artists(tmp_path):
     )
     assert create_response.status_code == 200
 
-    run_response = client.post(f"/api/scheduled-tasks/{create_response.json()['id']}/run")
+    run_response = client.post(f"/api/workflows/triggers/{create_response.json()['id']}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
@@ -1356,7 +1369,7 @@ def test_scheduled_task_builder_can_include_unavailable_artists(tmp_path):
 def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
     client = make_client(tmp_path)
     create_response = client.post(
-        "/api/scheduled-tasks",
+        "/api/workflows/triggers",
         json={
             "name": "Artist updates",
             "action": "download_artist",
@@ -1373,19 +1386,19 @@ def test_scheduled_download_blocks_on_low_disk_space(tmp_path, monkeypatch):
         lambda _path: SimpleNamespace(free=1024, total=2048, used=1024),
     )
 
-    run_response = client.post(f"/api/scheduled-tasks/{task_id}/run")
+    run_response = client.post(f"/api/workflows/triggers/{task_id}/run")
 
     assert run_response.status_code == 200
     body = run_response.json()
     assert body["created"] is False
-    assert body["task"]["status"] == "blocked"
-    assert body["task"]["last_error_code"] == "insufficient_disk_space"
-    assert body["task"]["failure_reason"] == "disk"
-    assert body["task"]["failure"] == {
+    assert body["trigger"]["status"] == "blocked"
+    assert body["trigger"]["last_error_code"] == "insufficient_disk_space"
+    assert body["trigger"]["failure_reason"] == "disk"
+    assert body["trigger"]["failure"] == {
         "code": "insufficient_disk_space",
         "reason": "disk",
         "retryable": False,
-        "message": body["task"]["last_error_message"],
+        "message": body["trigger"]["last_error_message"],
     }
 
 
@@ -1437,19 +1450,6 @@ def test_workflow_run_reads_advanced_shortcut_node_totals(tmp_path):
             created_at="2026-07-01T00:00:00Z",
         )
         repository.create_run(run)
-        repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id="advanced:advanced-shortcut-run",
-                title="Sync artist",
-                status="completed",
-                config={"nodes": []},
-                request={"source": "library_shortcut"},
-                created_at=run.created_at,
-                finished_at="2026-07-01T00:00:01Z",
-            )
-        )
         for position, node_id in enumerate(("target", "sync")):
             repository.create_node_run(
                 WorkflowNodeRun(
@@ -1501,18 +1501,6 @@ def test_workflow_run_node_failure_uses_structured_job_error(tmp_path):
     )
     try:
         repository.create_run(run)
-        repository.create_item(
-            WorkflowRunItem(
-                id=None,
-                run_id=run.id,
-                draft_id="advanced:failed",
-                title="Failed workflow",
-                status="running",
-                config={"nodes": []},
-                request={"source": "advanced_manual"},
-                created_at=run.created_at,
-            )
-        )
         repository.create_node_run(
             WorkflowNodeRun(
                 id=None,
@@ -1724,7 +1712,6 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
                 type="hydrate_legacy_import",
                 status="failed",
                 workflow_run_id="run-1",
-                workflow_item_id=1,
                 workflow_source="legacy_import",
                 options={
                     "source": "legacy_database",
@@ -1732,7 +1719,6 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
                     "legacy_latest_download_id_by_artist": {"111": "1000", "222": "2000"},
                     "activation_scope": "one_time",
                     "workflow_run_id": "run-1",
-                    "workflow_item_id": 1,
                     "workflow_source": "legacy_import",
                 },
             )
@@ -1764,7 +1750,6 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
     assert retry.type == "hydrate_legacy_import"
     assert retry.workflow_run_id is not None
     assert retry.workflow_run_id != "run-1"
-    assert retry.workflow_item_id is None
     assert retry.workflow_node_run_id is not None
     assert retry.workflow_source == "advanced_workflow"
     assert retry.options["artist_ids"] == ["222"]
@@ -1777,7 +1762,6 @@ def test_retry_legacy_hydration_job_queues_failed_artists_only(tmp_path):
         workflow_repository.close()
     assert run is not None
     assert run.source == "job_retry"
-    assert run.items == []
     assert len(run.node_runs) == 1
     assert run.node_runs[0].node_type == "job_action"
     assert run.node_runs[0].job_ids == [retry.id]
@@ -1816,7 +1800,6 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
     assert rerun.options["max_artworks"] == 5
     assert rerun.options["source_job_id"] == "job-1"
     assert rerun.workflow_run_id is not None
-    assert rerun.workflow_item_id is None
     assert rerun.workflow_node_run_id is not None
     assert rerun.workflow_source == "advanced_workflow"
     assert "workflow_source" not in rerun.options
@@ -1827,7 +1810,6 @@ def test_rerun_job_queues_copy_with_original_options(tmp_path):
         workflow_repository.close()
     assert run is not None
     assert run.source == "job_rerun"
-    assert run.items == []
     assert len(run.node_runs) == 1
     assert run.node_runs[0].node_type == "job_action"
     assert run.node_runs[0].job_ids == [rerun.id]
@@ -1943,7 +1925,7 @@ def make_config(tmp_path):
             "file_download_base_delay_seconds": 1.0,
             "file_download_random_delay_seconds": 0.5,
             "max_concurrent_downloads": 1,
-            "max_active_scheduled_tasks": 1,
+            "max_active_workflow_triggers": 1,
             "max_active_run_jobs": 1,
             "min_free_space_gb": 10.0,
             "existing_file_behavior": "skip",

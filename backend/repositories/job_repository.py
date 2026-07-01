@@ -28,7 +28,6 @@ class JobRepository:
                         input_artwork_id,
                         options_json,
                         workflow_run_id,
-                        workflow_item_id,
                         workflow_node_run_id,
                         workflow_source,
                         artist_id,
@@ -42,7 +41,7 @@ class JobRepository:
                         started_at,
                         finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job.id,
@@ -52,7 +51,6 @@ class JobRepository:
                         job.input_artwork_id,
                         json.dumps(job.options) if job.options else None,
                         job.workflow_run_id,
-                        job.workflow_item_id,
                         job.workflow_node_run_id,
                         job.workflow_source,
                         job.artist_id,
@@ -92,7 +90,6 @@ class JobRepository:
                         cancel_requested = ?,
                         error_message = ?,
                         workflow_run_id = ?,
-                        workflow_item_id = ?,
                         workflow_node_run_id = ?,
                         workflow_source = ?,
                         started_at = ?,
@@ -109,7 +106,6 @@ class JobRepository:
                         int(job.cancel_requested),
                         job.error_message,
                         job.workflow_run_id,
-                        job.workflow_item_id,
                         job.workflow_node_run_id,
                         job.workflow_source,
                         job.started_at,
@@ -135,7 +131,6 @@ class JobRepository:
         job_id: str,
         *,
         workflow_run_id: str,
-        workflow_item_id: int,
         workflow_source: str,
         workflow_node_run_id: int | None = None,
     ) -> None:
@@ -145,14 +140,12 @@ class JobRepository:
                     """
                     UPDATE jobs
                     SET workflow_run_id = ?,
-                        workflow_item_id = ?,
                         workflow_node_run_id = ?,
                         workflow_source = ?
                     WHERE id = ?
                     """,
                     (
                         workflow_run_id,
-                        workflow_item_id,
                         workflow_node_run_id,
                         workflow_source,
                         job_id,
@@ -269,7 +262,6 @@ class JobRepository:
                 SELECT * FROM jobs
                 WHERE status IN ('inactive', 'queued', 'running')
                   AND workflow_run_id IS NULL
-                  AND workflow_item_id IS NULL
                 ORDER BY created_at
                 """
             ).fetchall()
@@ -471,7 +463,6 @@ def job_from_row(row: sqlite3.Row) -> Job:
         input_artwork_id=str(row["input_artwork_id"]) if row["input_artwork_id"] else None,
         options=options,
         workflow_run_id=optional_row_str(row, "workflow_run_id"),
-        workflow_item_id=optional_row_int(row, "workflow_item_id"),
         workflow_node_run_id=optional_row_int(row, "workflow_node_run_id"),
         workflow_source=optional_row_str(row, "workflow_source"),
         artist_id=str(row["artist_id"]) if row["artist_id"] else None,

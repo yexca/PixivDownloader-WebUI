@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from backend.domain.entities import ScheduledTask, ScheduledTaskConfig, ScheduledTaskTarget
-from backend.domain.types import ScheduledTaskAction
+from backend.domain.entities import (
+    WorkflowTriggerConfig,
+    WorkflowTriggerRuntime,
+    WorkflowTriggerTarget,
+)
+from backend.domain.types import WorkflowTriggerAction
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 
 
-def scheduled_task_definition(
-    task: ScheduledTask,
-    config: ScheduledTaskConfig,
+def workflow_trigger_definition(
+    task: WorkflowTriggerRuntime,
+    config: WorkflowTriggerConfig,
     *,
     artist_ids: list[str] | None = None,
     artwork_ids: list[str] | None = None,
@@ -18,7 +22,7 @@ def scheduled_task_definition(
             "id": "target",
             "type": "artist_target",
             "title": "Target artists",
-            "config": scheduled_target_config(
+                "config": workflow_trigger_target_config(
                 config,
                 artist_ids=artist_ids,
                 artwork_ids=artwork_ids,
@@ -45,7 +49,7 @@ def scheduled_task_definition(
         return AdvancedWorkflowDefinitionRequest.model_validate(
             {
                 "name": task.name
-                or default_task_name("sync_artist", task.target_artist_id, config),
+                or default_workflow_trigger_name("sync_artist", task.target_artist_id, config),
                 "nodes": nodes,
             }
         )
@@ -53,16 +57,16 @@ def scheduled_task_definition(
     download_options = dict(config.download_options)
     if "download_artist" in actions:
         nodes.extend(
-            scheduled_download_nodes(
+            workflow_trigger_download_nodes(
                 download_options,
                 suffix="",
-                collect_mode=scheduled_download_collect_mode(download_options),
+                collect_mode=workflow_trigger_download_collect_mode(download_options),
                 title="Download files",
             )
         )
     if "retry_failed_artist" in actions:
         nodes.extend(
-            scheduled_download_nodes(
+            workflow_trigger_download_nodes(
                 download_options,
                 suffix="_retry",
                 collect_mode="failed_files",
@@ -71,14 +75,15 @@ def scheduled_task_definition(
         )
     return AdvancedWorkflowDefinitionRequest.model_validate(
         {
-            "name": task.name or default_task_name(actions[0], task.target_artist_id, config),
+            "name": task.name
+            or default_workflow_trigger_name(actions[0], task.target_artist_id, config),
             "nodes": nodes,
         }
     )
 
 
-def scheduled_target_config(
-    config: ScheduledTaskConfig,
+def workflow_trigger_target_config(
+    config: WorkflowTriggerConfig,
     *,
     artist_ids: list[str] | None = None,
     artwork_ids: list[str] | None = None,
@@ -103,18 +108,18 @@ def scheduled_target_config(
     }
 
 
-def legacy_config(task: ScheduledTask) -> ScheduledTaskConfig:
-    return ScheduledTaskConfig(
-        target=ScheduledTaskTarget(type="single_artist", artist_id=task.target_artist_id),
+def legacy_config(task: WorkflowTriggerRuntime) -> WorkflowTriggerConfig:
+    return WorkflowTriggerConfig(
+        target=WorkflowTriggerTarget(type="single_artist", artist_id=task.target_artist_id),
         actions=(task.action,),
     )
 
 
-def scheduled_task_downloads(config: ScheduledTaskConfig) -> bool:
+def workflow_trigger_downloads(config: WorkflowTriggerConfig) -> bool:
     return any(action in {"download_artist", "retry_failed_artist"} for action in config.actions)
 
 
-def scheduled_download_collect_mode(download_options: dict[str, object]) -> str:
+def workflow_trigger_download_collect_mode(download_options: dict[str, object]) -> str:
     if download_options.get("full_download"):
         return "all_synced"
     if download_options.get("pending_only"):
@@ -122,7 +127,7 @@ def scheduled_download_collect_mode(download_options: dict[str, object]) -> str:
     return "new_since_last_download"
 
 
-def scheduled_download_nodes(
+def workflow_trigger_download_nodes(
     download_options: dict[str, object],
     *,
     suffix: str,
@@ -162,10 +167,10 @@ def scheduled_download_nodes(
     ]
 
 
-def default_task_name(
-    action: ScheduledTaskAction,
+def default_workflow_trigger_name(
+    action: WorkflowTriggerAction,
     artist_id: str,
-    config: ScheduledTaskConfig | None = None,
+    config: WorkflowTriggerConfig | None = None,
 ) -> str:
     labels = {
         "sync_artist": "Sync artist",

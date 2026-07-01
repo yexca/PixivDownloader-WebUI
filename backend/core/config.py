@@ -22,7 +22,7 @@ class Settings:
     file_download_base_delay_seconds: float = 1.0
     file_download_random_delay_seconds: float = 0.5
     max_concurrent_downloads: int = 1
-    max_active_scheduled_tasks: int = 1
+    max_active_workflow_triggers: int = 1
     max_active_run_jobs: int = 1
     min_free_space_gb: float = 10.0
     existing_file_behavior: ExistingFileBehavior = "skip"
@@ -38,9 +38,14 @@ class Settings:
         if max_concurrent_downloads < 1:
             raise ConfigError("max_concurrent_downloads must be at least 1")
 
-        max_active_scheduled_tasks = int(data.get("max_active_scheduled_tasks", 1))
-        if max_active_scheduled_tasks < 1:
-            raise ConfigError("max_active_scheduled_tasks must be at least 1")
+        max_active_workflow_triggers = int(
+            data.get(
+                "max_active_workflow_triggers",
+                data.get("max_active_scheduled_tasks", 1),
+            )
+        )
+        if max_active_workflow_triggers < 1:
+            raise ConfigError("max_active_workflow_triggers must be at least 1")
 
         max_active_run_jobs = int(data.get("max_active_run_jobs", 1))
         if max_active_run_jobs < 1:
@@ -83,7 +88,7 @@ class Settings:
             file_download_base_delay_seconds=file_download_base_delay_seconds,
             file_download_random_delay_seconds=file_download_random_delay_seconds,
             max_concurrent_downloads=max_concurrent_downloads,
-            max_active_scheduled_tasks=max_active_scheduled_tasks,
+            max_active_workflow_triggers=max_active_workflow_triggers,
             max_active_run_jobs=max_active_run_jobs,
             min_free_space_gb=min_free_space_gb,
             existing_file_behavior=existing_file_behavior,
@@ -99,7 +104,7 @@ class Settings:
             "file_download_base_delay_seconds": self.file_download_base_delay_seconds,
             "file_download_random_delay_seconds": self.file_download_random_delay_seconds,
             "max_concurrent_downloads": self.max_concurrent_downloads,
-            "max_active_scheduled_tasks": self.max_active_scheduled_tasks,
+            "max_active_workflow_triggers": self.max_active_workflow_triggers,
             "max_active_run_jobs": self.max_active_run_jobs,
             "min_free_space_gb": self.min_free_space_gb,
             "existing_file_behavior": self.existing_file_behavior,
@@ -176,7 +181,7 @@ class SettingsService:
             "file_download_base_delay_seconds": settings.file_download_base_delay_seconds,
             "file_download_random_delay_seconds": settings.file_download_random_delay_seconds,
             "max_concurrent_downloads": settings.max_concurrent_downloads,
-            "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
+            "max_active_workflow_triggers": settings.max_active_workflow_triggers,
             "max_active_run_jobs": settings.max_active_run_jobs,
             "min_free_space_gb": settings.min_free_space_gb,
             "existing_file_behavior": settings.existing_file_behavior,

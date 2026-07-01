@@ -4,8 +4,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from backend.core.errors import InsufficientDiskSpaceError
-from backend.domain.entities import ScheduledTask, ScheduledTaskConfig
-from backend.domain.types import ScheduledTaskAction, ScheduledTaskStatus
+from backend.domain.entities import Job, WorkflowTriggerConfig, WorkflowTriggerRuntime
+from backend.domain.types import WorkflowTriggerAction, WorkflowTriggerStatus
 from backend.repositories._time import utc_now
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_definition_repository import (
@@ -15,18 +15,17 @@ from backend.repositories.workflow_definition_repository import (
 )
 from backend.repositories.workflow_run_repository import WorkflowRun
 from backend.schemas.failure_reasons import failure_detail_from_exception
-from backend.services.scheduled_task_service import ScheduledTaskRunResult, workflow_run_job_ids
-from backend.services.scheduled_workflow_compiler import (
-    legacy_config,
-    scheduled_task_definition,
-    scheduled_task_downloads,
-)
 from backend.services.settings_service import AppSettingsService
 from backend.services.storage_service import check_free_space
 from backend.services.workflow_schedule_service import WorkflowScheduleService, next_run_time
+from backend.services.workflow_trigger_compiler import (
+    legacy_config,
+    workflow_trigger_definition,
+    workflow_trigger_downloads,
+)
 
 
-class ScheduledTaskFacadeService:
+class WorkflowTriggerFacadeService:
     def __init__(
         self,
         db_path: Path | str | None = None,
@@ -37,22 +36,22 @@ class ScheduledTaskFacadeService:
         self.settings_json_path = settings_json_path
         self.repository = WorkflowDefinitionRepository(db_path)
 
-    def create_task(
+    def create_trigger(
         self,
         *,
         name: str,
-        action: ScheduledTaskAction,
+        action: WorkflowTriggerAction,
         target_artist_id: str,
         interval_days: int,
         enabled: bool = True,
         run_after_startup: bool = True,
-        config: ScheduledTaskConfig | None = None,
-    ) -> ScheduledTask:
+        config: WorkflowTriggerConfig | None = None,
+    ) -> WorkflowTriggerRuntime:
         if interval_days < 1:
             raise ValueError("interval_days must be at least 1")
-        task = ScheduledTask(
+        task = WorkflowTriggerRuntime(
             id=None,
-            name=name.strip() or default_compat_task_name(action, target_artist_id),
+            name=name.strip() or default_trigger_name(action, target_artist_id),
             action=action,
             status="active" if enabled else "paused",
             target_artist_id=target_artist_id,
@@ -61,7 +60,7 @@ class ScheduledTaskFacadeService:
             config=config,
         )
         definition = self._upsert_definition(task)
-        schedule = schedule_from_task(task)
+        schedule = schedule_from_trigger(task)
         trigger = self.repository.create_trigger(
             WorkflowTrigger(
                 id=None,
@@ -76,43 +75,43 @@ class ScheduledTaskFacadeService:
                 else None,
             )
         )
-        return task_from_definition(definition, trigger)
+        return trigger_from_definition(definition, trigger)
 
-    def list_tasks(self) -> list[ScheduledTask]:
-        tasks: list[ScheduledTask] = []
+    def list_triggers(self) -> list[WorkflowTriggerRuntime]:
+        triggers: list[WorkflowTriggerRuntime] = []
         for item in self.repository.list_definitions():
             for trigger in item.triggers:
                 if is_compat_schedule(item.definition, trigger):
-                    tasks.append(task_from_definition(item.definition, trigger))
-        return tasks
+                    triggers.append(trigger_from_definition(item.definition, trigger))
+        return triggers
 
-    def get_task(self, task_id: int) -> ScheduledTask | None:
-        loaded = self._load_task(task_id)
+    def get_trigger(self, trigger_id: int) -> WorkflowTriggerRuntime | None:
+        loaded = self._load_trigger(trigger_id)
         if loaded is None:
             return None
         definition, trigger = loaded
-        return task_from_definition(definition, trigger)
+        return trigger_from_definition(definition, trigger)
 
-    def activate_inactive_tasks(self) -> list[ScheduledTask]:
+    def activate_inactive_triggers(self) -> list[WorkflowTriggerRuntime]:
         return []
 
-    def update_task(
+    def update_trigger(
         self,
-        task_id: int,
+        trigger_id: int,
         *,
         name: str | None = None,
-        action: ScheduledTaskAction | None = None,
-        status: ScheduledTaskStatus | None = None,
+        action: WorkflowTriggerAction | None = None,
+        status: WorkflowTriggerStatus | None = None,
         target_artist_id: str | None = None,
         interval_days: int | None = None,
         run_after_startup: bool | None = None,
-        config: ScheduledTaskConfig | None = None,
-    ) -> ScheduledTask | None:
-        loaded = self._load_task(task_id)
+        config: WorkflowTriggerConfig | None = None,
+    ) -> WorkflowTriggerRuntime | None:
+        loaded = self._load_trigger(trigger_id)
         if loaded is None:
             return None
         definition, trigger = loaded
-        current = task_from_definition(definition, trigger)
+        current = trigger_from_definition(definition, trigger)
         if interval_days is not None and interval_days < 1:
             raise ValueError("interval_days must be at least 1")
         updated = replace(
@@ -130,7 +129,7 @@ class ScheduledTaskFacadeService:
             config=config or current.config,
         )
         saved = self._upsert_definition(updated, definition_id=definition.id)
-        schedule = schedule_from_task(updated)
+        schedule = schedule_from_trigger(updated)
         next_run_at = trigger.next_run_at
         if updated.status == "active" and current.status != "active":
             next_run_at = next_run_time(
@@ -151,21 +150,21 @@ class ScheduledTaskFacadeService:
                 ),
             )
         )
-        reloaded = self._load_task(task_id)
+        reloaded = self._load_trigger(trigger_id)
         if reloaded is None:
             return None
-        return task_from_definition(*reloaded)
+        return trigger_from_definition(*reloaded)
 
-    def delete_task(self, task_id: int) -> bool:
-        return self.repository.delete_trigger(task_id)
+    def delete_trigger(self, trigger_id: int) -> bool:
+        return self.repository.delete_trigger(trigger_id)
 
-    def run_task(self, task_id: int, *, manual: bool) -> ScheduledTaskRunResult:
-        loaded = self._load_task(task_id)
+    def run_trigger(self, trigger_id: int, *, manual: bool) -> WorkflowTriggerRunResult:
+        loaded = self._load_trigger(trigger_id)
         if loaded is None:
-            raise ValueError(f"scheduled task {task_id} was not found")
+            raise ValueError(f"workflow trigger {trigger_id} was not found")
         definition, trigger = loaded
-        task = task_from_definition(definition, trigger)
-        if task.config is not None and scheduled_task_downloads(task.config):
+        task = trigger_from_definition(definition, trigger)
+        if task.config is not None and workflow_trigger_downloads(task.config):
             try:
                 self._ensure_download_space()
             except InsufficientDiskSpaceError as exc:
@@ -179,10 +178,10 @@ class ScheduledTaskFacadeService:
                     last_error_message=str(exc),
                 )
                 self.repository.update_trigger(blocked)
-                return ScheduledTaskRunResult(
-                    task=task_from_definition(
+                return WorkflowTriggerRunResult(
+                    trigger=trigger_from_definition(
                         definition,
-                        self.repository.get_trigger(task_id) or blocked,
+                        self.repository.get_trigger(trigger_id) or blocked,
                     ),
                     jobs=[],
                     workflow_run_id=None,
@@ -196,7 +195,7 @@ class ScheduledTaskFacadeService:
         try:
             run = schedule_service.run_definition(
                 definition.id,
-                source="manual_schedule" if manual else "workflow_trigger",
+                source="manual_workflow_trigger" if manual else "workflow_trigger",
                 trigger_id=trigger.id,
             )
         finally:
@@ -211,9 +210,9 @@ class ScheduledTaskFacadeService:
             last_error_message=None,
         )
         self.repository.update_trigger(updated_trigger)
-        refreshed_trigger = self.repository.get_trigger(task_id) or trigger
+        refreshed_trigger = self.repository.get_trigger(trigger_id) or trigger
         refreshed_task = replace(
-            task_from_definition(definition, refreshed_trigger),
+            trigger_from_definition(definition, refreshed_trigger),
             last_job_id=jobs[-1].id if jobs else None,
             last_run_summary={
                 "created_jobs": len(jobs),
@@ -223,8 +222,8 @@ class ScheduledTaskFacadeService:
                 "workflow_run_source": run.source,
             },
         )
-        return ScheduledTaskRunResult(
-            task=refreshed_task,
+        return WorkflowTriggerRunResult(
+            trigger=refreshed_task,
             jobs=jobs,
             workflow_run_id=run.id,
             created=bool(jobs),
@@ -236,12 +235,12 @@ class ScheduledTaskFacadeService:
 
     def _upsert_definition(
         self,
-        task: ScheduledTask,
+        task: WorkflowTriggerRuntime,
         *,
         definition_id: str | None = None,
     ) -> WorkflowDefinition:
         config = task.config or legacy_config(task)
-        definition = scheduled_task_compat_definition(
+        definition = workflow_trigger_compat_definition(
             task,
             config,
             db_path=self.db_path,
@@ -256,8 +255,8 @@ class ScheduledTaskFacadeService:
         finally:
             service.close()
 
-    def _load_task(self, task_id: int) -> tuple[WorkflowDefinition, WorkflowTrigger] | None:
-        trigger = self.repository.get_trigger(task_id)
+    def _load_trigger(self, trigger_id: int) -> tuple[WorkflowDefinition, WorkflowTrigger] | None:
+        trigger = self.repository.get_trigger(trigger_id)
         if trigger is None:
             return None
         definition = self.repository.get_definition(trigger.workflow_definition_id)
@@ -287,24 +286,57 @@ class ScheduledTaskFacadeService:
         check_free_space(settings.download_path, settings.min_free_space_gb)
 
 
-def scheduled_task_compat_definition(
-    task: ScheduledTask,
-    config: ScheduledTaskConfig,
+class WorkflowTriggerRunResult:
+    def __init__(
+        self,
+        *,
+        trigger: WorkflowTriggerRuntime,
+        created: bool,
+        skipped: bool,
+        jobs: list[Job] | None = None,
+        workflow_run_id: str | None = None,
+    ) -> None:
+        self.trigger = trigger
+        self.jobs = jobs or []
+        self.job = self.jobs[-1] if self.jobs else None
+        self.workflow_run_id = workflow_run_id
+        self.created = created
+        self.skipped = skipped
+
+
+def workflow_run_job_ids(run: WorkflowRun) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for node in run.node_runs:
+        for job_id in node.job_ids:
+            if job_id in seen:
+                continue
+            result.append(job_id)
+            seen.add(job_id)
+    return result
+
+
+def workflow_trigger_compat_definition(
+    task: WorkflowTriggerRuntime,
+    config: WorkflowTriggerConfig,
     *,
     db_path: Path | str | None,
     settings_json_path: Path | str | None,
 ):
     _ = db_path, settings_json_path
-    definition = scheduled_task_definition(task, config)
+    definition = workflow_trigger_definition(task, config)
     dumped = definition.model_dump(mode="json")
     dumped["metadata"] = {
         **dict(dumped.get("metadata") if isinstance(dumped.get("metadata"), dict) else {}),
-        "compat_scheduled_task": compat_metadata(task, config),
+        "compat_workflow_trigger": compat_metadata(task, config),
     }
     return definition.model_validate(dumped)
 
 
-def compat_metadata(task: ScheduledTask, config: ScheduledTaskConfig) -> dict[str, object]:
+def compat_metadata(
+    task: WorkflowTriggerRuntime,
+    config: WorkflowTriggerConfig,
+) -> dict[str, object]:
     return {
         "action": task.action,
         "target_artist_id": task.target_artist_id,
@@ -316,15 +348,22 @@ def compat_metadata(task: ScheduledTask, config: ScheduledTaskConfig) -> dict[st
 
 def is_compat_schedule(definition: WorkflowDefinition, trigger: WorkflowTrigger) -> bool:
     metadata = definition.definition.get("metadata")
-    return bool(trigger.schedule.get("compat_scheduled_task")) or (
-        isinstance(metadata, dict) and bool(metadata.get("compat_scheduled_task"))
+    return bool(
+        trigger.schedule.get("compat_workflow_trigger")
+        or trigger.schedule.get("compat_scheduled_task")
+    ) or (
+        isinstance(metadata, dict)
+        and bool(
+            metadata.get("compat_workflow_trigger")
+            or metadata.get("compat_scheduled_task")
+        )
     )
 
 
-def task_from_definition(
+def trigger_from_definition(
     definition: WorkflowDefinition,
     trigger: WorkflowTrigger,
-) -> ScheduledTask:
+) -> WorkflowTriggerRuntime:
     meta = compat_meta(definition, trigger)
     config = config_from_meta(meta)
     action = str(meta.get("action") or (config.actions[0] if config.actions else "download_artist"))
@@ -333,7 +372,7 @@ def task_from_definition(
     status = trigger.status
     if status not in {"active", "inactive", "paused", "blocked", "archived"}:
         status = "paused"
-    return ScheduledTask(
+    return WorkflowTriggerRuntime(
         id=trigger.id,
         name=definition.name,
         action=action,
@@ -356,20 +395,26 @@ def task_from_definition(
 
 
 def compat_meta(definition: WorkflowDefinition, trigger: WorkflowTrigger) -> dict[str, object]:
-    meta = trigger.schedule.get("compat_scheduled_task")
+    meta = trigger.schedule.get("compat_workflow_trigger") or trigger.schedule.get(
+        "compat_scheduled_task"
+    )
     if isinstance(meta, dict):
         return meta
     metadata = definition.definition.get("metadata")
-    meta = metadata.get("compat_scheduled_task") if isinstance(metadata, dict) else None
+    meta = (
+        metadata.get("compat_workflow_trigger") or metadata.get("compat_scheduled_task")
+        if isinstance(metadata, dict)
+        else None
+    )
     return meta if isinstance(meta, dict) else {}
 
 
-def schedule_from_task(task: ScheduledTask) -> dict[str, object]:
+def schedule_from_trigger(task: WorkflowTriggerRuntime) -> dict[str, object]:
     return {
         "type": "interval",
         "every": task.interval_days,
         "unit": "days",
-        "compat_scheduled_task": {
+        "compat_workflow_trigger": {
             "action": task.action,
             "target_artist_id": task.target_artist_id,
             "interval_days": task.interval_days,
@@ -392,22 +437,22 @@ def utc_epoch() -> str:
     return "1970-01-01T00:00:00Z"
 
 
-def config_to_dict(config: ScheduledTaskConfig | None) -> dict[str, object]:
-    from backend.schemas.scheduled_tasks import scheduled_task_config_to_dict
+def config_to_dict(config: WorkflowTriggerConfig | None) -> dict[str, object]:
+    from backend.schemas.workflow_triggers import workflow_trigger_config_to_dict
 
-    return scheduled_task_config_to_dict(config)
+    return workflow_trigger_config_to_dict(config)
 
 
-def config_from_meta(meta: dict[str, object]) -> ScheduledTaskConfig:
-    from backend.schemas.scheduled_tasks import (
-        ScheduledTaskConfigRequest,
-        scheduled_task_config_from_request,
+def config_from_meta(meta: dict[str, object]) -> WorkflowTriggerConfig:
+    from backend.schemas.workflow_triggers import (
+        WorkflowTriggerConfigRequest,
+        workflow_trigger_config_from_request,
     )
 
     raw = meta.get("config")
     if not isinstance(raw, dict):
         return legacy_config(
-            ScheduledTask(
+            WorkflowTriggerRuntime(
                 id=None,
                 name="",
                 action="download_artist",
@@ -416,10 +461,10 @@ def config_from_meta(meta: dict[str, object]) -> ScheduledTaskConfig:
                 interval_days=interval_days_from_schedule({}),
             )
         )
-    return scheduled_task_config_from_request(ScheduledTaskConfigRequest.model_validate(raw))
+    return workflow_trigger_config_from_request(WorkflowTriggerConfigRequest.model_validate(raw))
 
 
-def default_compat_task_name(action: ScheduledTaskAction, target_artist_id: str) -> str:
+def default_trigger_name(action: WorkflowTriggerAction, target_artist_id: str) -> str:
     labels = {
         "sync_artist": "Sync artist",
         "download_artist": "Download artist",

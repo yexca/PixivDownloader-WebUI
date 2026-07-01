@@ -1,6 +1,6 @@
 import type { Job } from "@/api/jobs";
-import type { ScheduledTask } from "@/api/scheduledTasks";
-import type { WorkflowRun, WorkflowRunCompatItem } from "@/api/workflows";
+import type { WorkflowTriggerRuntime } from "@/api/workflowTriggers";
+import type { WorkflowRun } from "@/api/workflows";
 
 export type WorkflowRunGroups = {
   active: WorkflowRun[];
@@ -8,11 +8,11 @@ export type WorkflowRunGroups = {
   completed: WorkflowRun[];
 };
 
-export type WorkflowScheduleGroups = {
-  active: ScheduledTask[];
-  blocked: ScheduledTask[];
-  inactive: ScheduledTask[];
-  archived: ScheduledTask[];
+export type WorkflowTriggerGroups = {
+  active: WorkflowTriggerRuntime[];
+  blocked: WorkflowTriggerRuntime[];
+  inactive: WorkflowTriggerRuntime[];
+  archived: WorkflowTriggerRuntime[];
 };
 
 const actionLabels: Record<string, string> = {
@@ -43,7 +43,7 @@ export function emptyRunGroups(): WorkflowRunGroups {
   return { active: [], failed: [], completed: [] };
 }
 
-export function workflowScheduleGroups(tasks: ScheduledTask[]): WorkflowScheduleGroups {
+export function workflowTriggerGroups(tasks: WorkflowTriggerRuntime[]): WorkflowTriggerGroups {
   return {
     active: tasks.filter((task) => task.status === "active"),
     blocked: tasks.filter((task) => task.status === "blocked"),
@@ -78,21 +78,11 @@ export function filterWorkflowRuns(runs: WorkflowRun[], search: string): Workflo
           node.job_ids.join(" ")
         ])
         .join(" "),
-      run.items
-        .flatMap((item) => [
-          item.title,
-          item.draft_id,
-          item.status,
-          item.failure_reason,
-          item.error_message,
-          item.job_ids.join(" ")
-        ])
-        .join(" ")
     ]).includes(query)
   );
 }
 
-export function filterSchedules(tasks: ScheduledTask[], search: string): ScheduledTask[] {
+export function filterWorkflowTriggers(tasks: WorkflowTriggerRuntime[], search: string): WorkflowTriggerRuntime[] {
   const query = normalizeSearch(search);
   if (!query) {
     return tasks;
@@ -106,7 +96,7 @@ export function filterSchedules(tasks: ScheduledTask[], search: string): Schedul
       task.failure_reason,
       task.last_error_code,
       task.last_error_message,
-      scheduleSummary(task)
+      workflowTriggerSummary(task)
     ]).includes(query)
   );
 }
@@ -134,9 +124,7 @@ export function runJobIds(run: WorkflowRun | null): string[] {
   if (!run) {
     return [];
   }
-  const ids = run.node_runs.length
-    ? run.node_runs.flatMap((node) => node.job_ids)
-    : run.items.flatMap((item) => item.job_ids);
+  const ids = run.node_runs.flatMap((node) => node.job_ids);
   return Array.from(new Set(ids));
 }
 
@@ -144,11 +132,11 @@ export function groupRunsByFailureReason(runs: WorkflowRun[]): Array<{ reason: s
   return groupedByReason(runs, (run) => run.failure_reason || "unknown");
 }
 
-export function groupSchedulesByFailureReason(tasks: ScheduledTask[]): Array<{ reason: string; items: ScheduledTask[] }> {
+export function groupWorkflowTriggersByFailureReason(tasks: WorkflowTriggerRuntime[]): Array<{ reason: string; items: WorkflowTriggerRuntime[] }> {
   return groupedByReason(tasks, (task) => task.failure_reason || "unknown");
 }
 
-export function latestScheduleRun(task: ScheduledTask, runs: WorkflowRun[]): WorkflowRun | null {
+export function latestWorkflowTriggerRun(task: WorkflowTriggerRuntime, runs: WorkflowRun[]): WorkflowRun | null {
   const summaryRunId = task.last_run_summary?.workflow_run_id;
   const matchedBySummary = typeof summaryRunId === "string" ? runs.find((run) => run.id === summaryRunId) : null;
   if (matchedBySummary) {
@@ -157,7 +145,7 @@ export function latestScheduleRun(task: ScheduledTask, runs: WorkflowRun[]): Wor
   return runs.find((run) => run.schedule_id === task.id) ?? null;
 }
 
-export function lastRunLabel(task: ScheduledTask, run: WorkflowRun | null): string {
+export function lastRunLabel(task: WorkflowTriggerRuntime, run: WorkflowRun | null): string {
   if (run) {
     return `${run.status} · ${run.completed}/${run.total}`;
   }
@@ -196,11 +184,11 @@ export function jobTarget(job: Job): string {
 }
 
 export function sourceLabel(source: string): string {
-  if (source === "manual_schedule" || source === "schedule") {
-    return "schedule";
+  if (source === "manual_workflow_trigger" || source === "workflow_trigger") {
+    return "workflow trigger";
   }
-  if (source === "workflow_batch") {
-    return "manual";
+  if (source === "manual_schedule" || source === "schedule") {
+    return "workflow trigger";
   }
   if (source.includes("shortcut")) {
     return "shortcut";
@@ -212,13 +200,10 @@ export function runTitle(run: WorkflowRun): string {
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || "Workflow run";
   }
-  if (run.items.length === 1) {
-    return run.items[0].title;
-  }
-  return `${run.items.length} workflow item run`;
+  return "Workflow run";
 }
 
-export function scheduleSummary(task: ScheduledTask): string {
+export function workflowTriggerSummary(task: WorkflowTriggerRuntime): string {
   const target = targetLabels[task.config.target.type] ?? task.config.target.type;
   const actions = task.config.actions.map((action) => actionLabels[action] ?? action).join(" then ");
   return `${target} · ${actions} · every ${task.interval_days} days`;
@@ -232,19 +217,6 @@ export function workflowRunTone(status: WorkflowRun["status"]): "default" | "suc
     return "danger";
   }
   if (status === "running") {
-    return "default";
-  }
-  return "muted";
-}
-
-export function workflowItemTone(status: WorkflowRunCompatItem["status"]): "default" | "success" | "danger" | "warning" | "muted" {
-  if (status === "completed") {
-    return "success";
-  }
-  if (status === "failed") {
-    return "danger";
-  }
-  if (status === "running" || status === "pending") {
     return "default";
   }
   return "muted";

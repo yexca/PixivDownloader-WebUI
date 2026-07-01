@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { getDashboardSummary } from "@/api/dashboard";
 import { listJobs } from "@/api/jobs";
-import { listScheduledTasks } from "@/api/scheduledTasks";
+import { listWorkflowTriggers } from "@/api/workflowTriggers";
 import { listWorkflowRuns, type WorkflowRun } from "@/api/workflows";
 import { Button } from "@/components/ui/button";
 import { DataState } from "@/components/DataState";
@@ -16,16 +16,16 @@ import {
   loadRunJobs,
   RunDetailDialog,
   RunWorkflowCard,
-  ScheduleWorkflowCard,
+  WorkflowTriggerCard,
   WaitingJobCard,
   WorkflowGroupSection
 } from "@/components/workflows/WorkflowRuntimeCards";
 import {
   groupRunsByFailureReason,
-  groupSchedulesByFailureReason,
-  latestScheduleRun,
+  groupWorkflowTriggersByFailureReason,
+  latestWorkflowTriggerRun,
   workflowRunGroups,
-  workflowScheduleGroups,
+  workflowTriggerGroups,
   workflowWaitingJobs
 } from "@/components/workflows/runtime";
 import { useJobStream } from "@/hooks/useJobStream";
@@ -43,9 +43,9 @@ export function DashboardPage(): JSX.Element {
     queryFn: () => listJobs({ limit: 100 }),
     refetchInterval: 4000
   });
-  const schedules = useQuery({
-    queryKey: ["scheduled-tasks"],
-    queryFn: listScheduledTasks,
+  const triggers = useQuery({
+    queryKey: ["workflow-triggers"],
+    queryFn: listWorkflowTriggers,
     refetchInterval: 15000
   });
   const workflowRuns = useQuery({
@@ -62,22 +62,22 @@ export function DashboardPage(): JSX.Element {
 
   const allJobs = jobs.data?.items ?? [];
   const allRuns = workflowRuns.data?.items ?? [];
-  const allSchedules = schedules.data?.items ?? [];
+  const allTriggers = triggers.data?.items ?? [];
   const runGroups = workflowRunGroups(allRuns);
-  const scheduleGroups = workflowScheduleGroups(allSchedules);
+  const triggerGroups = workflowTriggerGroups(allTriggers);
   const waitingJobs = workflowWaitingJobs(allJobs);
   const failedRunReasonGroups = groupRunsByFailureReason(runGroups.failed);
-  const blockedScheduleReasonGroups = groupSchedulesByFailureReason(scheduleGroups.blocked);
+  const blockedTriggerReasonGroups = groupWorkflowTriggersByFailureReason(triggerGroups.blocked);
   const activeJob = allJobs.find((job) => job.status === "running" || job.status === "queued");
   const stream = useJobStream(activeJob?.id);
-  const loading = summary.isLoading || jobs.isLoading || schedules.isLoading || workflowRuns.isLoading;
+  const loading = summary.isLoading || jobs.isLoading || triggers.isLoading || workflowRuns.isLoading;
   const error =
-    summary.error?.message ?? jobs.error?.message ?? schedules.error?.message ?? workflowRuns.error?.message;
+    summary.error?.message ?? jobs.error?.message ?? triggers.error?.message ?? workflowRuns.error?.message;
 
   function refetchAll() {
     void summary.refetch();
     void jobs.refetch();
-    void schedules.refetch();
+    void triggers.refetch();
     void workflowRuns.refetch();
   }
 
@@ -85,7 +85,7 @@ export function DashboardPage(): JSX.Element {
     <>
       <PageHeader
         title="Dashboard"
-        description="Workflow runs, schedule health, queue pressure, and library status."
+        description="Workflow runs, trigger health, queue pressure, and library status."
         actions={
           <>
             <Button type="button" variant="outline" onClick={refetchAll} disabled={summary.isFetching || jobs.isFetching}>
@@ -107,7 +107,7 @@ export function DashboardPage(): JSX.Element {
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <Metric label="Running runs" value={summary.data?.workflows.running_runs ?? 0} loading={summary.isLoading} />
           <Metric label="Waiting queue" value={summary.data?.workflows.waiting_jobs ?? 0} loading={summary.isLoading} />
-          <Metric label="Blocked schedules" value={summary.data?.workflows.blocked_schedules ?? 0} loading={summary.isLoading} tone="warning" />
+          <Metric label="Blocked triggers" value={summary.data?.workflows.blocked_schedules ?? 0} loading={summary.isLoading} tone="warning" />
           <Metric label="Failed files" value={summary.data?.library.failed_files ?? 0} loading={summary.isLoading} tone="danger" />
           <Metric label="Artist updates" value={summary.data?.library.artists_with_updates ?? 0} loading={summary.isLoading} tone="warning" />
         </div>
@@ -151,35 +151,35 @@ export function DashboardPage(): JSX.Element {
             <section className="space-y-4">
               <SectionHeader
                 icon={<CalendarClock className="h-4 w-4" aria-hidden="true" />}
-                title="Schedules"
+                title="Workflow Triggers"
                 action={<Button asChild size="sm" variant="outline"><Link to="/workflows">Manage</Link></Button>}
               />
               {loading ? (
-                <DataState title="Loading schedules" variant="loading" />
-              ) : scheduleGroups.blocked.length ? (
-                <WorkflowGroupSection title="Blocked Schedules" count={scheduleGroups.blocked.length}>
-                  {scheduleGroups.blocked.slice(0, 3).map((task) => (
-                    <ScheduleWorkflowCard
+                <DataState title="Loading workflow triggers" variant="loading" />
+              ) : triggerGroups.blocked.length ? (
+                <WorkflowGroupSection title="Blocked Triggers" count={triggerGroups.blocked.length}>
+                  {triggerGroups.blocked.slice(0, 3).map((task) => (
+                    <WorkflowTriggerCard
                       key={task.id}
                       task={task}
-                      lastRun={latestScheduleRun(task, allRuns)}
+                      lastRun={latestWorkflowTriggerRun(task, allRuns)}
                       onRuntimeChanged={refetchAll}
                     />
                   ))}
                 </WorkflowGroupSection>
-              ) : scheduleGroups.active.length ? (
-                <WorkflowGroupSection title="Active Schedules" count={scheduleGroups.active.length}>
-                  {scheduleGroups.active.slice(0, 3).map((task) => (
-                    <ScheduleWorkflowCard
+              ) : triggerGroups.active.length ? (
+                <WorkflowGroupSection title="Active Triggers" count={triggerGroups.active.length}>
+                  {triggerGroups.active.slice(0, 3).map((task) => (
+                    <WorkflowTriggerCard
                       key={task.id}
                       task={task}
-                      lastRun={latestScheduleRun(task, allRuns)}
+                      lastRun={latestWorkflowTriggerRun(task, allRuns)}
                       onRuntimeChanged={refetchAll}
                     />
                   ))}
                 </WorkflowGroupSection>
               ) : (
-                <DataState title="No active schedules" description="Scheduled workflows will appear here." />
+                <DataState title="No active workflow triggers" description="Workflow triggers will appear here." />
               )}
             </section>
 
@@ -224,7 +224,7 @@ export function DashboardPage(): JSX.Element {
               />
               {loading ? (
                 <DataState title="Loading failures" variant="loading" />
-              ) : runGroups.failed.length || scheduleGroups.blocked.length ? (
+              ) : runGroups.failed.length || triggerGroups.blocked.length ? (
                 <div className="space-y-4">
                   {failedRunReasonGroups.slice(0, 2).map((group) => (
                     <WorkflowGroupSection key={`runs-${group.reason}`} title={`Failed Runs · ${group.reason}`} count={group.items.length}>
@@ -233,13 +233,13 @@ export function DashboardPage(): JSX.Element {
                       ))}
                     </WorkflowGroupSection>
                   ))}
-                  {blockedScheduleReasonGroups.slice(0, 2).map((group) => (
-                    <WorkflowGroupSection key={`schedules-${group.reason}`} title={`Blocked Schedules · ${group.reason}`} count={group.items.length}>
+                  {blockedTriggerReasonGroups.slice(0, 2).map((group) => (
+                    <WorkflowGroupSection key={`triggers-${group.reason}`} title={`Blocked Triggers · ${group.reason}`} count={group.items.length}>
                       {group.items.slice(0, 2).map((task) => (
-                        <ScheduleWorkflowCard
+                        <WorkflowTriggerCard
                           key={task.id}
                           task={task}
-                          lastRun={latestScheduleRun(task, allRuns)}
+                          lastRun={latestWorkflowTriggerRun(task, allRuns)}
                           onRuntimeChanged={refetchAll}
                         />
                       ))}
@@ -247,7 +247,7 @@ export function DashboardPage(): JSX.Element {
                   ))}
                 </div>
               ) : (
-                <DataState title="No workflow failures" description="Failed runs and blocked schedules will appear here." />
+                <DataState title="No workflow failures" description="Failed runs and blocked triggers will appear here." />
               )}
             </section>
           </div>

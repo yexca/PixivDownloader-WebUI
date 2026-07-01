@@ -4,11 +4,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { getJob, type Job, type JobDetail } from "@/api/jobs";
 import {
-  deleteScheduledTask,
-  runScheduledTask,
-  type ScheduledTask,
-  updateScheduledTask
-} from "@/api/scheduledTasks";
+  deleteWorkflowTrigger,
+  runWorkflowTrigger,
+  type WorkflowTriggerRuntime,
+  updateWorkflowTrigger
+} from "@/api/workflowTriggers";
 import type { SettingsResponse } from "@/api/settings";
 import type { WorkflowRun, WorkflowNodeRun } from "@/api/workflows";
 import { Badge } from "@/components/ui/badge";
@@ -25,9 +25,8 @@ import {
   jobTarget,
   lastRunLabel,
   runTitle,
-  scheduleSummary,
+  workflowTriggerSummary,
   sourceLabel,
-  workflowItemTone,
   workflowJobStats,
   workflowRunTone
 } from "./runtime";
@@ -41,8 +40,8 @@ export function RunWorkflowCard({ run, onInspect }: { run: WorkflowRun; onInspec
             <h2 className="break-words text-sm font-semibold">{runTitle(run)}</h2>
             <WorkflowRunStatusPill status={run.status} />
             <Badge tone="muted">run</Badge>
-            {run.source === "schedule" || run.source === "manual_schedule" ? (
-              <Badge tone="default">{run.source === "manual_schedule" ? "manual schedule" : "schedule"}</Badge>
+            {["workflow_trigger", "manual_workflow_trigger", "schedule", "manual_schedule"].includes(run.source) ? (
+              <Badge tone="default">{sourceLabel(run.source)}</Badge>
             ) : null}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -58,11 +57,11 @@ export function RunWorkflowCard({ run, onInspect }: { run: WorkflowRun; onInspec
         </div>
       </div>
       <div className="mt-3 space-y-2">
-        {(run.node_runs.length ? run.node_runs : run.items).map((item) => (
-          <div key={item.id ?? item.title} className="rounded-md border bg-muted/20 p-3 text-sm">
+        {run.node_runs.map((item) => (
+          <div key={item.id ?? item.node_id} className="rounded-md border bg-muted/20 p-3 text-sm">
             <div className="flex items-center justify-between gap-2">
               <span className="truncate font-medium">{item.title}</span>
-              <Badge tone={workflowItemTone(item.status)}>{item.status}</Badge>
+              <Badge tone={workflowRunTone(item.status)}>{item.status}</Badge>
             </div>
             {item.job_ids.length ? (
               <p className="mt-1 break-all text-xs text-muted-foreground">
@@ -168,27 +167,23 @@ export function RunDetailDialog({
       {!run ? null : (
         <div className="flex h-full min-h-0 flex-col gap-4">
           <RunDetailHeader run={run} />
-          {run.node_runs.length ? (
-            <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[290px_minmax(0,1fr)]">
-              <NodeTimeline nodes={run.node_runs} selectedNodeId={selectedNode?.node_id ?? null} onSelect={setSelectedNodeId} />
-              <section className="min-h-0 overflow-y-auto pr-1">
-                {selectedNode ? (
-                  <NodeDetailPanel
-                    node={selectedNode}
-                    jobs={selectedNodeJobs}
-                    loading={loading}
-                    error={error}
-                    tab={detailTab}
-                    onTabChange={setDetailTab}
-                  />
-                ) : (
-                  <DataState title="No node selected" description="Select a workflow node to inspect its runtime data." />
-                )}
-              </section>
-            </div>
-          ) : (
-            <LegacyRunDetail run={run} jobs={jobs} loading={loading} error={error} />
-          )}
+          <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[290px_minmax(0,1fr)]">
+            <NodeTimeline nodes={run.node_runs} selectedNodeId={selectedNode?.node_id ?? null} onSelect={setSelectedNodeId} />
+            <section className="min-h-0 overflow-y-auto pr-1">
+              {selectedNode ? (
+                <NodeDetailPanel
+                  node={selectedNode}
+                  jobs={selectedNodeJobs}
+                  loading={loading}
+                  error={error}
+                  tab={detailTab}
+                  onTabChange={setDetailTab}
+                />
+              ) : (
+                <DataState title="No node selected" description="Select a workflow node to inspect its runtime data." />
+              )}
+            </section>
+          </div>
         </div>
       )}
     </Dialog>
@@ -305,7 +300,7 @@ function NodeTimeline({
               <span className="min-w-0 flex-1">
                 <span className="flex items-center justify-between gap-2">
                   <span className="truncate font-medium">{node.title}</span>
-                  <Badge tone={workflowItemTone(node.status)}>{node.status}</Badge>
+                  <Badge tone={workflowRunTone(node.status)}>{node.status}</Badge>
                 </span>
                 <span className="mt-1 block text-xs text-muted-foreground">
                   {node.position + 1}. {node.node_type} · {node.job_ids.length} job(s)
@@ -342,7 +337,7 @@ function NodeDetailPanel({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="break-words text-base font-semibold">{node.title}</h3>
-              <Badge tone={workflowItemTone(node.status)}>{node.status}</Badge>
+              <Badge tone={workflowRunTone(node.status)}>{node.status}</Badge>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
               {node.position + 1}. {node.node_type} · {node.node_id}
@@ -426,59 +421,6 @@ function NodeJobs({
         <RunJobDetail key={job.id} job={job} />
       ))}
     </section>
-  );
-}
-
-function LegacyRunDetail({
-  run,
-  jobs,
-  loading,
-  error
-}: {
-  run: WorkflowRun;
-  jobs: JobDetail[];
-  loading: boolean;
-  error?: string;
-}): JSX.Element {
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-      <div className="space-y-4">
-        <RunDetailHeader run={run} />
-        <section className="space-y-3">
-          <h3 className="text-sm font-semibold">Items</h3>
-          {run.items.map((item) => (
-            <div key={item.id ?? item.draft_id} className="rounded-md border bg-card p-3 text-sm">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">{item.title}</span>
-                <Badge tone={workflowItemTone(item.status)}>{item.status}</Badge>
-              </div>
-              <dl className="mt-3 grid gap-3 sm:grid-cols-3">
-                <Detail label="Draft" value={item.draft_id} />
-                <Detail label="Jobs" value={item.job_ids.length ? item.job_ids.join(", ") : "-"} />
-                <Detail label="Finished" value={formatDate(item.finished_at)} />
-              </dl>
-              {item.error_message ? (
-                <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-                  {item.error_message}
-                </p>
-              ) : null}
-            </div>
-          ))}
-        </section>
-        <section className="space-y-3">
-          <h3 className="text-sm font-semibold">Jobs</h3>
-          {loading ? (
-            <DataState title="Loading jobs" variant="loading" />
-          ) : error ? (
-            <DataState title="Could not load jobs" description={error} variant="error" />
-          ) : jobs.length === 0 ? (
-            <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No jobs were created.</p>
-          ) : (
-            jobs.map((job) => <RunJobDetail key={job.id} job={job} />)
-          )}
-        </section>
-      </div>
-    </div>
   );
 }
 
@@ -577,12 +519,12 @@ function timeValue(value: string | null): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function ScheduleWorkflowCard({
+export function WorkflowTriggerCard({
   task,
   lastRun,
   onRuntimeChanged
 }: {
-  task: ScheduledTask;
+  task: WorkflowTriggerRuntime;
   lastRun: WorkflowRun | null;
   onRuntimeChanged?: () => void;
 }): JSX.Element {
@@ -590,50 +532,50 @@ export function ScheduleWorkflowCard({
   const { pushToast } = useToast();
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    void queryClient.invalidateQueries({ queryKey: ["scheduled-tasks"] });
+    void queryClient.invalidateQueries({ queryKey: ["workflow-triggers"] });
     void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
     void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     onRuntimeChanged?.();
   };
   const runMutation = useMutation({
-    mutationFn: () => runScheduledTask(task.id),
+    mutationFn: () => runWorkflowTrigger(task.id),
     onSuccess: (response) => {
       pushToast({
         title: response.workflow_run_id
-          ? "Schedule run submitted"
+          ? "Workflow trigger run submitted"
           : response.skipped
-            ? "Schedule skipped"
-            : "Schedule checked",
+            ? "Workflow trigger skipped"
+            : "Workflow trigger checked",
         description: response.workflow_run_id ?? (response.job_ids.length ? response.job_ids.join(", ") : undefined),
         tone: response.skipped ? "info" : "success"
       });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Schedule could not run", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Workflow trigger could not run", description: error.message, tone: "error" })
   });
   const statusMutation = useMutation({
-    mutationFn: (status: ScheduledTask["status"]) => updateScheduledTask(task.id, { status }),
+    mutationFn: (status: WorkflowTriggerRuntime["status"]) => updateWorkflowTrigger(task.id, { status }),
     onSuccess: (_response, status) => {
       pushToast({
         title:
           status === "archived"
-            ? "Schedule archived"
+            ? "Workflow trigger archived"
             : status === "active"
-              ? "Schedule activation requested"
-              : "Schedule paused",
+              ? "Workflow trigger activation requested"
+              : "Workflow trigger paused",
         tone: "success"
       });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Schedule could not be updated", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Workflow trigger could not be updated", description: error.message, tone: "error" })
   });
   const deleteMutation = useMutation({
-    mutationFn: () => deleteScheduledTask(task.id),
+    mutationFn: () => deleteWorkflowTrigger(task.id),
     onSuccess: () => {
-      pushToast({ title: "Schedule deleted", tone: "success" });
+      pushToast({ title: "Workflow trigger deleted", tone: "success" });
       invalidate();
     },
-    onError: (error) => pushToast({ title: "Schedule could not be deleted", description: error.message, tone: "error" })
+    onError: (error) => pushToast({ title: "Workflow trigger could not be deleted", description: error.message, tone: "error" })
   });
   const busy = runMutation.isPending || statusMutation.isPending || deleteMutation.isPending;
 
@@ -646,9 +588,9 @@ export function ScheduleWorkflowCard({
             <Badge tone={task.status === "active" ? "success" : task.status === "blocked" ? "danger" : "muted"}>
               {task.status}
             </Badge>
-            <Badge tone="default">schedule</Badge>
+            <Badge tone="default">trigger</Badge>
           </div>
-          <p className="mt-1 text-sm text-muted-foreground">{scheduleSummary(task)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{workflowTriggerSummary(task)}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => runMutation.mutate()}>
@@ -859,11 +801,7 @@ export function loadRunJobs(run: WorkflowRun | null): Promise<JobDetail[]> {
     return Promise.resolve([]);
   }
   const ids = Array.from(
-    new Set([
-      ...(run.node_runs.length
-        ? run.node_runs.flatMap((node) => node.job_ids)
-        : run.items.flatMap((item) => item.job_ids))
-    ])
+    new Set(run.node_runs.flatMap((node) => node.job_ids))
   );
   return Promise.all(ids.map((jobId) => getJob(jobId)));
 }

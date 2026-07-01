@@ -19,9 +19,9 @@ JobType = Literal[
     "download_candidate_artist",
     "download_candidate_set",
 ]
-ScheduledTaskAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
-ScheduledTaskStatus = Literal["active", "inactive", "paused", "blocked", "archived"]
-ScheduledTaskTargetType = Literal[
+WorkflowTriggerAction = Literal["sync_artist", "download_artist", "retry_failed_artist"]
+WorkflowTriggerStatus = Literal["active", "inactive", "paused", "blocked", "archived"]
+WorkflowTriggerTargetType = Literal[
     "artists",
     "artworks",
     "single_artist",
@@ -30,8 +30,8 @@ ScheduledTaskTargetType = Literal[
     "artists_with_tag",
     "artists_not_checked",
 ]
-ScheduledTaskArtistSource = Literal["artist_ids", "artwork_ids"]
-ScheduledTaskFilterType = Literal["last_checked_before_days", "has_failed_files"]
-ScheduledTaskArtistSelection = Literal["oldest_checked_first", "newest_checked_first", "random"]
+WorkflowTriggerArtistSource = Literal["artist_ids", "artwork_ids"]
+WorkflowTriggerFilterType = Literal["last_checked_before_days", "has_failed_files"]
+WorkflowTriggerArtistSelection = Literal["oldest_checked_first", "newest_checked_first", "random"]
 ArtistAccountStatus = Literal["unknown", "available", "unavailable"]
 FailureReason = Literal["auth", "disk", "network", "cancelled", "target", "rule", "unknown"]

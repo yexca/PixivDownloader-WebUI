@@ -11,7 +11,7 @@ from backend.workers.job_queue import JobQueue
 logger = logging.getLogger(__name__)
 
 
-class ScheduledTaskRunner:
+class WorkflowTriggerRunner:
     def __init__(
         self,
         *,
@@ -35,7 +35,7 @@ class ScheduledTaskRunner:
             self._startup_scan = True
             self._task = asyncio.create_task(
                 self._run(),
-                name="pixiv-scheduled-task-runner",
+                name="pixiv-workflow-trigger-runner",
             )
 
     async def stop(self) -> None:
@@ -71,7 +71,7 @@ class ScheduledTaskRunner:
             _ = startup_scan
             workflow_results = workflow_service.run_due_triggers()
         except Exception:
-            logger.exception("scheduled task scan failed")
+            logger.exception("workflow trigger scan failed")
             return False
         finally:
             workflow_service.close()

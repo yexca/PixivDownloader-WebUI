@@ -192,9 +192,6 @@ def first_run_job_id(run: WorkflowRun, *, db_path: Path | str | None = None) -> 
     for node in refreshed.node_runs:
         if node.job_ids:
             return node.job_ids[0]
-    for item in refreshed.items:
-        if item.job_ids:
-            return item.job_ids[0]
     return None
 
 

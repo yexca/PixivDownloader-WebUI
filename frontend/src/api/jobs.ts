@@ -1,5 +1,5 @@
 import { apiRequest } from "./client";
-import type { FailureDetail } from "./scheduledTasks";
+import type { FailureDetail } from "./workflowTriggers";
 
 export type JobStatus = "inactive" | "queued" | "running" | "completed" | "failed" | "cancelled";
 
@@ -19,7 +19,6 @@ export type Job = {
   input_artwork_id: string | null;
   options: Record<string, unknown>;
   workflow_run_id: string | null;
-  workflow_item_id: number | null;
   workflow_node_run_id: number | null;
   workflow_source: string | null;
   total_files: number;

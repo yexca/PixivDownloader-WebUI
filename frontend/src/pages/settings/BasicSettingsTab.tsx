@@ -125,12 +125,12 @@ export function BasicSettingsTab({
             />
             <NumberField
               label="Schedule trigger limit"
-              value={form.max_active_scheduled_tasks}
-              error={errors.max_active_scheduled_tasks}
+              value={form.max_active_workflow_triggers}
+              error={errors.max_active_workflow_triggers}
               min={1}
               step={1}
               tooltip="Legacy compatibility setting. Schedules now act as triggers; run execution capacity is controlled by the run limit."
-              onChange={(value) => onChange({ ...form, max_active_scheduled_tasks: Math.max(1, Math.trunc(value)) })}
+              onChange={(value) => onChange({ ...form, max_active_workflow_triggers: Math.max(1, Math.trunc(value)) })}
             />
             <NumberField
               label="Run limit"

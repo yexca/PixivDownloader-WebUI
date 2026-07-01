@@ -13,23 +13,8 @@ from backend.repositories.workflow_definition_repository import (
 from backend.repositories.workflow_run_repository import (
     WorkflowNodeRun,
     WorkflowRun,
-    WorkflowRunItem,
 )
 from backend.schemas.failure_reasons import FailureDetail, classify_failure_reason, failure_detail
-from backend.schemas.scheduled_tasks import ScheduledTaskConfigRequest
-
-
-class WorkflowRunCompatItemRequest(BaseModel):
-    draft_id: str
-    title: str
-    config: ScheduledTaskConfigRequest
-    skip_if_last_run_failed: bool = False
-    schedule: bool = False
-    name: str = ""
-    interval_days: int = Field(default=30, ge=1)
-    enabled: bool = True
-    run_after_startup: bool = True
-
 
 AdvancedWorkflowNodeType = Literal[
     "artist_target",
@@ -99,22 +84,6 @@ class WorkflowDefinitionListResponse(BaseModel):
     total: int
 
 
-class WorkflowRunItemResponse(BaseModel):
-    id: int | None
-    run_id: str
-    draft_id: str
-    title: str
-    status: str
-    job_ids: list[str]
-    error_message: str | None
-    failure_reason: FailureReason
-    failure: FailureDetail | None
-    config: dict[str, object]
-    request: dict[str, object]
-    created_at: str | None
-    finished_at: str | None
-
-
 class WorkflowNodeRunResponse(BaseModel):
     id: int | None
     workflow_run_id: str
@@ -148,7 +117,6 @@ class WorkflowRunResponse(BaseModel):
     failure: FailureDetail | None
     created_at: str | None
     finished_at: str | None
-    items: list[WorkflowRunItemResponse]
     node_runs: list[WorkflowNodeRunResponse] = Field(default_factory=list)
 
 
@@ -164,7 +132,6 @@ class WorkflowDefinitionSaveResponse(BaseModel):
 
 
 def workflow_run_response(run: WorkflowRun) -> WorkflowRunResponse:
-    items = [workflow_run_item_response(item) for item in run.items]
     node_runs = [workflow_node_run_response(node_run) for node_run in run.node_runs]
     return WorkflowRunResponse(
         id=run.id,
@@ -176,11 +143,10 @@ def workflow_run_response(run: WorkflowRun) -> WorkflowRunResponse:
         concurrency=run.concurrency,
         source=run.source,
         schedule_id=run.schedule_id,
-        failure_reason=workflow_run_failure_reason(run, items),
-        failure=workflow_run_failure_detail(run, items, node_runs),
+        failure_reason=workflow_run_failure_reason(run),
+        failure=workflow_run_failure_detail(run, node_runs),
         created_at=run.created_at,
         finished_at=run.finished_at,
-        items=items,
         node_runs=node_runs,
     )
 
@@ -222,27 +188,6 @@ def workflow_trigger_response(trigger: WorkflowTrigger) -> WorkflowTriggerRespon
     )
 
 
-def workflow_run_item_response(item: WorkflowRunItem) -> WorkflowRunItemResponse:
-    return WorkflowRunItemResponse(
-        id=item.id,
-        run_id=item.run_id,
-        draft_id=item.draft_id,
-        title=item.title,
-        status=item.status,
-        job_ids=item.job_ids,
-        error_message=item.error_message,
-        failure_reason=classify_failure_reason(
-            item.error_message,
-            item.status if item.status == "failed" else None,
-        ),
-        failure=workflow_item_failure_detail(item),
-        config=item.config,
-        request=item.request,
-        created_at=item.created_at,
-        finished_at=item.finished_at,
-    )
-
-
 def workflow_node_run_response(node_run: WorkflowNodeRun) -> WorkflowNodeRunResponse:
     return WorkflowNodeRunResponse(
         id=node_run.id,
@@ -267,10 +212,7 @@ def workflow_node_run_response(node_run: WorkflowNodeRun) -> WorkflowNodeRunResp
     )
 
 
-def workflow_run_failure_reason(
-    run: WorkflowRun,
-    items: list[WorkflowRunItemResponse],
-) -> FailureReason:
+def workflow_run_failure_reason(run: WorkflowRun) -> FailureReason:
     if run.status not in {"failed", "partial"}:
         return "unknown"
     for node_run in run.node_runs:
@@ -279,18 +221,11 @@ def workflow_run_failure_reason(
         reason = classify_failure_reason(node_run.error_message, node_run.status)
         if reason != "unknown":
             return reason
-    for item in items:
-        if item.status == "failed" and item.failure_reason != "unknown":
-            return item.failure_reason
-    return classify_failure_reason(
-        *(item.error_message for item in items if item.status == "failed"),
-        run.status,
-    )
+    return classify_failure_reason(run.status)
 
 
 def workflow_run_failure_detail(
     run: WorkflowRun,
-    items: list[WorkflowRunItemResponse],
     node_runs: list[WorkflowNodeRunResponse],
 ) -> FailureDetail | None:
     if run.status not in {"failed", "partial", "cancelled"}:
@@ -298,23 +233,7 @@ def workflow_run_failure_detail(
     for node_run in node_runs:
         if node_run.status == "failed" and node_run.failure is not None:
             return node_run.failure
-    for item in items:
-        if item.status == "failed" and item.failure is not None:
-            return item.failure
     return failure_detail(run.status, status=run.status)
-
-
-def workflow_item_failure_detail(item: WorkflowRunItem) -> FailureDetail | None:
-    if item.status not in {"failed", "cancelled"}:
-        return None
-    return failure_detail(
-        item.error_message,
-        item.status,
-        code=string_option(item.request.get("error_code")),
-        message=item.error_message,
-        status=item.status,
-        retryable=bool_option(item.request.get("error_retryable")),
-    )
 
 
 def workflow_node_failure_detail(node_run: WorkflowNodeRun) -> FailureDetail | None:

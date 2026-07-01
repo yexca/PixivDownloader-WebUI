@@ -68,7 +68,6 @@ class JobService:
             input_artwork_id=artwork_id,
             options=cleaned_options,
             workflow_run_id=link.run_id,
-            workflow_item_id=link.item_id,
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
@@ -118,7 +117,6 @@ class JobService:
             total_files=len(artist_ids),
             options=job_options,
             workflow_run_id=link.run_id,
-            workflow_item_id=link.item_id,
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
@@ -170,7 +168,6 @@ class JobService:
             total_files=len(artist_ids) + len(artwork_ids),
             options=job_options,
             workflow_run_id=link.run_id,
-            workflow_item_id=link.item_id,
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
@@ -218,7 +215,6 @@ class JobService:
             total_files=len(artist_ids) + len(artwork_ids),
             options=job_options,
             workflow_run_id=link.run_id,
-            workflow_item_id=link.item_id,
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
@@ -264,7 +260,6 @@ class JobService:
             input_user_id=artist_id,
             options=job_options,
             workflow_run_id=link.run_id,
-            workflow_item_id=link.item_id,
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
@@ -344,7 +339,6 @@ class JobService:
                 input_artwork_id=job.input_artwork_id,
                 options=job.options,
                 workflow_run_id=job.workflow_run_id,
-                workflow_item_id=job.workflow_item_id,
                 workflow_source=job.workflow_source,
                 artist_id=job.artist_id,
                 total_files=job.total_files,
@@ -404,7 +398,6 @@ class JobService:
                 input_artwork_id=job.input_artwork_id,
                 options=job.options,
                 workflow_run_id=job.workflow_run_id,
-                workflow_item_id=job.workflow_item_id,
                 workflow_source=job.workflow_source,
                 artist_id=job.artist_id,
                 total_files=job.total_files,
@@ -502,7 +495,6 @@ class JobService:
             artist_id=source.artist_id,
             options=cleaned_options,
             workflow_run_id=link.run_id,
-            workflow_item_id=link.item_id,
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
@@ -599,7 +591,6 @@ DOWNLOAD_JOB_TYPES = {
 @dataclass(frozen=True)
 class WorkflowJobLink:
     run_id: str | None = None
-    item_id: int | None = None
     node_run_id: int | None = None
     source: str | None = None
 
@@ -607,7 +598,6 @@ class WorkflowJobLink:
 def workflow_link_from_job(job: Job) -> WorkflowJobLink:
     return WorkflowJobLink(
         run_id=job.workflow_run_id,
-        item_id=job.workflow_item_id,
         node_run_id=job.workflow_node_run_id,
         source=job.workflow_source,
     )
@@ -620,7 +610,6 @@ def without_workflow_options(options: dict[str, object]) -> dict[str, object]:
         if key
         not in {
             "workflow_run_id",
-            "workflow_item_id",
             "workflow_node_run_id",
             "workflow_source",
         }

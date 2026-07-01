@@ -57,11 +57,6 @@ def first_workflow_job_id(run: object) -> str | None:
         job_ids = getattr(node_run, "job_ids", [])
         if job_ids:
             return str(job_ids[0])
-    items = getattr(run, "items", [])
-    for item in items:
-        job_ids = getattr(item, "job_ids", [])
-        if job_ids:
-            return str(job_ids[0])
     return None
 
 

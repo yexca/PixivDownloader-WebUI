@@ -14,10 +14,8 @@ from backend.repositories.workflow_run_repository import (
 )
 from backend.services.advanced_workflow_runner import (
     AdvancedWorkflowRunner,
-    is_advanced_workflow_source,
 )
 from backend.services.job_service import JobService
-from backend.services.workflow_run_service import LegacyWorkflowItemRunService
 
 
 class WorkflowRecoveryService:
@@ -44,17 +42,8 @@ class WorkflowRecoveryService:
         self.repository.close()
 
     def _recover_running_run(self, run: WorkflowRun) -> WorkflowRun:
-        if is_advanced_workflow_source(run.source):
-            self._requeue_interrupted_node_jobs(run)
-            return self._resume_advanced_run(run)
-        legacy_service = LegacyWorkflowItemRunService(
-            self.db_path,
-            settings_json_path=self.settings_json_path,
-        )
-        try:
-            return legacy_service.recover_run(run.id)
-        finally:
-            legacy_service.close()
+        self._requeue_interrupted_node_jobs(run)
+        return self._resume_advanced_run(run)
 
     def _resume_advanced_run(self, run: WorkflowRun) -> WorkflowRun:
         runner = AdvancedWorkflowRunner(
@@ -136,13 +125,6 @@ class WorkflowRecoveryService:
         finally:
             repository.close()
 
-    def _jobs_for_ids(self, job_ids: list[str]) -> list[Job]:
-        repository = JobRepository(self.db_path)
-        try:
-            return repository.list_by_ids(job_ids)
-        finally:
-            repository.close()
-
     def _jobs_for_node_runs(self, node_runs: list[WorkflowNodeRun]) -> list[Job]:
         repository = JobRepository(self.db_path)
         try:
@@ -175,7 +157,6 @@ class WorkflowRecoveryService:
                     replace(
                         job,
                         workflow_run_id=run_id,
-                        workflow_item_id=None,
                         workflow_node_run_id=node_run_id,
                         workflow_source="startup_recovery",
                     )

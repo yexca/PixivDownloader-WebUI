@@ -16,7 +16,7 @@ class SettingsResponse(BaseModel):
     file_download_base_delay_seconds: float
     file_download_random_delay_seconds: float
     max_concurrent_downloads: int
-    max_active_scheduled_tasks: int
+    max_active_workflow_triggers: int
     max_active_run_jobs: int
     min_free_space_gb: float
     existing_file_behavior: ExistingFileBehavior
@@ -33,7 +33,7 @@ class SettingsUpdateRequest(BaseModel):
     file_download_base_delay_seconds: float | None = Field(default=None, ge=0)
     file_download_random_delay_seconds: float | None = Field(default=None, ge=0)
     max_concurrent_downloads: int | None = Field(default=None, ge=1)
-    max_active_scheduled_tasks: int | None = Field(default=None, ge=1)
+    max_active_workflow_triggers: int | None = Field(default=None, ge=1)
     max_active_run_jobs: int | None = Field(default=None, ge=1)
     min_free_space_gb: float | None = Field(default=None, ge=0)
     existing_file_behavior: ExistingFileBehavior | None = None

@@ -9,12 +9,12 @@ from backend.domain.types import (
     JobEventLevel,
     JobStatus,
     JobType,
-    ScheduledTaskAction,
-    ScheduledTaskArtistSelection,
-    ScheduledTaskArtistSource,
-    ScheduledTaskFilterType,
-    ScheduledTaskStatus,
-    ScheduledTaskTargetType,
+    WorkflowTriggerAction,
+    WorkflowTriggerArtistSelection,
+    WorkflowTriggerArtistSource,
+    WorkflowTriggerFilterType,
+    WorkflowTriggerStatus,
+    WorkflowTriggerTargetType,
 )
 
 
@@ -100,7 +100,6 @@ class Job:
     input_artwork_id: str | None = None
     options: dict[str, object] = field(default_factory=dict)
     workflow_run_id: str | None = None
-    workflow_item_id: int | None = None
     workflow_node_run_id: int | None = None
     workflow_source: str | None = None
     artist_id: str | None = None
@@ -126,11 +125,11 @@ class JobEvent:
 
 
 @dataclass(frozen=True)
-class ScheduledTask:
+class WorkflowTriggerRuntime:
     id: int | None
     name: str
-    action: ScheduledTaskAction
-    status: ScheduledTaskStatus
+    action: WorkflowTriggerAction
+    status: WorkflowTriggerStatus
     target_artist_id: str
     interval_days: int
     run_after_startup: bool = True
@@ -140,37 +139,37 @@ class ScheduledTask:
     last_job_id: str | None = None
     last_error_code: str | None = None
     last_error_message: str | None = None
-    config: ScheduledTaskConfig | None = None
+    config: WorkflowTriggerConfig | None = None
     last_run_summary: dict[str, object] | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
 
 @dataclass(frozen=True)
-class ScheduledTaskTarget:
-    type: ScheduledTaskTargetType
+class WorkflowTriggerTarget:
+    type: WorkflowTriggerTargetType
     artist_id: str | None = None
     artwork_id: str | None = None
     artist_ids: tuple[str, ...] = ()
     artwork_ids: tuple[str, ...] = ()
-    artist_source: ScheduledTaskArtistSource = "artist_ids"
+    artist_source: WorkflowTriggerArtistSource = "artist_ids"
     tag: str | None = None
     tags: tuple[str, ...] = ()
     days: int | None = None
 
 
 @dataclass(frozen=True)
-class ScheduledTaskFilter:
-    type: ScheduledTaskFilterType
+class WorkflowTriggerFilter:
+    type: WorkflowTriggerFilterType
     days: int | None = None
 
 
 @dataclass(frozen=True)
-class ScheduledTaskConfig:
-    target: ScheduledTaskTarget
-    filters: tuple[ScheduledTaskFilter, ...] = ()
-    actions: tuple[ScheduledTaskAction, ...] = ("download_artist",)
+class WorkflowTriggerConfig:
+    target: WorkflowTriggerTarget
+    filters: tuple[WorkflowTriggerFilter, ...] = ()
+    actions: tuple[WorkflowTriggerAction, ...] = ("download_artist",)
     download_options: dict[str, object] = field(default_factory=dict)
     max_artists_per_run: int = 25
-    artist_selection: ScheduledTaskArtistSelection = "oldest_checked_first"
+    artist_selection: WorkflowTriggerArtistSelection = "oldest_checked_first"
     skip_unavailable_artists: bool = True

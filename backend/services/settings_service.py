@@ -38,6 +38,14 @@ class AppSettingsService:
         refresh_token_value = values.get("refresh_token", "")
         refresh_token = refresh_token_value.strip() if isinstance(refresh_token_value, str) else ""
         update_values = {key: value for key, value in values.items() if key != "refresh_token"}
+        if (
+            "max_active_workflow_triggers" not in update_values
+            and "max_active_scheduled_tasks" in update_values
+        ):
+            update_values["max_active_workflow_triggers"] = update_values[
+                "max_active_scheduled_tasks"
+            ]
+        update_values.pop("max_active_scheduled_tasks", None)
         if "existing_file_behavior" not in update_values:
             if update_values.get("overwrite_existing_files") is True:
                 update_values["existing_file_behavior"] = "overwrite"
@@ -118,7 +126,7 @@ def masked_settings(settings: Settings) -> dict[str, object]:
         "file_download_base_delay_seconds": settings.file_download_base_delay_seconds,
         "file_download_random_delay_seconds": settings.file_download_random_delay_seconds,
         "max_concurrent_downloads": settings.max_concurrent_downloads,
-        "max_active_scheduled_tasks": settings.max_active_scheduled_tasks,
+        "max_active_workflow_triggers": settings.max_active_workflow_triggers,
         "max_active_run_jobs": settings.max_active_run_jobs,
         "min_free_space_gb": settings.min_free_space_gb,
         "existing_file_behavior": settings.existing_file_behavior,

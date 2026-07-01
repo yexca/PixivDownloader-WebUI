@@ -5,9 +5,7 @@ from pathlib import Path
 from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunRepository
 from backend.services.advanced_workflow_runner import (
     AdvancedWorkflowRunner,
-    is_advanced_workflow_source,
 )
-from backend.services.workflow_run_service import LegacyWorkflowItemRunService
 
 
 class WorkflowReadService:
@@ -33,23 +31,14 @@ class WorkflowReadService:
         return self.refresh_run(run)
 
     def refresh_run(self, run: WorkflowRun) -> WorkflowRun:
-        if is_advanced_workflow_source(run.source):
-            runner = AdvancedWorkflowRunner(
-                self.db_path,
-                settings_json_path=self.settings_json_path,
-            )
-            try:
-                return runner.process_run(run.id)
-            finally:
-                runner.close()
-        service = LegacyWorkflowItemRunService(
+        runner = AdvancedWorkflowRunner(
             self.db_path,
             settings_json_path=self.settings_json_path,
         )
         try:
-            return service.refresh_run_status(run)
+            return runner.process_run(run.id)
         finally:
-            service.close()
+            runner.close()
 
     def close(self) -> None:
         self.repository.close()

@@ -13,7 +13,7 @@ export type BasicForm = Pick<
   | "file_download_base_delay_seconds"
   | "file_download_random_delay_seconds"
   | "max_concurrent_downloads"
-  | "max_active_scheduled_tasks"
+  | "max_active_workflow_triggers"
   | "max_active_run_jobs"
   | "min_free_space_gb"
   | "library_stale_check_days"
@@ -78,7 +78,7 @@ export function toBasicForm(settings: SettingsResponse): BasicForm {
     file_download_base_delay_seconds: settings.file_download_base_delay_seconds,
     file_download_random_delay_seconds: settings.file_download_random_delay_seconds,
     max_concurrent_downloads: settings.max_concurrent_downloads,
-    max_active_scheduled_tasks: settings.max_active_scheduled_tasks,
+    max_active_workflow_triggers: settings.max_active_workflow_triggers,
     max_active_run_jobs: settings.max_active_run_jobs,
     min_free_space_gb: settings.min_free_space_gb,
     library_stale_check_days: settings.library_stale_check_days,
@@ -106,8 +106,8 @@ export function validateBasic(form: BasicForm, downloadPathEditable: boolean): R
   if (form.max_concurrent_downloads < 1 || !Number.isInteger(form.max_concurrent_downloads)) {
     errors.max_concurrent_downloads = "Must be a whole number of at least 1.";
   }
-  if (form.max_active_scheduled_tasks < 1 || !Number.isInteger(form.max_active_scheduled_tasks)) {
-    errors.max_active_scheduled_tasks = "Must be a whole number of at least 1.";
+  if (form.max_active_workflow_triggers < 1 || !Number.isInteger(form.max_active_workflow_triggers)) {
+    errors.max_active_workflow_triggers = "Must be a whole number of at least 1.";
   }
   if (form.max_active_run_jobs < 1 || !Number.isInteger(form.max_active_run_jobs)) {
     errors.max_active_run_jobs = "Must be a whole number of at least 1.";

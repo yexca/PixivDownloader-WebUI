@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, model_validator
 
-from backend.domain.entities import ScheduledTaskConfig, ScheduledTaskTarget
+from backend.domain.entities import WorkflowTriggerConfig, WorkflowTriggerTarget
 
 
 class DownloadCreateRequest(BaseModel):
@@ -63,13 +63,13 @@ def download_request_options(request: DownloadCreateRequest) -> dict[str, object
     }
 
 
-def download_request_workflow_config(request: DownloadCreateRequest) -> ScheduledTaskConfig:
-    target = ScheduledTaskTarget(
+def download_request_workflow_config(request: DownloadCreateRequest) -> WorkflowTriggerConfig:
+    target = WorkflowTriggerTarget(
         type="single_artwork" if request.artwork_id else "single_artist",
         artist_id=request.user_id,
         artwork_id=request.artwork_id,
     )
-    return ScheduledTaskConfig(
+    return WorkflowTriggerConfig(
         target=target,
         actions=("download_artist",),
         download_options=download_request_options(request),

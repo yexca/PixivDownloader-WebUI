@@ -23,6 +23,7 @@ ADVANCED_WORKFLOW_SOURCES = {
     "advanced",
     "advanced_manual",
     "workflow_trigger",
+    "manual_workflow_trigger",
     "download_api",
     "library_shortcut",
     "artwork_file_shortcut",
@@ -293,7 +294,7 @@ class AdvancedWorkflowRunner:
             node_runs=node_runs,
         )
         self.repository.update_run(refreshed)
-        return replace(refreshed, items=self.repository.list_items(run_id))
+        return refreshed
 
     def _hydrate_node_run_jobs(self, node_run: WorkflowNodeRun) -> WorkflowNodeRun:
         linked_job_ids = self._linked_job_ids(node_run)

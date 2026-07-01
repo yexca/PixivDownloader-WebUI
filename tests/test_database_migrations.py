@@ -36,6 +36,7 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "016",
         "017",
         "018",
+        "019",
     ]
     assert {
         "schema_migrations",
@@ -47,9 +48,7 @@ def test_fresh_database_migration_creates_webui_schema(tmp_path):
         "settings",
         "local_tags",
         "artist_local_tags",
-        "scheduled_tasks",
         "workflow_runs",
-        "workflow_run_items",
         "workflow_node_runs",
         "workflow_candidate_sets",
         "workflow_candidate_artworks",
@@ -72,6 +71,6 @@ def test_migration_is_idempotent(tmp_path):
     finally:
         conn.close()
 
-    assert len(first_applied) == 18
+    assert len(first_applied) == 19
     assert second_applied == []
-    assert migration_count == 18
+    assert migration_count == 19
