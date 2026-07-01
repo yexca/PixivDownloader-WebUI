@@ -21,6 +21,7 @@ const LibraryPage = React.lazy(() =>
   import("@/pages/LibraryPage").then((module) => ({ default: module.LibraryPage }))
 );
 const LogsPage = React.lazy(() => import("@/pages/LogsPage").then((module) => ({ default: module.LogsPage })));
+const RunsPage = React.lazy(() => import("@/pages/RunsPage").then((module) => ({ default: module.RunsPage })));
 const SettingsPage = React.lazy(() =>
   import("@/pages/SettingsPage").then((module) => ({ default: module.SettingsPage }))
 );
@@ -60,6 +61,7 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: suspensePage(<DashboardPage />) },
       { path: "workflows", element: suspensePage(<WorkflowsPage />) },
+      { path: "runs", element: suspensePage(<RunsPage />) },
       { path: "library", element: suspensePage(<LibraryPage />) },
       { path: "artists/:artistId", element: suspensePage(<ArtistDetailPage />) },
       { path: "jobs", element: suspensePage(<JobsPage />) },

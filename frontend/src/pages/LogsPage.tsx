@@ -49,8 +49,8 @@ export function LogsPage(): JSX.Element {
   return (
     <>
       <PageHeader
-        title="Logs"
-        description="Recent job events for troubleshooting downloads."
+        title="Events"
+        description="Global job event stream for troubleshooting workflow runs and queue work."
         actions={
           <>
             <Select value={level} onChange={(event) => setFilter("level", event.target.value)} aria-label="Filter log level">
@@ -69,9 +69,9 @@ export function LogsPage(): JSX.Element {
       />
       <div className="space-y-3 p-4 sm:p-6">
         {logs.isLoading ? (
-          <DataState title="Loading logs" variant="loading" />
+          <DataState title="Loading events" variant="loading" />
         ) : logs.isError ? (
-          <DataState title="Could not load logs" description={logs.error.message} variant="error" />
+          <DataState title="Could not load events" description={logs.error.message} variant="error" />
         ) : items.length === 0 ? (
           <DataState title="No log events" description="Job activity and failures will appear here." />
         ) : (

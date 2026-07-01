@@ -6,6 +6,7 @@ import {
   Check,
   CircleHelp,
   Image,
+  ListChecks,
   Home,
   Library,
   Menu,
@@ -31,10 +32,11 @@ import { cn, percent } from "@/lib/utils";
 const navItems = [
   { to: "/", label: "Dashboard", icon: Home },
   { to: "/workflows", label: "Workflows", icon: Workflow },
+  { to: "/runs", label: "Runs", icon: ListChecks },
   { to: "/library", label: "Library", icon: Library },
-  { to: "/jobs", label: "Jobs", icon: Briefcase },
+  { to: "/jobs", label: "Queue", icon: Briefcase },
   { to: "/settings", label: "Settings", icon: Settings },
-  { to: "/logs", label: "Logs", icon: ScrollText },
+  { to: "/logs", label: "Events", icon: ScrollText },
   { to: "/about", label: "About", icon: CircleHelp }
 ];
 

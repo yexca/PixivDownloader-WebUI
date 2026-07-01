@@ -221,8 +221,8 @@ export function JobsPage(): JSX.Element {
   return (
     <>
       <PageHeader
-        title="Jobs"
-        description="Inspect queued, running, and completed download work."
+        title="Queue"
+        description="Manage low-level jobs, queue controls, retries, reruns, and cancellation."
         actions={
           <>
             <Select
@@ -269,9 +269,9 @@ export function JobsPage(): JSX.Element {
               </Button>
             )}
             <Button type="button" variant="outline" asChild>
-              <Link to="/workflows">
+              <Link to="/runs">
                 <CalendarClock className="h-4 w-4" aria-hidden="true" />
-                Workflows
+                Runs
               </Link>
             </Button>
           </>
@@ -540,7 +540,7 @@ function CancelConfirmDialog({
   const title = isSingle ? "Cancel running job?" : `Cancel ${count} ${state?.kind === "bulk" ? state.label : "job"}?`;
   const description = isSingle
     ? "This requests cancellation for the running job. The file in progress may be marked failed."
-    : "This bulk action cannot be undone from the jobs page.";
+    : "This bulk action cannot be undone from the queue page.";
 
   return (
     <Dialog

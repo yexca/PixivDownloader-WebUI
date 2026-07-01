@@ -1,11 +1,10 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Activity,
   CheckCircle2,
   Database,
-  Eye,
   Filter,
   GitBranch,
   ListChecks,
@@ -26,7 +25,7 @@ import {
   type WorkflowDefinition,
   type WorkflowNodeRun
 } from "@/api/workflows";
-import { listJobs, type Job, type JobDetail } from "@/api/jobs";
+import { listJobs, type Job } from "@/api/jobs";
 import { getSettings, updateSettings } from "@/api/settings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,29 +36,18 @@ import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { AdvancedWorkflowBuilder } from "@/components/workflows/AdvancedWorkflowBuilder";
-import { loadRunJobs, RunDetailDialog, WorkflowLimitPanel } from "@/components/workflows/WorkflowRuntimeCards";
+import { WorkflowLimitPanel } from "@/components/workflows/WorkflowRuntimeCards";
 import { cn, formatDate, percent } from "@/lib/utils";
 
-type WorkflowView = "definitions" | "runs";
-type RunFilter = "all" | "running" | "completed" | "failed" | "scheduled" | "shortcuts";
+type DefinitionFilter = "manual" | "scheduled";
 
-const viewTabs: Array<{ value: WorkflowView; label: string }> = [
-  { value: "definitions", label: "Definitions" },
-  { value: "runs", label: "Runs" }
-];
-
-const runFilterTabs: Array<{ value: RunFilter; label: string }> = [
-  { value: "all", label: "All" },
-  { value: "running", label: "Running" },
-  { value: "completed", label: "Completed" },
-  { value: "failed", label: "Failed" },
-  { value: "scheduled", label: "Scheduled" },
-  { value: "shortcuts", label: "Shortcuts" }
+const definitionFilterTabs: Array<{ value: DefinitionFilter; label: string }> = [
+  { value: "manual", label: "Manual" },
+  { value: "scheduled", label: "Scheduled" }
 ];
 
 const emptyDefinitions: WorkflowDefinition[] = [];
 const emptyRuns: WorkflowRun[] = [];
-const emptyJobs: Job[] = [];
 
 const nodeTypeLabels: Record<string, string> = {
   artist_target: "Target",
@@ -87,16 +75,15 @@ const sourceLabels: Record<string, string> = {
 export function WorkflowsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialView = workflowViewFromParam(searchParams.get("view"));
-  const [view, setViewState] = React.useState<WorkflowView>(initialView);
-  const [runFilter, setRunFilter] = React.useState<RunFilter>(runFilterFromParam(searchParams.get("filter")));
+  const [definitionFilter, setDefinitionFilter] = React.useState<DefinitionFilter>(
+    definitionFilterFromParam(searchParams.get("filter"))
+  );
   const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
   const [builderOpen, setBuilderOpen] = React.useState(false);
   const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
-  const [selectedRun, setSelectedRun] = React.useState<WorkflowRun | null>(null);
-  const [inspectedRun, setInspectedRun] = React.useState<WorkflowRun | null>(null);
 
   const definitions = useQuery({
     queryKey: ["workflow-definitions"],
@@ -114,26 +101,16 @@ export function WorkflowsPage(): JSX.Element {
     refetchInterval: 4000
   });
   const settings = useQuery({ queryKey: ["settings"], queryFn: getSettings });
-  const selectedRunJobs = useQuery({
-    queryKey: ["workflow-run-jobs", selectedRun?.id],
-    queryFn: () => loadRunJobs(selectedRun),
-    enabled: Boolean(selectedRun),
-    refetchInterval: selectedRun?.status === "running" ? 4000 : false
-  });
-  const inspectedRunJobs = useQuery({
-    queryKey: ["workflow-run-jobs", inspectedRun?.id],
-    queryFn: () => loadRunJobs(inspectedRun),
-    enabled: Boolean(inspectedRun),
-    refetchInterval: inspectedRun?.status === "running" ? 4000 : false
-  });
 
   const definitionItems = definitions.data?.items ?? emptyDefinitions;
   const runItems = runs.data?.items ?? emptyRuns;
+  const filteredDefinitions = React.useMemo(
+    () => filterDefinitions(filterDefinitionsByKind(definitionItems, definitionFilter), search),
+    [definitionFilter, definitionItems, search]
+  );
   const selectedDefinition =
-    definitionItems.find((definition) => definition.id === selectedDefinitionId) ?? definitionItems[0] ?? null;
-  const filteredDefinitions = filterDefinitions(definitionItems, search);
-  const filteredRuns = filterRuns(filterRunsByKind(runItems, runFilter), search);
-  const visibleShortcutJobs = filterShortcutJobs(jobs.data?.items ?? emptyJobs, "");
+    filteredDefinitions.find((definition) => definition.id === selectedDefinitionId) ?? filteredDefinitions[0] ?? null;
+  const visibleShortcutJobs = filterShortcutJobs(jobs.data?.items ?? [], "");
 
   React.useEffect(() => {
     if (!selectedDefinitionId && definitionItems[0]) {
@@ -142,13 +119,14 @@ export function WorkflowsPage(): JSX.Element {
   }, [definitionItems, selectedDefinitionId]);
 
   React.useEffect(() => {
-    if (view !== "runs") {
+    if (!filteredDefinitions.length) {
+      setSelectedDefinitionId(null);
       return;
     }
-    if (!selectedRun || !filteredRuns.some((run) => run.id === selectedRun.id)) {
-      setSelectedRun(filteredRuns[0] ?? null);
+    if (!selectedDefinitionId || !filteredDefinitions.some((definition) => definition.id === selectedDefinitionId)) {
+      setSelectedDefinitionId(filteredDefinitions[0].id);
     }
-  }, [filteredRuns, selectedRun, view]);
+  }, [filteredDefinitions, selectedDefinitionId]);
 
   const runDefinition = useMutation({
     mutationFn: runWorkflowDefinition,
@@ -156,7 +134,7 @@ export function WorkflowsPage(): JSX.Element {
       pushToast({ title: "Workflow started", description: run.id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      setInspectedRun(run);
+      navigate(`/runs?run=${encodeURIComponent(run.id)}`);
     },
     onError: (error) => pushToast({ title: "Workflow could not start", description: error.message, tone: "error" })
   });
@@ -175,21 +153,9 @@ export function WorkflowsPage(): JSX.Element {
     void runs.refetch();
     void jobs.refetch();
   };
-  const setView = (nextView: WorkflowView) => {
-    setViewState(nextView);
+  const setDefinitionFilterParam = (nextFilter: DefinitionFilter) => {
+    setDefinitionFilter(nextFilter);
     const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("view", nextView);
-    if (search.trim()) {
-      nextParams.set("q", search.trim());
-    } else {
-      nextParams.delete("q");
-    }
-    setSearchParams(nextParams, { replace: true });
-  };
-  const setRunFilterParam = (nextFilter: RunFilter) => {
-    setRunFilter(nextFilter);
-    const nextParams = new URLSearchParams(searchParams);
-    nextParams.set("view", "runs");
     nextParams.set("filter", nextFilter);
     if (search.trim()) {
       nextParams.set("q", search.trim());
@@ -206,7 +172,6 @@ export function WorkflowsPage(): JSX.Element {
     } else {
       nextParams.delete("q");
     }
-    nextParams.set("view", view);
     setSearchParams(nextParams, { replace: true });
   };
   const openNewBuilder = () => {
@@ -222,7 +187,7 @@ export function WorkflowsPage(): JSX.Element {
     <>
       <PageHeader
         title="Workflows"
-        description="Saved workflow definitions, shortcut runs, and node-level execution history."
+        description="Create, run, and schedule reusable workflow definitions."
         actions={
           <>
             <WorkflowLimitPanel
@@ -263,57 +228,42 @@ export function WorkflowsPage(): JSX.Element {
                 onChange={(event) => setSearchQuery(event.target.value)}
               />
             </div>
-            <Tabs value={view} onValueChange={setView} items={viewTabs} className="mt-4 max-w-full flex-wrap" />
+            <Tabs
+              value={definitionFilter}
+              onValueChange={setDefinitionFilterParam}
+              items={definitionFilterTabs}
+              className="mt-4 max-w-full flex-wrap"
+            />
           </section>
 
-          {view === "definitions" ? (
-            <DefinitionList
-              definitions={filteredDefinitions}
-              selectedDefinitionId={selectedDefinition?.id ?? null}
-              loading={definitions.isLoading}
-              error={definitions.isError ? definitions.error.message : undefined}
-              onSelect={setSelectedDefinitionId}
-            />
-          ) : (
-            <>
-              <section className="surface p-3">
-                <Tabs value={runFilter} onValueChange={setRunFilterParam} items={runFilterTabs} className="max-w-full flex-wrap" />
-              </section>
-              <RunList runs={filteredRuns} selectedRunId={selectedRun?.id ?? null} onInspect={setSelectedRun} />
-            </>
-          )}
+          <DefinitionList
+            definitions={filteredDefinitions}
+            selectedDefinitionId={selectedDefinition?.id ?? null}
+            loading={definitions.isLoading}
+            error={definitions.isError ? definitions.error.message : undefined}
+            onSelect={setSelectedDefinitionId}
+          />
         </aside>
 
         <main className="min-w-0 space-y-4">
-          {view === "definitions" ? (
-            selectedDefinition ? (
-              <DefinitionWorkbench
-                definition={selectedDefinition}
-                latestRun={latestDefinitionRun(selectedDefinition, runItems)}
-                running={runDefinition.isPending}
-                onEdit={() => openEditBuilder(selectedDefinition)}
-                onRun={() => runDefinition.mutate(selectedDefinition.id)}
-                onInspectRun={(run) => setInspectedRun(run)}
-              />
-            ) : definitions.isLoading ? (
-              <DataState title="Loading workflows" variant="loading" />
-            ) : (
-              <EmptyDefinitionState onCreate={openNewBuilder} />
-            )
-          ) : selectedRun ? (
-            <RunWorkbench
-              run={selectedRun}
-              jobs={selectedRunJobs.data ?? []}
-              loading={selectedRunJobs.isLoading}
-              error={selectedRunJobs.isError ? selectedRunJobs.error.message : undefined}
+          {selectedDefinition ? (
+            <DefinitionWorkbench
+              definition={selectedDefinition}
+              latestRun={latestDefinitionRun(selectedDefinition, runItems)}
+              running={runDefinition.isPending}
+              onEdit={() => openEditBuilder(selectedDefinition)}
+              onRun={() => runDefinition.mutate(selectedDefinition.id)}
             />
+          ) : definitions.isLoading ? (
+            <DataState title="Loading workflows" variant="loading" />
           ) : (
-            <DataState title="No run selected" description="Workflow runs matching the current filter appear in the left list." />
+            <EmptyDefinitionState onCreate={openNewBuilder} />
           )}
         </main>
 
         <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
           <RuntimeSummary definitions={definitionItems} runs={runItems} jobs={jobs.data?.items ?? []} />
+          <RecentRunsPanel runs={runItems} />
           <ActiveShortcutPanel jobs={visibleShortcutJobs} />
         </aside>
       </div>
@@ -346,19 +296,6 @@ export function WorkflowsPage(): JSX.Element {
         />
       </Dialog>
 
-      {view === "definitions" ? (
-        <RunDetailDialog
-          run={inspectedRun}
-          jobs={inspectedRunJobs.data ?? []}
-          loading={inspectedRunJobs.isLoading}
-          error={inspectedRunJobs.isError ? inspectedRunJobs.error.message : undefined}
-          onOpenChange={(open) => {
-            if (!open) {
-              setInspectedRun(null);
-            }
-          }}
-        />
-      ) : null}
     </>
   );
 }
@@ -429,15 +366,13 @@ function DefinitionWorkbench({
   latestRun,
   running,
   onEdit,
-  onRun,
-  onInspectRun
+  onRun
 }: {
   definition: WorkflowDefinition;
   latestRun: WorkflowRun | null;
   running: boolean;
   onEdit: () => void;
   onRun: () => void;
-  onInspectRun: (run: WorkflowRun) => void;
 }): JSX.Element {
   const nodes = workflowNodes(definition);
   return (
@@ -479,9 +414,8 @@ function DefinitionWorkbench({
                 {runSourceLabel(latestRun)} · {formatDate(latestRun.created_at)}
               </p>
             </div>
-            <Button type="button" size="sm" variant="outline" onClick={() => onInspectRun(latestRun)}>
-              <Eye className="h-4 w-4" aria-hidden="true" />
-              Inspect
+            <Button type="button" size="sm" variant="outline" asChild>
+              <Link to={`/runs?run=${encodeURIComponent(latestRun.id)}`}>Open Run</Link>
             </Button>
           </div>
           <RunNodeTimeline run={latestRun} />
@@ -548,46 +482,6 @@ function WorkflowNodeCard({ node, nodeRun }: { node: AdvancedWorkflowNode; nodeR
         <div>{nodeRun?.job_ids.length ?? 0} linked job(s)</div>
       </div>
     </article>
-  );
-}
-
-function RunList({
-  runs,
-  selectedRunId,
-  onInspect
-}: {
-  runs: WorkflowRun[];
-  selectedRunId: string | null;
-  onInspect: (run: WorkflowRun) => void;
-}): JSX.Element {
-  if (!runs.length) {
-    return <DataState title="No recent runs" description="Workflow executions will appear here." />;
-  }
-  return (
-    <section className="space-y-2">
-      {runs.map((run) => (
-        <button
-          key={run.id}
-          type="button"
-          className={cn(
-            "surface w-full p-3 text-left transition-colors hover:bg-muted/50",
-            run.id === selectedRunId && "border-primary bg-primary/5"
-          )}
-          onClick={() => onInspect(run)}
-        >
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold">{runTitle(run)}</h3>
-              <p className="mt-1 text-xs text-muted-foreground">{runSourceLabel(run)}</p>
-            </div>
-            <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            {run.completed}/{run.total} completed · {formatDate(run.created_at)}
-          </p>
-        </button>
-      ))}
-    </section>
   );
 }
 
@@ -669,6 +563,43 @@ function SummaryMetric({
         {value.toLocaleString()}
       </p>
     </div>
+  );
+}
+
+function RecentRunsPanel({ runs }: { runs: WorkflowRun[] }): JSX.Element {
+  const recentRuns = runs.slice(0, 4);
+  return (
+    <section className="surface p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Recent Runs</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Open execution details in Runs.</p>
+        </div>
+        <Button type="button" size="sm" variant="outline" asChild>
+          <Link to="/runs">All</Link>
+        </Button>
+      </div>
+      <div className="mt-4 space-y-2">
+        {recentRuns.map((run) => (
+          <Link
+            key={run.id}
+            to={`/runs?run=${encodeURIComponent(run.id)}`}
+            className="block rounded-md border bg-background p-3 text-sm transition-colors hover:bg-muted/50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-medium">{runTitle(run)}</span>
+              <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {runSourceLabel(run)} · {formatDate(run.created_at)}
+            </p>
+          </Link>
+        ))}
+        {recentRuns.length === 0 ? (
+          <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No workflow runs yet.</p>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -762,23 +693,11 @@ function filterDefinitions(definitions: WorkflowDefinition[], search: string): W
   );
 }
 
-function filterRuns(runs: WorkflowRun[], search: string): WorkflowRun[] {
-  const query = search.trim().toLowerCase();
-  if (!query) {
-    return runs;
+function filterDefinitionsByKind(definitions: WorkflowDefinition[], filter: DefinitionFilter): WorkflowDefinition[] {
+  if (filter === "scheduled") {
+    return definitions.filter((definition) => definition.triggers.length > 0);
   }
-  return runs.filter((run) =>
-    [
-      run.id,
-      run.status,
-      run.source,
-      runSourceLabel(run),
-      run.node_runs.map((node) => `${node.title} ${node.node_id} ${node.node_type}`).join(" ")
-    ]
-      .join(" ")
-      .toLowerCase()
-      .includes(query)
-  );
+  return definitions.filter((definition) => definition.triggers.length === 0);
 }
 
 function filterShortcutJobs(jobs: Job[], search: string): Job[] {
@@ -796,209 +715,6 @@ function latestDefinitionRun(definition: WorkflowDefinition, runs: WorkflowRun[]
   const triggerIds = new Set(definition.triggers.map((trigger) => trigger.id));
   const matches = runs.filter((run) => run.schedule_id !== null && triggerIds.has(run.schedule_id));
   return matches[0] ?? null;
-}
-
-function RunWorkbench({
-  run,
-  jobs,
-  loading,
-  error
-}: {
-  run: WorkflowRun;
-  jobs: JobDetail[];
-  loading: boolean;
-  error?: string;
-}): JSX.Element {
-  const [selectedNodeId, setSelectedNodeId] = React.useState(run.node_runs[0]?.node_id ?? null);
-  const selectedNode = run.node_runs.find((node) => node.node_id === selectedNodeId) ?? run.node_runs[0] ?? null;
-  const selectedNodeJobs = selectedNode ? jobs.filter((job) => selectedNode.job_ids.includes(job.id)) : [];
-
-  React.useEffect(() => {
-    setSelectedNodeId(run.node_runs[0]?.node_id ?? null);
-  }, [run.id, run.node_runs]);
-
-  return (
-    <section className="surface min-w-0 p-4">
-      <div className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="break-words text-lg font-semibold">{runTitle(run)}</h2>
-            <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
-            <Badge tone="muted">{runSourceLabel(run)}</Badge>
-          </div>
-          <p className="mt-1 break-all text-sm text-muted-foreground">{run.id}</p>
-        </div>
-        <dl className="grid gap-3 text-sm sm:grid-cols-4 lg:min-w-[520px]">
-          <RunMetric label="Completed" value={`${run.completed}/${run.total}`} />
-          <RunMetric label="Failed" value={String(run.failed)} />
-          <RunMetric label="Created" value={formatDate(run.created_at)} />
-          <RunMetric label="Finished" value={formatDate(run.finished_at)} />
-        </dl>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
-        <aside className="min-w-0 space-y-2">
-          <h3 className="px-1 text-sm font-semibold">Node Timeline</h3>
-          {run.node_runs.length ? (
-            run.node_runs.map((node) => {
-              const selected = selectedNode?.node_id === node.node_id;
-              return (
-                <button
-                  key={node.id ?? node.node_id}
-                  type="button"
-                  className={cn(
-                    "w-full rounded-md border bg-background p-3 text-left text-sm transition-colors hover:bg-muted/50",
-                    selected && "border-primary bg-primary/5"
-                  )}
-                  onClick={() => setSelectedNodeId(node.node_id)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{node.title}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        {node.position + 1}. {node.node_type}
-                      </p>
-                    </div>
-                    <Badge tone={workflowStatusTone(node.status)}>{node.status}</Badge>
-                  </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{node.job_ids.length} job(s)</p>
-                </button>
-              );
-            })
-          ) : (
-            <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No workflow nodes were recorded.</p>
-          )}
-        </aside>
-
-        <div className="min-w-0">
-          {selectedNode ? (
-            <NodeWorkbench node={selectedNode} jobs={selectedNodeJobs} loading={loading} error={error} />
-          ) : (
-            <DataState title="No node selected" description="Select a workflow node to inspect its runtime data." />
-          )}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function filterRunsByKind(runs: WorkflowRun[], filter: RunFilter): WorkflowRun[] {
-  if (filter === "running") {
-    return runs.filter((run) => run.status === "running");
-  }
-  if (filter === "completed") {
-    return runs.filter((run) => run.status === "completed" || run.status === "skipped");
-  }
-  if (filter === "failed") {
-    return runs.filter((run) => run.status === "failed" || run.status === "partial");
-  }
-  if (filter === "scheduled") {
-    return runs.filter((run) => isScheduledRun(run));
-  }
-  if (filter === "shortcuts") {
-    return runs.filter((run) => isShortcutRun(run));
-  }
-  return runs;
-}
-
-function NodeWorkbench({
-  node,
-  jobs,
-  loading,
-  error
-}: {
-  node: WorkflowNodeRun;
-  jobs: JobDetail[];
-  loading: boolean;
-  error?: string;
-}): JSX.Element {
-  const completedFiles = jobs.reduce((total, job) => total + job.completed_files, 0);
-  const failedFiles = jobs.reduce((total, job) => total + job.failed_files, 0);
-  return (
-    <div className="space-y-4">
-      <section className="rounded-md border bg-card p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="break-words text-base font-semibold">{node.title}</h3>
-              <Badge tone={workflowStatusTone(node.status)}>{node.status}</Badge>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {node.position + 1}. {node.node_type} · {node.node_id}
-            </p>
-          </div>
-        </div>
-        {node.error_message ? (
-          <p className="mt-4 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-            {node.error_message}
-          </p>
-        ) : null}
-      </section>
-
-      <section className="rounded-md border bg-card p-4">
-        <dl className="grid gap-3 text-sm sm:grid-cols-4">
-          <RunMetric label="Started" value={formatDate(node.started_at)} />
-          <RunMetric label="Finished" value={formatDate(node.finished_at)} />
-          <RunMetric label="Jobs" value={String(node.job_ids.length)} />
-          <RunMetric label="Files" value={loading ? "Loading" : error ? "-" : `${completedFiles} ok / ${failedFiles} failed`} />
-        </dl>
-      </section>
-
-      {error ? <DataState title="Could not load jobs" description={error} variant="error" /> : null}
-      {!error && jobs.length ? (
-        <section className="space-y-3">
-          {jobs.map((job) => (
-            <RunJobSummary key={job.id} job={job} />
-          ))}
-        </section>
-      ) : null}
-      {!loading && !error && !jobs.length ? (
-        <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No jobs were linked to this node.</p>
-      ) : null}
-    </div>
-  );
-}
-
-function RunJobSummary({ job }: { job: JobDetail }): JSX.Element {
-  const latestEvent = [...job.events].sort((left, right) => timeValue(right.created_at) - timeValue(left.created_at))[0];
-  return (
-    <article className="rounded-md border bg-card p-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h4 className="break-words text-sm font-semibold">{job.type.replaceAll("_", " ")}</h4>
-            <Badge tone={jobStatusTone(job.status)}>{job.status}</Badge>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">{jobTarget(job)}</p>
-        </div>
-        <p className="text-sm text-muted-foreground">{job.completed_files}/{job.total_files || 0} files</p>
-      </div>
-      {job.error_message ? (
-        <p className="mt-3 rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
-          {job.error_message}
-        </p>
-      ) : latestEvent ? (
-        <p className="mt-3 rounded-md border bg-muted/20 p-2 text-xs">{latestEvent.message}</p>
-      ) : null}
-    </article>
-  );
-}
-
-function RunMetric({ label, value }: { label: string; value: string }): JSX.Element {
-  return (
-    <div>
-      <dt className="text-xs uppercase text-muted-foreground">{label}</dt>
-      <dd className="mt-1 break-words font-medium">{value}</dd>
-    </div>
-  );
-}
-
-function isShortcutRun(run: WorkflowRun): boolean {
-  return run.source.includes("shortcut") || run.source.includes("api");
-}
-
-function isScheduledRun(run: WorkflowRun): boolean {
-  return run.schedule_id !== null || run.source.includes("schedule") || run.source.includes("trigger");
 }
 
 function isShortcutJob(job: Job): boolean {
@@ -1090,24 +806,6 @@ function jobStatusTone(status: Job["status"]): "default" | "success" | "danger" 
   return "warning";
 }
 
-function workflowViewFromParam(value: string | null): WorkflowView {
-  if (value === "runs" || value === "shortcuts") {
-    return "runs";
-  }
-  return "definitions";
-}
-
-function runFilterFromParam(value: string | null): RunFilter {
-  if (value === "running" || value === "completed" || value === "failed" || value === "scheduled" || value === "shortcuts") {
-    return value;
-  }
-  return "all";
-}
-
-function timeValue(value: string | null): number {
-  if (!value) {
-    return 0;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : 0;
+function definitionFilterFromParam(value: string | null): DefinitionFilter {
+  return value === "scheduled" ? "scheduled" : "manual";
 }

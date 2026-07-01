@@ -187,7 +187,7 @@ export function DashboardPage(): JSX.Element {
               <SectionHeader
                 icon={<Workflow className="h-4 w-4" aria-hidden="true" />}
                 title="Active Works"
-                action={<Button asChild size="sm" variant="outline"><Link to="/workflows">Open Workflows</Link></Button>}
+                action={<Button asChild size="sm" variant="outline"><Link to="/runs">Open Runs</Link></Button>}
               />
               {loading ? (
                 <DataState title="Loading workflow state" variant="loading" />
@@ -220,7 +220,7 @@ export function DashboardPage(): JSX.Element {
               <SectionHeader
                 icon={<AlertTriangle className="h-4 w-4" aria-hidden="true" />}
                 title="Failures"
-                action={<Button asChild size="sm" variant="outline"><Link to="/jobs">Open Jobs</Link></Button>}
+                action={<Button asChild size="sm" variant="outline"><Link to="/runs">Open Runs</Link></Button>}
               />
               {loading ? (
                 <DataState title="Loading failures" variant="loading" />
@@ -256,7 +256,7 @@ export function DashboardPage(): JSX.Element {
         <section>
           <SectionHeader
             icon={<Briefcase className="h-4 w-4" aria-hidden="true" />}
-            title="Recent Jobs"
+            title="Recent Queue Jobs"
             action={<Button type="button" variant="ghost" size="sm" onClick={() => void jobs.refetch()} disabled={jobs.isFetching}>
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
               Refresh
@@ -267,7 +267,7 @@ export function DashboardPage(): JSX.Element {
           ) : jobs.isError ? (
             <DataState title="Could not load jobs" description={jobs.error.message} variant="error" />
           ) : allJobs.length === 0 ? (
-            <DataState title="No jobs yet" description="Started workflows will appear here." />
+            <DataState title="No jobs yet" description="Started workflow jobs will appear here." />
           ) : (
             <JobTable jobs={allJobs.slice(0, 10)} onSelect={(job) => navigate(`/jobs?job=${encodeURIComponent(job.id)}`)} />
           )}
