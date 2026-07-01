@@ -7,12 +7,9 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
-from backend.domain.entities import ScheduledTaskConfig, ScheduledTaskTarget
-from backend.domain.types import ScheduledTaskAction
 from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
-from backend.repositories.job_repository import JobRepository
 from backend.repositories.tag_repository import LocalTagRepository
 from backend.repositories.workflow_run_repository import WorkflowRun
 from backend.schemas.artists import (
@@ -30,7 +27,12 @@ from backend.schemas.artists import (
 from backend.schemas.downloads import DownloadCreateResponse
 from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.settings_service import AppSettingsService
-from backend.services.workflow_run_service import WorkflowRunService
+from backend.services.shortcut_workflows import (
+    first_run_job_id,
+    job_status,
+    run_artist_retry_failed_shortcut,
+    run_artist_sync_shortcut,
+)
 
 router = APIRouter(prefix="/api/artists", tags=["artists"])
 
@@ -99,19 +101,12 @@ def create_artist(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        run = service.run_download_shortcut(
-            source="library_shortcut",
-            title="Sync artist",
-            draft_id=f"library-sync:{request.user_id}",
-            config=artist_action_config(request.user_id, "sync_artist"),
-            user_id=request.user_id,
-            artwork_id=None,
-            sync_only=True,
-        )
-    finally:
-        service.close()
+    run = run_artist_sync_shortcut(
+        artist_id=request.user_id,
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+        source="library_shortcut",
+    )
     queue.wake()
     return download_response_from_run(db_path, run)
 
@@ -190,19 +185,12 @@ def sync_artist(
     settings_json_path: SettingsJsonPath,
     queue: Queue,
 ) -> DownloadCreateResponse:
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        run = service.run_download_shortcut(
-            source="library_shortcut",
-            title="Sync artist",
-            draft_id=f"library-sync:{artist_id}",
-            config=artist_action_config(artist_id, "sync_artist"),
-            user_id=artist_id,
-            artwork_id=None,
-            sync_only=True,
-        )
-    finally:
-        service.close()
+    run = run_artist_sync_shortcut(
+        artist_id=artist_id,
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+        source="library_shortcut",
+    )
     queue.wake()
     return download_response_from_run(db_path, run)
 
@@ -221,19 +209,12 @@ def retry_failed_artist(
     finally:
         artist_repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        run = service.run_download_shortcut(
-            source="library_shortcut",
-            title="Retry failed artist",
-            draft_id=f"library-retry-failed:{artist_id}",
-            config=artist_action_config(artist_id, "retry_failed_artist"),
-            user_id=artist_id,
-            artwork_id=None,
-            retry_failed_artist=True,
-        )
-    finally:
-        service.close()
+    run = run_artist_retry_failed_shortcut(
+        artist_id=artist_id,
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+        source="library_shortcut",
+    )
     queue.wake()
     return download_response_from_run(db_path, run)
 
@@ -280,22 +261,9 @@ def list_artist_artworks(
         artwork_repository.close()
 
 
-def artist_action_config(artist_id: str, action: ScheduledTaskAction) -> ScheduledTaskConfig:
-    return ScheduledTaskConfig(
-        target=ScheduledTaskTarget(type="single_artist", artist_id=artist_id),
-        actions=(action,),
-        max_artists_per_run=1,
-    )
-
-
 def download_response_from_run(
     db_path: Path | str | None,
     run: WorkflowRun,
 ) -> DownloadCreateResponse:
-    job_id = run.items[0].job_ids[0]
-    repository = JobRepository(db_path)
-    try:
-        job = repository.get_by_id(job_id)
-    finally:
-        repository.close()
-    return DownloadCreateResponse(job_id=job_id, status=job.status if job else "queued")
+    job_id = first_run_job_id(run, db_path=db_path)
+    return DownloadCreateResponse(job_id=job_id or run.id, status=job_status(db_path, job_id))

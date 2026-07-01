@@ -546,8 +546,9 @@ def test_create_download_job(tmp_path):
     try:
         job = repository.get_by_id(body["job_id"])
         assert job is not None
-        assert job.input_user_id == "123"
-        assert job.workflow_source == "download_api"
+        assert job.type == "resolve_workflow_targets"
+        assert job.options["artist_ids"] == ["123"]
+        assert job.workflow_source == "advanced_workflow"
         assert "workflow_source" not in job.options
         run_id = job.workflow_run_id
     finally:
@@ -558,8 +559,16 @@ def test_create_download_job(tmp_path):
     finally:
         workflow_repository.close()
     assert run is not None
+    assert run.source == "download_api"
     assert run.status == "running"
-    assert run.items[0].job_ids == [body["job_id"]]
+    assert [node.node_id for node in run.node_runs] == [
+        "target",
+        "sync",
+        "collect",
+        "filters",
+        "actions",
+    ]
+    assert run.node_runs[0].job_ids == [body["job_id"]]
 
 
 def test_create_download_job_persists_workflow_options(tmp_path):
@@ -585,18 +594,27 @@ def test_create_download_job_persists_workflow_options(tmp_path):
     try:
         job = repository.get_by_id(response.json()["job_id"])
         assert job is not None
-        assert job.options == {
-            "activation_scope": "one_time",
-            "full_download": True,
-            "max_artworks": 12,
-            "min_artwork_id": "100",
-            "max_artwork_id": "200",
-        }
+        assert job.type == "resolve_workflow_targets"
+        assert job.options["activation_scope"] == "one_time"
+        assert job.options["artist_ids"] == ["123"]
         assert "workflow_run_id" not in job.options
         assert "workflow_item_id" not in job.options
         assert "workflow_source" not in job.options
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(job.workflow_run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    collect_node = next(node for node in run.node_runs if node.node_id == "collect")
+    assert collect_node.input["config"] == {
+        "mode": "all_synced",
+        "max_artworks": 12,
+        "min_artwork_id": "100",
+        "max_artwork_id": "200",
+    }
 
 
 def test_create_download_job_rejects_low_disk_space(tmp_path, monkeypatch):
@@ -1683,12 +1701,22 @@ def test_create_artist_queues_sync_job(tmp_path):
     try:
         job = repository.get_by_id(body["job_id"])
         assert job is not None
-        assert job.type == "sync_artist"
-        assert job.input_user_id == "123"
-        assert job.workflow_source == "library_shortcut"
+        assert job.type == "resolve_workflow_targets"
+        assert job.options["artist_ids"] == ["123"]
+        assert job.workflow_source == "advanced_workflow"
         assert "workflow_source" not in job.options
+        run_id = job.workflow_run_id
     finally:
         repository.close()
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(str(run_id))
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.source == "library_shortcut"
+    assert [node.node_id for node in run.node_runs] == ["target", "sync"]
+    assert run.node_runs[0].job_ids == [body["job_id"]]
 
 
 def test_artist_tags_and_filter_endpoint(tmp_path):

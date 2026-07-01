@@ -3,12 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
-from backend.domain.entities import ScheduledTaskConfig, ScheduledTaskTarget
 from backend.repositories.file_repository import ArtworkFileRepository
-from backend.repositories.job_repository import JobRepository
-from backend.schemas.downloads import DownloadCreateResponse
+from backend.schemas.downloads import DownloadCreateRequest, DownloadCreateResponse
 from backend.schemas.files import ArtworkFileListResponse, artwork_file_response
-from backend.services.workflow_run_service import WorkflowRunService
+from backend.services.shortcut_workflows import first_run_job_id, job_status, run_download_shortcut
 
 router = APIRouter(tags=["artwork-files"])
 
@@ -41,28 +39,12 @@ def retry_artwork_file(
     finally:
         file_repository.close()
 
-    service = WorkflowRunService(db_path, settings_json_path=settings_json_path)
-    try:
-        run = service.run_download_shortcut(
-            source="artwork_file_shortcut",
-            title="Retry artwork file",
-            draft_id=f"artwork-file-retry:{file_id}",
-            config=ScheduledTaskConfig(
-                target=ScheduledTaskTarget(type="single_artwork", artwork_id=file.artwork_id),
-                actions=("download_artist",),
-                max_artists_per_run=1,
-            ),
-            user_id=None,
-            artwork_id=file.artwork_id,
-            retry_failed=True,
-        )
-    finally:
-        service.close()
+    run = run_download_shortcut(
+        DownloadCreateRequest(artwork_id=file.artwork_id, mode="artwork", retry_failed=True),
+        db_path=db_path,
+        settings_json_path=settings_json_path,
+        source="artwork_file_shortcut",
+    )
     queue.wake()
-    job_id = run.items[0].job_ids[0]
-    repository = JobRepository(db_path)
-    try:
-        job = repository.get_by_id(job_id)
-    finally:
-        repository.close()
-    return DownloadCreateResponse(job_id=job_id, status=job.status if job else "queued")
+    job_id = first_run_job_id(run, db_path=db_path)
+    return DownloadCreateResponse(job_id=job_id or run.id, status=job_status(db_path, job_id))

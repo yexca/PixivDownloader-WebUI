@@ -19,6 +19,14 @@ from backend.services.workflow_nodes.utils import dict_option
 
 ACTIVE_JOB_STATUSES = {"inactive", "queued", "running"}
 FAILED_JOB_STATUSES = {"failed", "cancelled"}
+ADVANCED_WORKFLOW_SOURCES = {
+    "advanced",
+    "advanced_manual",
+    "workflow_trigger",
+    "download_api",
+    "library_shortcut",
+    "artwork_file_shortcut",
+}
 
 
 class AdvancedWorkflowRunner:
@@ -94,7 +102,7 @@ class AdvancedWorkflowRunner:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
-        if run.source not in {"advanced", "advanced_manual", "workflow_trigger"}:
+        if run.source not in ADVANCED_WORKFLOW_SOURCES:
             return run
 
         context: dict[str, object] = {}
