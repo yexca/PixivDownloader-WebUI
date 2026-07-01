@@ -59,6 +59,8 @@ class AdvancedWorkflowRunner:
         *,
         source: str = "advanced",
         schedule_id: int | None = None,
+        definition_id: str | None = None,
+        name: str | None = None,
     ) -> WorkflowRun:
         if not definition.nodes:
             raise ValueError("advanced workflow requires at least one node")
@@ -71,8 +73,10 @@ class AdvancedWorkflowRunner:
             failed=0,
             skipped=0,
             concurrency=1,
+            name=(name or definition.name or "Workflow run").strip() or "Workflow run",
             source=source,
             schedule_id=schedule_id,
+            definition_id=definition_id,
             created_at=now,
         )
         self.repository.create_run(run)

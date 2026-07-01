@@ -105,6 +105,7 @@ class WorkflowNodeRunResponse(BaseModel):
 
 class WorkflowRunResponse(BaseModel):
     id: str
+    name: str
     status: str
     total: int
     completed: int
@@ -113,6 +114,7 @@ class WorkflowRunResponse(BaseModel):
     concurrency: int
     source: str
     schedule_id: int | None
+    definition_id: str | None
     failure_reason: FailureReason
     failure: FailureDetail | None
     created_at: str | None
@@ -135,6 +137,7 @@ def workflow_run_response(run: WorkflowRun) -> WorkflowRunResponse:
     node_runs = [workflow_node_run_response(node_run) for node_run in run.node_runs]
     return WorkflowRunResponse(
         id=run.id,
+        name=run.name,
         status=run.status,
         total=run.total,
         completed=run.completed,
@@ -143,6 +146,7 @@ def workflow_run_response(run: WorkflowRun) -> WorkflowRunResponse:
         concurrency=run.concurrency,
         source=run.source,
         schedule_id=run.schedule_id,
+        definition_id=run.definition_id,
         failure_reason=workflow_run_failure_reason(run),
         failure=workflow_run_failure_detail(run, node_runs),
         created_at=run.created_at,

@@ -739,6 +739,9 @@ function runSourceLabel(run: WorkflowRun): string {
 }
 
 function runTitle(run: WorkflowRun): string {
+  if (run.name?.trim()) {
+    return run.name;
+  }
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || `${run.node_runs.length} node workflow`;
   }

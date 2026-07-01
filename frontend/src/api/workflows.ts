@@ -22,6 +22,7 @@ export type WorkflowNodeRun = {
 
 export type WorkflowRun = {
   id: string;
+  name: string;
   status: "running" | "completed" | "failed" | "partial" | "skipped";
   total: number;
   completed: number;
@@ -30,6 +31,7 @@ export type WorkflowRun = {
   concurrency: number;
   source: string;
   schedule_id: number | null;
+  definition_id: string | null;
   failure_reason: FailureReason;
   failure: FailureDetail | null;
   created_at: string | null;

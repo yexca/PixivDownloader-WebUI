@@ -36,7 +36,7 @@ def run_artist_retry_failed_shortcut(
     ensure_download_space(db_path=db_path, settings_json_path=settings_json_path)
     return run_shortcut_definition(
         download_artist_definition(
-            name="Retry failed artist",
+            name=f"Retry failed artist {artist_id}",
             artist_ids=[artist_id],
             artwork_ids=[],
             options={},
@@ -56,9 +56,10 @@ def run_download_shortcut(
     source: str = "download_api",
 ) -> WorkflowRun:
     ensure_download_space(db_path=db_path, settings_json_path=settings_json_path)
+    name = download_shortcut_name(request)
     return run_shortcut_definition(
         download_artist_definition(
-            name="Download artwork" if request.artwork_id else "Download artist",
+            name=name,
             artist_ids=[] if request.user_id is None else [request.user_id],
             artwork_ids=[] if request.artwork_id is None else [request.artwork_id],
             options=download_request_options(request),
@@ -87,7 +88,7 @@ def run_shortcut_definition(
 def sync_artist_definition(artist_id: str) -> AdvancedWorkflowDefinitionRequest:
     return AdvancedWorkflowDefinitionRequest.model_validate(
         {
-            "name": "Sync artist",
+            "name": f"Sync artist {artist_id}",
             "nodes": [
                 target_node(artist_ids=[artist_id], artwork_ids=[], max_artists=1),
                 {
@@ -185,6 +186,23 @@ def download_collect_mode(request: DownloadCreateRequest) -> str:
     if request.pending_only:
         return "pending_files"
     return "new_since_last_download"
+
+
+def download_shortcut_name(request: DownloadCreateRequest) -> str:
+    action = "Retry failed" if request.retry_failed else "Download"
+    if request.artwork_id:
+        target = f"artwork {request.artwork_id}"
+        if request.full_download:
+            return f"Full download {target}"
+        if request.pending_only:
+            return f"Download pending files for {target}"
+        return f"{action} {target}"
+    target = f"artist {request.user_id}" if request.user_id else "artist"
+    if request.full_download:
+        return f"Full download {target}"
+    if request.pending_only:
+        return f"Download pending files for {target}"
+    return f"{action} {target}"
 
 
 def first_run_job_id(run: WorkflowRun, *, db_path: Path | str | None = None) -> str | None:

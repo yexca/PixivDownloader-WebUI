@@ -197,6 +197,9 @@ export function sourceLabel(source: string): string {
 }
 
 export function runTitle(run: WorkflowRun): string {
+  if (run.name?.trim()) {
+    return run.name;
+  }
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || "Workflow run";
   }

@@ -38,8 +38,10 @@ class WorkflowRun:
     failed: int
     skipped: int
     concurrency: int
+    name: str = "Workflow run"
     source: str = "manual"
     schedule_id: int | None = None
+    definition_id: str | None = None
     created_at: str | None = None
     finished_at: str | None = None
     node_runs: list[WorkflowNodeRun] = field(default_factory=list)
@@ -56,13 +58,14 @@ class WorkflowRunRepository:
                 self.conn.execute(
                     """
                     INSERT INTO workflow_runs(
-                        id, status, total, completed, failed, skipped,
-                        concurrency, source, schedule_id, created_at, finished_at
+                        id, name, status, total, completed, failed, skipped,
+                        concurrency, source, schedule_id, definition_id, created_at, finished_at
                     )
-                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         run.id,
+                        run.name,
                         run.status,
                         run.total,
                         run.completed,
@@ -71,6 +74,7 @@ class WorkflowRunRepository:
                         run.concurrency,
                         run.source,
                         run.schedule_id,
+                        run.definition_id,
                         created_at,
                         run.finished_at,
                     ),
@@ -84,7 +88,8 @@ class WorkflowRunRepository:
                 self.conn.execute(
                     """
                     UPDATE workflow_runs
-                    SET status = ?,
+                    SET name = ?,
+                        status = ?,
                         total = ?,
                         completed = ?,
                         failed = ?,
@@ -92,10 +97,12 @@ class WorkflowRunRepository:
                         concurrency = ?,
                         source = ?,
                         schedule_id = ?,
+                        definition_id = ?,
                         finished_at = ?
                     WHERE id = ?
                     """,
                     (
+                        run.name,
                         run.status,
                         run.total,
                         run.completed,
@@ -104,6 +111,7 @@ class WorkflowRunRepository:
                         run.concurrency,
                         run.source,
                         run.schedule_id,
+                        run.definition_id,
                         run.finished_at,
                         run.id,
                     ),
@@ -289,11 +297,17 @@ def workflow_run_from_row(
 ) -> WorkflowRun:
     source = "manual"
     schedule_id = None
+    name = "Workflow run"
+    definition_id = None
     with suppress(IndexError):
         source = str(row["source"] or "manual")
         schedule_id = int(row["schedule_id"]) if row["schedule_id"] is not None else None
+    with suppress(IndexError):
+        name = str(row["name"] or "Workflow run")
+        definition_id = str(row["definition_id"]) if row["definition_id"] is not None else None
     return WorkflowRun(
         id=str(row["id"]),
+        name=name,
         status=str(row["status"]),
         total=int(row["total"]),
         completed=int(row["completed"]),
@@ -302,6 +316,7 @@ def workflow_run_from_row(
         concurrency=int(row["concurrency"]),
         source=source,
         schedule_id=schedule_id,
+        definition_id=definition_id,
         created_at=row["created_at"],
         finished_at=row["finished_at"],
         node_runs=node_runs,

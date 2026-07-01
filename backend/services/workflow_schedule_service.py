@@ -87,7 +87,13 @@ class WorkflowScheduleService:
             settings_json_path=self.settings_json_path,
         )
         try:
-            return runner.create_run(definition, source=source, schedule_id=trigger_id)
+            return runner.create_run(
+                definition,
+                source=source,
+                schedule_id=trigger_id,
+                definition_id=saved.id,
+                name=saved.name,
+            )
         finally:
             runner.close()
 
