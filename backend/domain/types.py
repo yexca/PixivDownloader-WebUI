@@ -13,6 +13,7 @@ JobType = Literal[
     "sync_artist",
     "retry_failed",
     "retry_failed_artist",
+    "import_legacy_database",
     "hydrate_legacy_import",
     "resolve_workflow_targets",
     "resolve_artist_targets",

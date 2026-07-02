@@ -311,16 +311,15 @@ export function SettingsPage(): JSX.Element {
   const importLegacyDatabaseMutation = useMutation({
     mutationFn: importLegacyDatabase,
     onSuccess: (response) => {
-      const hydrationMessage = response.hydration_job_id
-        ? ` Legacy hydration job has started: ${response.hydration_job_id}.`
-        : "";
+      const runMessage = response.workflow_run_id ? ` Run: ${response.workflow_run_id}.` : "";
+      const jobMessage = response.import_job_id ? ` Import job: ${response.import_job_id}.` : "";
       pushToast({
-        title: "Legacy database imported",
-        description: `${response.imported_artists} artists imported, ${response.skipped_rows} rows skipped.${hydrationMessage}`,
+        title: "Legacy import started",
+        description: `${response.message}${runMessage}${jobMessage}`,
         tone: "success"
       });
-      void queryClient.invalidateQueries({ queryKey: ["artists"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
     },
     onError: (error) => pushToast({ title: "Legacy database import failed", description: error.message, tone: "error" })
   });

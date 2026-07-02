@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/pages/settings/shared";
 
 export type AdvancedSettingsTabProps = {
-  importLegacyDatabaseData?: { imported_artists: number; total_rows: number };
+  importLegacyDatabaseData?: { workflow_run_id?: string | null; import_job_id?: string | null };
   isImporting: boolean;
   legacyDatabaseInputId: string;
   onImportLegacyDatabase: (file: File) => void;
@@ -49,7 +49,8 @@ export function AdvancedSettingsTab({
             </Button>
             {importLegacyDatabaseData ? (
               <span className="text-xs text-muted-foreground">
-                {importLegacyDatabaseData.imported_artists} of {importLegacyDatabaseData.total_rows} rows imported.
+                Legacy import workflow started
+                {importLegacyDatabaseData.workflow_run_id ? `: ${importLegacyDatabaseData.workflow_run_id}` : "."}
               </span>
             ) : null}
           </div>

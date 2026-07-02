@@ -23,6 +23,7 @@ AdvancedWorkflowNodeType = Literal[
     "filter_artworks",
     "execute_actions",
     "job_action",
+    "legacy_database_import",
     "legacy_import_hydration",
 ]
 

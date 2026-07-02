@@ -24,6 +24,7 @@ from backend.services.job_service import JobService
 from backend.services.settings_service import AppSettingsService
 from backend.services.workflow_nodes import target as workflow_target_node
 from backend.services.workflow_trigger_facade_service import WorkflowTriggerFacadeService
+from backend.workers.download_worker import DownloadWorker
 
 
 class NoopQueue:
@@ -510,30 +511,26 @@ def test_import_legacy_database_endpoint(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["imported_artists"] == 2
+    assert body["imported_artists"] == 0
     assert body["skipped_rows"] == 0
-    assert body["total_rows"] == 2
-    assert body["hydration_job_id"]
+    assert body["total_rows"] == 0
+    assert body["workflow_run_id"]
+    assert body["import_job_id"]
+    assert body["hydration_job_id"] is None
     assert queue.wake_count == 1
 
-    artist_response = client.get("/api/artists/100058387")
-    assert artist_response.status_code == 200
-    assert artist_response.json()["latest_downloaded_artwork_id"] == "113381074"
     repository = JobRepository(tmp_path / "pixiv.sqlite3")
     try:
-        job = repository.get_by_id(body["hydration_job_id"])
+        job = repository.get_by_id(body["import_job_id"])
     finally:
         repository.close()
     assert job is not None
-    assert job.type == "hydrate_legacy_import"
-    assert job.total_files == 2
+    assert job.type == "import_legacy_database"
     assert job.workflow_run_id is not None
     assert job.workflow_node_run_id is not None
     assert job.workflow_source == "advanced_workflow"
     assert "workflow_source" not in job.options
-    assert job.options["source"] == "legacy_database"
-    assert job.options["artist_ids"] == ["100058387", "101013492"]
-    assert job.options["legacy_latest_download_id_by_artist"]["100058387"] == "113381074"
+    assert job.options["import_id"]
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
     try:
         run = workflow_repository.get_run(str(job.workflow_run_id))
@@ -542,6 +539,52 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert run is not None
     assert run.source == "legacy_import"
     assert run.node_runs[0].job_ids == [job.id]
+    assert [node.node_type for node in run.node_runs] == [
+        "legacy_database_import",
+        "legacy_import_hydration",
+    ]
+
+
+def test_legacy_import_workflow_import_job_imports_artists_and_continues(tmp_path):
+    queue = NoopQueue()
+    client = make_client(tmp_path, queue=queue)
+    legacy_db_path = tmp_path / "legacy-pixiv.db"
+    create_legacy_database(legacy_db_path)
+
+    with legacy_db_path.open("rb") as file:
+        response = client.post(
+            "/api/imports/legacy-database",
+            files={"file": ("pixiv.db", file, "application/octet-stream")},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    worker = DownloadWorker(db_path=tmp_path / "pixiv.sqlite3")
+    job = worker.run_job(body["import_job_id"])
+
+    assert job.status == "completed"
+    assert job.total_files == 2
+    assert job.completed_files == 2
+    artist_response = client.get("/api/artists/100058387")
+    assert artist_response.status_code == 200
+    assert artist_response.json()["latest_downloaded_artwork_id"] == "113381074"
+    workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        run = workflow_repository.get_run(body["workflow_run_id"])
+    finally:
+        workflow_repository.close()
+    assert run is not None
+    assert run.node_runs[0].status == "completed"
+    assert run.node_runs[1].status == "running"
+    assert run.node_runs[1].job_ids
+    repository = JobRepository(tmp_path / "pixiv.sqlite3")
+    try:
+        hydration_job = repository.get_by_id(run.node_runs[1].job_ids[0])
+    finally:
+        repository.close()
+    assert hydration_job is not None
+    assert hydration_job.type == "hydrate_legacy_import"
+    assert hydration_job.options["artist_ids"] == ["100058387", "101013492"]
 
 
 def test_create_download_job(tmp_path):

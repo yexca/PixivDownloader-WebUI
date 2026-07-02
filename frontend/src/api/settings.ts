@@ -94,6 +94,8 @@ export type LegacyDatabaseImportResponse = {
   imported_artists: number;
   skipped_rows: number;
   total_rows: number;
+  workflow_run_id?: string | null;
+  import_job_id?: string | null;
   hydration_job_id?: string | null;
   message: string;
 };

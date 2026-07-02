@@ -30,6 +30,7 @@ from backend.services.legacy_import_hydration_service import (
     LegacyImportHydrationSummary,
     legacy_hydration_targets_from_options,
 )
+from backend.services.legacy_import_service import LegacyDatabaseImportService
 from backend.services.library_sync_service import LibrarySyncService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.pixiv_rate_policy import (
@@ -83,6 +84,9 @@ class DownloadWorker:
                 return result
 
             job = self._start(repository, job)
+            if job.type == "import_legacy_database":
+                result = self._run_legacy_database_import_job(repository, job)
+                return result
             if job.type == "hydrate_legacy_import":
                 result = self._run_legacy_import_hydration_job(repository, job)
                 return result
@@ -292,6 +296,45 @@ class DownloadWorker:
             artist_ids=resolved.artist_ids,
             actions=actions,
             download_options=download_options,
+        )
+        return repository.get_by_id(job.id) or finished
+
+    def _run_legacy_database_import_job(self, repository: JobRepository, job: Job) -> Job:
+        import_id = string_option(job.options.get("import_id"))
+        if import_id is None:
+            raise ValueError("legacy database import job requires import_id")
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Importing legacy database artists",
+                payload={"import_id": import_id},
+            )
+        )
+        summary = LegacyDatabaseImportService(self.db_path).scan_import(import_id)
+        latest = repository.get_by_id(job.id) or job
+        finished = replace(
+            latest,
+            status="completed",
+            total_files=summary.total_rows,
+            completed_files=summary.imported_artists,
+            skipped_files=summary.skipped_rows,
+            failed_files=0,
+            finished_at=utc_now(),
+        )
+        repository.update(finished)
+        repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Legacy database import completed",
+                payload={
+                    "import_id": import_id,
+                    "total_rows": summary.total_rows,
+                    "imported_artists": summary.imported_artists,
+                    "skipped_rows": summary.skipped_rows,
+                },
+            )
         )
         return repository.get_by_id(job.id) or finished
 

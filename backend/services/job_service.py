@@ -184,6 +184,43 @@ class JobService:
         )
         return self.repository.get_by_id(job.id) or job
 
+    def create_legacy_database_import_job(
+        self,
+        *,
+        import_id: str,
+        options: dict[str, object] | None = None,
+        workflow_link: WorkflowJobLink | None = None,
+    ) -> Job:
+        metadata = without_workflow_options(options or {})
+        job_options = {
+            "import_id": import_id,
+            "activation_scope": "one_time",
+            **metadata,
+        }
+        link = workflow_link or WorkflowJobLink()
+        status: JobStatus = self._next_one_time_status()
+        job = Job(
+            id=str(uuid4()),
+            type="import_legacy_database",
+            status=status,
+            options=job_options,
+            workflow_run_id=link.run_id,
+            workflow_node_run_id=link.node_run_id,
+            workflow_source=link.source,
+        )
+        self.repository.create(job)
+        self.repository.add_event(
+            JobEvent(
+                job_id=job.id,
+                level="info",
+                message="Legacy database import queued"
+                if status == "queued"
+                else "Legacy database import waiting for one-time task capacity",
+                payload=job_options,
+            )
+        )
+        return self.repository.get_by_id(job.id) or job
+
     def create_resolve_workflow_targets_job(
         self,
         *,

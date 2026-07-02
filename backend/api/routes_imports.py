@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, File, UploadFile
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
+from backend.core.paths import resources_dir
+from backend.repositories.legacy_import_repository import LegacyImport, LegacyImportRepository
 from backend.schemas.imports import LegacyDatabaseImportResponse
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
-from backend.services.legacy_import_service import LegacyDatabaseImportService
 
 router = APIRouter(prefix="/api/imports", tags=["imports"])
 
@@ -20,32 +24,49 @@ def import_legacy_database(
     queue: Queue,
     file: Annotated[UploadFile, File()],
 ) -> LegacyDatabaseImportResponse:
+    import_id = str(uuid4())
+    legacy_path = legacy_import_upload_path(import_id, file.filename)
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        summary = LegacyDatabaseImportService(db_path).import_file(file.file)
+        with legacy_path.open("wb") as target:
+            shutil.copyfileobj(file.file, target)
     finally:
         file.file.close()
+    legacy_repository = LegacyImportRepository(db_path)
+    try:
+        legacy_repository.create(
+            LegacyImport(
+                id=import_id,
+                source_path=str(legacy_path),
+                status="pending",
+            )
+        )
+    finally:
+        legacy_repository.close()
     runner = AdvancedWorkflowRunner(db_path, settings_json_path=settings_json_path)
     try:
         run = runner.create_run(
-            legacy_import_hydration_definition(
-                artist_ids=summary.imported_artist_ids,
-                legacy_latest_download_id_by_artist=(
-                    summary.legacy_latest_download_id_by_artist or {}
-                ),
-            ),
+            legacy_import_definition(import_id=import_id),
             source="legacy_import",
         )
     finally:
         runner.close()
-    job_id = first_workflow_job_id(run)
-    if job_id is not None:
+    legacy_repository = LegacyImportRepository(db_path)
+    try:
+        legacy_repository.update_workflow_run_id(import_id, run.id)
+    finally:
+        legacy_repository.close()
+    import_job_id = first_workflow_job_id(run)
+    if import_job_id is not None:
         queue.wake()
     return LegacyDatabaseImportResponse(
-        imported_artists=summary.imported_artists,
-        skipped_rows=summary.skipped_rows,
-        total_rows=summary.total_rows,
-        hydration_job_id=job_id,
-        message=f"Imported {summary.imported_artists} artists from legacy database.",
+        imported_artists=0,
+        skipped_rows=0,
+        total_rows=0,
+        workflow_run_id=run.id,
+        import_job_id=import_job_id,
+        hydration_job_id=None,
+        message="Legacy database import workflow started.",
     )
 
 
@@ -60,26 +81,35 @@ def first_workflow_job_id(run: object) -> str | None:
     return None
 
 
-def legacy_import_hydration_definition(
-    *,
-    artist_ids: tuple[str, ...],
-    legacy_latest_download_id_by_artist: dict[str, str | None],
-) -> AdvancedWorkflowDefinitionRequest:
+def legacy_import_definition(*, import_id: str) -> AdvancedWorkflowDefinitionRequest:
     return AdvancedWorkflowDefinitionRequest.model_validate(
         {
-            "name": "Legacy import hydration",
+            "name": "Legacy database import",
+            "metadata": {"system_workflow": "legacy_import"},
             "nodes": [
+                {
+                    "id": "import",
+                    "type": "legacy_database_import",
+                    "title": "Import legacy artists",
+                    "config": {"import_id": import_id},
+                },
                 {
                     "id": "hydrate",
                     "type": "legacy_import_hydration",
                     "title": "Legacy import hydration",
-                    "config": {
-                        "artist_ids": list(artist_ids),
-                        "legacy_latest_download_id_by_artist": (
-                            legacy_latest_download_id_by_artist
-                        ),
-                    },
-                }
+                    "config": {"import_id": import_id},
+                },
             ],
         }
     )
+
+
+def legacy_import_upload_path(import_id: str, filename: str | None) -> Path:
+    suffix = ".db"
+    if filename:
+        lowered = filename.lower()
+        for candidate in (".db", ".sqlite", ".sqlite3"):
+            if lowered.endswith(candidate):
+                suffix = candidate
+                break
+    return resources_dir() / "imports" / import_id / f"pixiv{suffix}"
