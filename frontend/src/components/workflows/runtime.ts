@@ -200,6 +200,9 @@ export function runTitle(run: WorkflowRun): string {
   if (run.name?.trim()) {
     return run.name;
   }
+  if (run.definition_id) {
+    return "Workflow run";
+  }
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || "Workflow run";
   }

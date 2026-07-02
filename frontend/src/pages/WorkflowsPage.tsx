@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Activity,
   CheckCircle2,
@@ -44,6 +44,7 @@ import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
 import { AdvancedWorkflowBuilder, type AdvancedWorkflowBuilderStage } from "@/components/workflows/AdvancedWorkflowBuilder";
+import { definitionRunTitle, recentDefinitionRuns, workflowNodes } from "@/components/workflows/definitionMatching";
 import { WorkflowLimitPanel } from "@/components/workflows/WorkflowRuntimeCards";
 import { cn, formatDate, percent } from "@/lib/utils";
 
@@ -83,7 +84,6 @@ const sourceLabels: Record<string, string> = {
 export function WorkflowsPage(): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [definitionFilter, setDefinitionFilter] = React.useState<DefinitionFilter>(
     definitionFilterFromParam(searchParams.get("filter"))
@@ -95,6 +95,7 @@ export function WorkflowsPage(): JSX.Element {
   const [editingTriggerId, setEditingTriggerId] = React.useState<number | null>(null);
   const [deleteDefinition, setDeleteDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
+  const [optimisticRuns, setOptimisticRuns] = React.useState<Record<string, WorkflowRun>>({});
 
   const definitions = useQuery({
     queryKey: ["workflow-definitions"],
@@ -142,10 +143,12 @@ export function WorkflowsPage(): JSX.Element {
   const runDefinition = useMutation({
     mutationFn: runWorkflowDefinition,
     onSuccess: (run) => {
-      pushToast({ title: "Workflow started", description: run.id, tone: "success" });
+      pushToast({ title: "Workflow started", description: run.name || run.id, tone: "success" });
+      if (selectedDefinitionId) {
+        setOptimisticRuns((current) => ({ ...current, [selectedDefinitionId]: run }));
+      }
       void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      navigate(`/runs?run=${encodeURIComponent(run.id)}`);
     },
     onError: (error) => pushToast({ title: "Workflow could not start", description: error.message, tone: "error" })
   });
@@ -227,6 +230,14 @@ export function WorkflowsPage(): JSX.Element {
     setEditingTriggerId(triggerId);
     setBuilderOpen(true);
   };
+  const definitionRuns = (definition: WorkflowDefinition): WorkflowRun[] => {
+    const matchedRuns = recentDefinitionRuns(definition, runItems);
+    const optimisticRun = optimisticRuns[definition.id];
+    if (!optimisticRun || matchedRuns.some((run) => run.id === optimisticRun.id)) {
+      return matchedRuns;
+    }
+    return [optimisticRun, ...matchedRuns];
+  };
 
   return (
     <>
@@ -294,7 +305,7 @@ export function WorkflowsPage(): JSX.Element {
           {selectedDefinition ? (
             <DefinitionWorkbench
               definition={selectedDefinition}
-              latestRun={latestDefinitionRun(selectedDefinition, runItems)}
+              runs={definitionRuns(selectedDefinition)}
               running={runDefinition.isPending}
               onEdit={() => openEditBuilder(selectedDefinition)}
               onEditStage={(stage) => openEditBuilder(selectedDefinition, stage)}
@@ -486,7 +497,7 @@ function DeleteWorkflowConfirmDialog({
 
 function DefinitionWorkbench({
   definition,
-  latestRun,
+  runs,
   running,
   onEdit,
   onEditStage,
@@ -497,7 +508,7 @@ function DefinitionWorkbench({
   onRun
 }: {
   definition: WorkflowDefinition;
-  latestRun: WorkflowRun | null;
+  runs: WorkflowRun[];
   running: boolean;
   onEdit: () => void;
   onEditStage: (stage: AdvancedWorkflowBuilderStage) => void;
@@ -508,6 +519,7 @@ function DefinitionWorkbench({
   onRun: () => void;
 }): JSX.Element {
   const nodes = workflowNodes(definition);
+  const latestRun = runs[0] ?? null;
   return (
     <>
       <section className="surface p-4">
@@ -550,25 +562,52 @@ function DefinitionWorkbench({
 
       <WorkflowGraph nodes={nodes} latestRun={latestRun} onEditNode={onEditStage} />
 
-      {latestRun ? (
-        <section className="surface p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold">Latest Run</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {runSourceLabel(latestRun)} · {formatDate(latestRun.created_at)}
-              </p>
-            </div>
-            <Button type="button" size="sm" variant="outline" asChild>
-              <Link to={`/runs?run=${encodeURIComponent(latestRun.id)}`}>Open Run</Link>
-            </Button>
-          </div>
-          <RunNodeTimeline run={latestRun} />
-        </section>
-      ) : (
-        <DataState title="No run yet" description="Run this definition to see node execution here." />
-      )}
+      <DefinitionRunsPanel definition={definition} runs={runs} />
     </>
+  );
+}
+
+function DefinitionRunsPanel({ definition, runs }: { definition: WorkflowDefinition; runs: WorkflowRun[] }): JSX.Element {
+  const latestRun = runs[0] ?? null;
+  if (!latestRun) {
+    return <DataState title="No run yet" description="Run this definition to see node execution here." />;
+  }
+  return (
+    <section className="surface p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold">Recent Runs</h3>
+          <p className="mt-1 text-sm font-medium">{definitionRunTitle(definition, latestRun)}</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Latest {runSourceLabel(latestRun)} · {formatDate(latestRun.created_at)}
+          </p>
+        </div>
+        <Badge tone={workflowStatusTone(latestRun.status)}>{latestRun.status}</Badge>
+      </div>
+      <RunNodeTimeline run={latestRun} />
+      {runs.length > 1 ? (
+        <div className="mt-4 space-y-2 border-t pt-4">
+          {runs.slice(1, 5).map((run) => (
+            <Link
+              key={run.id}
+              to={`/runs?run=${encodeURIComponent(run.id)}`}
+              className="flex flex-col gap-2 rounded-md border bg-background p-3 text-sm transition-colors hover:bg-muted/50 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{definitionRunTitle(definition, run)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {runSourceLabel(run)} · {formatDate(run.created_at)}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                <span>{run.completed}/{run.total} nodes</span>
+                <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
+              </div>
+            </Link>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -975,22 +1014,6 @@ function EmptyDefinitionState({ onCreate }: { onCreate: () => void }): JSX.Eleme
   );
 }
 
-function workflowNodes(definition: WorkflowDefinition): AdvancedWorkflowNode[] {
-  const maybeNodes = (definition.definition as { nodes?: unknown }).nodes;
-  if (!Array.isArray(maybeNodes)) {
-    return [];
-  }
-  return maybeNodes.filter(isWorkflowNode);
-}
-
-function isWorkflowNode(value: unknown): value is AdvancedWorkflowNode {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const node = value as Partial<AdvancedWorkflowNode>;
-  return typeof node.id === "string" && typeof node.type === "string" && typeof node.config === "object";
-}
-
 function filterDefinitions(definitions: WorkflowDefinition[], search: string): WorkflowDefinition[] {
   const query = search.trim().toLowerCase();
   if (!query) {
@@ -1020,12 +1043,6 @@ function filterShortcutJobs(jobs: Job[], search: string): Job[] {
         ? [job.id, job.type, job.workflow_source, job.input_user_id, job.input_artwork_id, job.status].join(" ").toLowerCase().includes(query)
         : true
     );
-}
-
-function latestDefinitionRun(definition: WorkflowDefinition, runs: WorkflowRun[]): WorkflowRun | null {
-  const triggerIds = new Set(definition.triggers.map((trigger) => trigger.id));
-  const matches = runs.filter((run) => run.schedule_id !== null && triggerIds.has(run.schedule_id));
-  return matches[0] ?? null;
 }
 
 function isShortcutJob(job: Job): boolean {
@@ -1103,6 +1120,9 @@ function runSourceLabel(run: WorkflowRun): string {
 function runTitle(run: WorkflowRun): string {
   if (run.name?.trim()) {
     return run.name;
+  }
+  if (run.definition_id) {
+    return "Workflow run";
   }
   if (run.node_runs.length) {
     return run.node_runs[0]?.title || `${run.node_runs.length} node workflow`;

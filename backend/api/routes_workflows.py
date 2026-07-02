@@ -32,7 +32,7 @@ def create_advanced_workflow_run(
 ) -> WorkflowRunResponse:
     runner = AdvancedWorkflowRunner(db_path, settings_json_path=settings_json_path)
     try:
-        run = runner.create_run(request.definition)
+        run = runner.create_run(request.definition, name=request.definition.name)
     finally:
         runner.close()
     if any(node.job_ids for node in run.node_runs):

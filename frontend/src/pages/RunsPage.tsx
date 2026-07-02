@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { RefreshCw, Search } from "lucide-react";
 
-import { listWorkflowRuns, type WorkflowRun } from "@/api/workflows";
+import { listWorkflowDefinitions, listWorkflowRuns, type WorkflowDefinition, type WorkflowRun } from "@/api/workflows";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
@@ -13,7 +13,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { WorkflowRunDetail } from "@/components/workflows/WorkflowRunDetail";
 import { loadRunJobs } from "@/components/workflows/WorkflowRuntimeCards";
 import { cn, formatDate } from "@/lib/utils";
-import { runTitle, sourceLabel, workflowRunTone } from "@/components/workflows/runtime";
+import { sourceLabel, workflowRunTone } from "@/components/workflows/runtime";
+import { definitionRunTitle, matchingDefinitionForRun } from "@/components/workflows/definitionMatching";
 
 type RunFilter = "all" | "running" | "completed" | "failed" | "scheduled" | "manual" | "shortcuts";
 
@@ -28,6 +29,7 @@ const runFilterTabs: Array<{ value: RunFilter; label: string }> = [
 ];
 
 const emptyRuns: WorkflowRun[] = [];
+const emptyDefinitions: WorkflowDefinition[] = [];
 
 export function RunsPage(): JSX.Element {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -40,7 +42,13 @@ export function RunsPage(): JSX.Element {
     queryFn: () => listWorkflowRuns(50),
     refetchInterval: 5000
   });
+  const definitions = useQuery({
+    queryKey: ["workflow-definitions"],
+    queryFn: listWorkflowDefinitions,
+    refetchInterval: 15000
+  });
   const runItems = runs.data?.items ?? emptyRuns;
+  const definitionItems = definitions.data?.items ?? emptyDefinitions;
   const filteredRuns = filterRuns(filterRunsByKind(runItems, filter), search);
   const selectedRun = filteredRuns.find((run) => run.id === selectedRunId) ?? filteredRuns[0] ?? null;
   const selectedRunJobs = useQuery({
@@ -51,6 +59,9 @@ export function RunsPage(): JSX.Element {
   });
 
   React.useEffect(() => {
+    if (searchParams.get("run")) {
+      return;
+    }
     if (selectedRun && selectedRun.id !== selectedRunId) {
       setSelectedRunId(selectedRun.id);
       const nextParams = new URLSearchParams(searchParams);
@@ -58,6 +69,13 @@ export function RunsPage(): JSX.Element {
       setSearchParams(nextParams, { replace: true });
     }
   }, [searchParams, selectedRun, selectedRunId, setSearchParams]);
+
+  React.useEffect(() => {
+    const runId = searchParams.get("run");
+    if (runId !== selectedRunId) {
+      setSelectedRunId(runId);
+    }
+  }, [searchParams, selectedRunId]);
 
   const refresh = () => {
     void runs.refetch();
@@ -134,7 +152,7 @@ export function RunsPage(): JSX.Element {
           ) : runs.isError ? (
             <DataState title="Could not load runs" description={runs.error.message} variant="error" />
           ) : (
-            <RunList runs={filteredRuns} selectedRunId={selectedRun?.id ?? null} onSelect={selectRun} />
+            <RunList runs={filteredRuns} definitions={definitionItems} selectedRunId={selectedRun?.id ?? null} onSelect={selectRun} />
           )}
           </aside>
 
@@ -158,10 +176,12 @@ export function RunsPage(): JSX.Element {
 
 function RunList({
   runs,
+  definitions,
   selectedRunId,
   onSelect
 }: {
   runs: WorkflowRun[];
+  definitions: WorkflowDefinition[];
   selectedRunId: string | null;
   onSelect: (run: WorkflowRun) => void;
 }): JSX.Element {
@@ -171,18 +191,41 @@ function RunList({
   return (
     <section className="space-y-2">
       {runs.map((run) => (
-        <button
+        <RunListItem
           key={run.id}
+          run={run}
+          definition={matchingDefinitionForRun(definitions, run)}
+          selected={run.id === selectedRunId}
+          onSelect={onSelect}
+        />
+      ))}
+    </section>
+  );
+}
+
+function RunListItem({
+  run,
+  definition,
+  selected,
+  onSelect
+}: {
+  run: WorkflowRun;
+  definition: WorkflowDefinition | null;
+  selected: boolean;
+  onSelect: (run: WorkflowRun) => void;
+}): JSX.Element {
+  return (
+        <button
           type="button"
           className={cn(
             "w-full rounded-md border bg-card p-3 text-left transition-colors hover:bg-muted/50",
-            run.id === selectedRunId && "border-primary bg-primary/5"
+            selected && "border-primary bg-primary/5"
           )}
           onClick={() => onSelect(run)}
         >
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <h3 className="truncate text-sm font-semibold">{runTitle(run)}</h3>
+              <h3 className="truncate text-sm font-semibold">{definitionRunTitle(definition, run)}</h3>
               <p className="mt-1 text-xs text-muted-foreground">
                 {sourceLabel(run.source)} · {formatDate(run.created_at)}
               </p>
@@ -195,8 +238,6 @@ function RunList({
             <span>{run.node_runs.reduce((total, node) => total + node.job_ids.length, 0)} job(s)</span>
           </div>
         </button>
-      ))}
-    </section>
   );
 }
 
@@ -208,6 +249,7 @@ function filterRuns(runs: WorkflowRun[], search: string): WorkflowRun[] {
   return runs.filter((run) =>
     [
       run.id,
+      run.name,
       run.status,
       run.source,
       sourceLabel(run.source),
