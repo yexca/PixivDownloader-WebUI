@@ -31,7 +31,15 @@ import {
   workflowRunTone
 } from "./runtime";
 
-export function RunWorkflowCard({ run, onInspect }: { run: WorkflowRun; onInspect: () => void }): JSX.Element {
+export function RunWorkflowCard({
+  run,
+  onInspect,
+  actions
+}: {
+  run: WorkflowRun;
+  onInspect: () => void;
+  actions?: React.ReactNode;
+}): JSX.Element {
   return (
     <article className="surface p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -48,12 +56,15 @@ export function RunWorkflowCard({ run, onInspect }: { run: WorkflowRun; onInspec
             {run.completed}/{run.total} completed, {run.failed} failed, {run.skipped} skipped
           </p>
         </div>
-        <div className="text-left text-sm text-muted-foreground sm:text-right">
+        <div className="flex shrink-0 flex-col items-start gap-2 text-left text-sm text-muted-foreground sm:items-end sm:text-right">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <span>Concurrency {run.concurrency}</span>
+            <Button type="button" size="sm" variant="outline" onClick={onInspect}>
+              Inspect
+            </Button>
+            {actions}
+          </div>
           <div>{formatDate(run.created_at)}</div>
-          <div className="mt-1">Concurrency {run.concurrency}</div>
-          <Button type="button" size="sm" variant="outline" className="mt-2" onClick={onInspect}>
-            Inspect
-          </Button>
         </div>
       </div>
       <div className="mt-3 space-y-2">

@@ -379,22 +379,23 @@ function DismissibleRunCard({
   onDismiss: () => void;
 }): JSX.Element {
   return (
-    <div className="space-y-2">
-      <div className="flex justify-end">
+    <RunWorkflowCard
+      run={run}
+      onInspect={onInspect}
+      actions={
         <Button
           type="button"
           size="icon"
           variant="ghost"
-          className="h-7 w-7"
+          className="h-7 w-7 text-muted-foreground hover:bg-muted hover:text-foreground"
           title="Hide from dashboard"
           aria-label="Hide from dashboard"
           onClick={onDismiss}
         >
           <X className="h-4 w-4" aria-hidden="true" />
         </Button>
-      </div>
-      <RunWorkflowCard run={run} onInspect={onInspect} />
-    </div>
+      }
+    />
   );
 }
 
