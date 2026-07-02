@@ -1,6 +1,6 @@
 import * as React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import { RefreshCw, Search } from "lucide-react";
 
 import { listWorkflowDefinitions, listWorkflowRuns, type WorkflowDefinition, type WorkflowRun } from "@/api/workflows";
@@ -30,12 +30,17 @@ const runFilterTabs: Array<{ value: RunFilter; label: string }> = [
 
 const emptyRuns: WorkflowRun[] = [];
 const emptyDefinitions: WorkflowDefinition[] = [];
+const runsPageStateKey = "pixiv-downloader:runs-page-state";
 
 export function RunsPage(): JSX.Element {
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [filter, setFilterState] = React.useState<RunFilter>(runFilterFromParam(searchParams.get("filter")));
-  const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
-  const [selectedRunId, setSelectedRunId] = React.useState(searchParams.get("run"));
+  const initialParamsRef = React.useRef(searchParams.toString() ? searchParams : readPersistedRunsPageState() ?? searchParams);
+  const initialParams = initialParamsRef.current;
+  const [filter, setFilterState] = React.useState<RunFilter>(runFilterFromParam(initialParams.get("filter")));
+  const [search, setSearch] = React.useState(initialParams.get("q") ?? "");
+  const [selectedRunId, setSelectedRunId] = React.useState(initialParams.get("run"));
+  const defaultRunSyncedRef = React.useRef(Boolean(initialParams.get("run")));
 
   const runs = useQuery({
     queryKey: ["workflow-runs", 50],
@@ -59,23 +64,36 @@ export function RunsPage(): JSX.Element {
   });
 
   React.useEffect(() => {
-    if (searchParams.get("run")) {
-      return;
-    }
-    if (selectedRun && selectedRun.id !== selectedRunId) {
-      setSelectedRunId(selectedRun.id);
-      const nextParams = new URLSearchParams(searchParams);
-      nextParams.set("run", selectedRun.id);
-      setSearchParams(nextParams, { replace: true });
-    }
-  }, [searchParams, selectedRun, selectedRunId, setSearchParams]);
-
-  React.useEffect(() => {
     const runId = searchParams.get("run");
     if (runId !== selectedRunId) {
       setSelectedRunId(runId);
+      defaultRunSyncedRef.current = Boolean(runId);
     }
   }, [searchParams, selectedRunId]);
+
+  React.useEffect(() => {
+    if (location.pathname !== "/runs" || searchParams.toString() || !initialParams.toString()) {
+      return;
+    }
+    setSearchParams(initialParams, { replace: true });
+  }, [initialParams, location.pathname, searchParams, setSearchParams]);
+
+  React.useEffect(() => {
+    if (location.pathname === "/runs") {
+      persistRunsPageState(searchParams);
+    }
+  }, [location.pathname, searchParams]);
+
+  React.useEffect(() => {
+    if (location.pathname !== "/runs" || defaultRunSyncedRef.current || searchParams.get("run") || !selectedRun) {
+      return;
+    }
+    defaultRunSyncedRef.current = true;
+    setSelectedRunId(selectedRun.id);
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set("run", selectedRun.id);
+    setSearchParams(nextParams, { replace: true });
+  }, [location.pathname, searchParams, selectedRun, setSearchParams]);
 
   const refresh = () => {
     void runs.refetch();
@@ -91,6 +109,7 @@ export function RunsPage(): JSX.Element {
       nextParams.delete("q");
     }
     nextParams.delete("run");
+    defaultRunSyncedRef.current = false;
     setSelectedRunId(null);
     setSearchParams(nextParams, { replace: true });
   };
@@ -103,6 +122,7 @@ export function RunsPage(): JSX.Element {
       nextParams.delete("q");
     }
     nextParams.delete("run");
+    defaultRunSyncedRef.current = false;
     setSelectedRunId(null);
     setSearchParams(nextParams, { replace: true });
   };
@@ -110,6 +130,7 @@ export function RunsPage(): JSX.Element {
     setSelectedRunId(run.id);
     const nextParams = new URLSearchParams(searchParams);
     nextParams.set("run", run.id);
+    defaultRunSyncedRef.current = true;
     setSearchParams(nextParams, { replace: true });
   };
 
@@ -307,4 +328,29 @@ function runFilterFromParam(value: string | null): RunFilter {
     return value;
   }
   return "all";
+}
+
+function readPersistedRunsPageState(): URLSearchParams | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  try {
+    const value = window.sessionStorage.getItem(runsPageStateKey);
+    return value ? new URLSearchParams(value) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistRunsPageState(params: URLSearchParams): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (params.toString()) {
+      window.sessionStorage.setItem(runsPageStateKey, params.toString());
+    }
+  } catch {
+    // Storage can be disabled; URL state still keeps the page usable.
+  }
 }

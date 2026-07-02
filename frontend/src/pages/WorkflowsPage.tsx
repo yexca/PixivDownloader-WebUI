@@ -95,6 +95,7 @@ export function WorkflowsPage(): JSX.Element {
   const [editingTriggerId, setEditingTriggerId] = React.useState<number | null>(null);
   const [deleteDefinition, setDeleteDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = React.useState<Record<string, string>>({});
   const [optimisticRuns, setOptimisticRuns] = React.useState<Record<string, WorkflowRun>>({});
 
   const definitions = useQuery({
@@ -182,6 +183,11 @@ export function WorkflowsPage(): JSX.Element {
       setDeleteDefinition(null);
       const nextDefinition = filteredDefinitions.find((item) => item.id !== definition.id) ?? null;
       setSelectedDefinitionId(nextDefinition?.id ?? null);
+      setSelectedNodeIds((current) => {
+        const next = { ...current };
+        delete next[definition.id];
+        return next;
+      });
       void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
       void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
     },
@@ -306,7 +312,14 @@ export function WorkflowsPage(): JSX.Element {
             <DefinitionWorkbench
               definition={selectedDefinition}
               runs={definitionRuns(selectedDefinition)}
+              selectedNodeId={selectedNodeIds[selectedDefinition.id] ?? null}
               running={runDefinition.isPending}
+              onSelectNode={(nodeId) =>
+                setSelectedNodeIds((current) => ({
+                  ...current,
+                  [selectedDefinition.id]: nodeId
+                }))
+              }
               onEdit={() => openEditBuilder(selectedDefinition)}
               onEditStage={(stage) => openEditBuilder(selectedDefinition, stage)}
               onDelete={() => setDeleteDefinition(selectedDefinition)}
@@ -498,7 +511,9 @@ function DeleteWorkflowConfirmDialog({
 function DefinitionWorkbench({
   definition,
   runs,
+  selectedNodeId,
   running,
+  onSelectNode,
   onEdit,
   onEditStage,
   onDelete,
@@ -509,7 +524,9 @@ function DefinitionWorkbench({
 }: {
   definition: WorkflowDefinition;
   runs: WorkflowRun[];
+  selectedNodeId: string | null;
   running: boolean;
+  onSelectNode: (nodeId: string) => void;
   onEdit: () => void;
   onEditStage: (stage: AdvancedWorkflowBuilderStage) => void;
   onDelete: () => void;
@@ -560,7 +577,7 @@ function DefinitionWorkbench({
         onToggleTrigger={onToggleTrigger}
       />
 
-      <WorkflowGraph nodes={nodes} latestRun={latestRun} onEditNode={onEditStage} />
+      <WorkflowGraph nodes={nodes} selectedNodeId={selectedNodeId} latestRun={latestRun} onSelectNode={onSelectNode} onEditNode={onEditStage} />
 
       <DefinitionRunsPanel definition={definition} runs={runs} />
     </>
@@ -710,19 +727,25 @@ function SchedulePanel({
 
 function WorkflowGraph({
   nodes,
+  selectedNodeId,
   latestRun,
+  onSelectNode,
   onEditNode
 }: {
   nodes: AdvancedWorkflowNode[];
+  selectedNodeId: string | null;
   latestRun: WorkflowRun | null;
+  onSelectNode: (nodeId: string) => void;
   onEditNode: (stage: AdvancedWorkflowBuilderStage) => void;
 }): JSX.Element {
-  const [selectedNodeId, setSelectedNodeId] = React.useState(nodes[0]?.id ?? "");
+  const resolvedSelectedNodeId = nodes.some((node) => node.id === selectedNodeId) ? selectedNodeId : nodes[0]?.id ?? "";
+
   React.useEffect(() => {
-    if (!nodes.some((node) => node.id === selectedNodeId)) {
-      setSelectedNodeId(nodes[0]?.id ?? "");
+    if (nodes[0] && selectedNodeId !== resolvedSelectedNodeId) {
+      onSelectNode(resolvedSelectedNodeId);
     }
-  }, [nodes, selectedNodeId]);
+  }, [nodes, onSelectNode, resolvedSelectedNodeId, selectedNodeId]);
+
   if (!nodes.length) {
     return <DataState title="Workflow has no nodes" variant="error" />;
   }
@@ -745,13 +768,13 @@ function WorkflowGraph({
                 <WorkflowNodeCard
                   node={node}
                   nodeRun={run}
-                  selected={selectedNodeId === node.id}
+                  selected={resolvedSelectedNodeId === node.id}
                   onActivate={() => {
-                    if (selectedNodeId === node.id) {
+                    if (resolvedSelectedNodeId === node.id) {
                       onEditNode(stageForNode(node.type));
                       return;
                     }
-                    setSelectedNodeId(node.id);
+                    onSelectNode(node.id);
                   }}
                   onEdit={() => onEditNode(stageForNode(node.type))}
                 />
