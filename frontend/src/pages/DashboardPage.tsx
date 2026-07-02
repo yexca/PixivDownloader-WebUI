@@ -106,18 +106,30 @@ export function DashboardPage(): JSX.Element {
         {error ? <DataState title="Could not load dashboard" description={error} variant="error" /> : null}
 
         <div className="grid gap-2 md:grid-cols-5">
-          <StatusMetric label="Queue" value={queueStatus.label} loading={summary.isLoading} tone={queueStatus.tone} />
-          <StatusMetric label="Active jobs" value={summary.data?.jobs.running ?? 0} loading={summary.isLoading} />
-          <StatusMetric label="Waiting jobs" value={summary.data?.workflows.waiting_jobs ?? 0} loading={summary.isLoading} />
-          <StatusMetric label="Failures" value={(summary.data?.library.failed_files ?? 0) + visibleFailedRuns.length} loading={loading} tone="danger" />
-          <StatusMetric label="Updates" value={summary.data?.library.artists_with_updates ?? 0} loading={summary.isLoading} tone="warning" />
+          <StatusMetric label="Queue" value={queueStatus.label} loading={summary.isLoading} tone={queueStatus.tone} to="/jobs" />
+          <StatusMetric label="Active jobs" value={summary.data?.jobs.running ?? 0} loading={summary.isLoading} to="/jobs?status=running" />
+          <StatusMetric label="Waiting jobs" value={summary.data?.workflows.waiting_jobs ?? 0} loading={summary.isLoading} to="/jobs" />
+          <StatusMetric
+            label="Failures"
+            value={(summary.data?.library.failed_files ?? 0) + visibleFailedRuns.length}
+            loading={loading}
+            tone="danger"
+            to={visibleFailedRuns.length ? "/runs?filter=failed" : "/library?fileState=failed&sort=failed_desc"}
+          />
+          <StatusMetric
+            label="Updates"
+            value={summary.data?.library.artists_with_updates ?? 0}
+            loading={summary.isLoading}
+            tone="warning"
+            to="/library?updateState=available&sort=updated_desc"
+          />
         </div>
 
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(22rem,0.85fr)] xl:items-start">
           <section className="space-y-4">
             <SectionHeader
               icon={<Workflow className="h-4 w-4" aria-hidden="true" />}
-              title="Now Running"
+              title="Operations"
               action={<Button asChild size="sm" variant="outline"><Link to="/runs">Open Runs</Link></Button>}
             />
             <div className="surface space-y-4 p-4">
@@ -125,33 +137,45 @@ export function DashboardPage(): JSX.Element {
                 <DataState title="Loading runtime state" variant="loading" />
               ) : activeJob || runGroups.active.length || waitingJobs.length || triggerGroups.active.length ? (
                 <>
-                  {activeJob ? <JobProgress job={activeJob} message={stream.lastMessage?.message} /> : null}
-                  {runGroups.active.length ? (
-                    <WorkflowGroupSection title="Running Runs" count={runGroups.active.length}>
-                      {runGroups.active.slice(0, 3).map((run) => (
-                        <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
-                      ))}
-                    </WorkflowGroupSection>
-                  ) : null}
-                  {waitingJobs.length ? (
-                    <WorkflowGroupSection title="Waiting Queue" count={waitingJobs.length}>
-                      {waitingJobs.slice(0, 4).map((job) => (
-                        <WaitingJobCard key={job.id} job={job} />
-                      ))}
-                    </WorkflowGroupSection>
-                  ) : null}
-                  {triggerGroups.active.length ? (
-                    <WorkflowGroupSection title="Schedules" count={triggerGroups.active.length}>
-                      {triggerGroups.active.slice(0, 3).map((task) => (
-                        <WorkflowTriggerCard
-                          key={task.id}
-                          task={task}
-                          lastRun={latestWorkflowTriggerRun(task, allRuns)}
-                          onRuntimeChanged={refetchAll}
-                        />
-                      ))}
-                    </WorkflowGroupSection>
-                  ) : null}
+                  <OperationsGroup
+                    title="Active Download"
+                    count={activeJob ? 1 : 0}
+                    action={<Button asChild size="sm" variant="ghost"><Link to="/jobs?status=running">Open Jobs</Link></Button>}
+                  >
+                    {activeJob ? <JobProgress job={activeJob} message={stream.lastMessage?.message} /> : null}
+                  </OperationsGroup>
+                  <OperationsGroup
+                    title="Running Runs"
+                    count={runGroups.active.length}
+                    action={<Button asChild size="sm" variant="ghost"><Link to="/runs?filter=running">Open Runs</Link></Button>}
+                  >
+                    {runGroups.active.slice(0, 3).map((run) => (
+                      <RunWorkflowCard key={run.id} run={run} onInspect={() => setSelectedRun(run)} />
+                    ))}
+                  </OperationsGroup>
+                  <OperationsGroup
+                    title="Waiting Queue"
+                    count={waitingJobs.length}
+                    action={<Button asChild size="sm" variant="ghost"><Link to="/jobs">Open Jobs</Link></Button>}
+                  >
+                    {waitingJobs.slice(0, 4).map((job) => (
+                      <WaitingJobCard key={job.id} job={job} />
+                    ))}
+                  </OperationsGroup>
+                  <OperationsGroup
+                    title="Upcoming Schedules"
+                    count={triggerGroups.active.length}
+                    action={<Button asChild size="sm" variant="ghost"><Link to="/workflows?filter=scheduled">Open Schedules</Link></Button>}
+                  >
+                    {triggerGroups.active.slice(0, 3).map((task) => (
+                      <WorkflowTriggerCard
+                        key={task.id}
+                        task={task}
+                        lastRun={latestWorkflowTriggerRun(task, allRuns)}
+                        onRuntimeChanged={refetchAll}
+                      />
+                    ))}
+                  </OperationsGroup>
                 </>
               ) : (
                 <DataState
@@ -317,6 +341,34 @@ function Metric({
   );
 }
 
+function OperationsGroup({
+  title,
+  count,
+  action,
+  children
+}: {
+  title: string;
+  count: number;
+  action: React.ReactNode;
+  children: React.ReactNode;
+}): JSX.Element | null {
+  if (count === 0) {
+    return null;
+  }
+  return (
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <span className="rounded-md border bg-muted/30 px-2 py-0.5 text-xs font-medium text-muted-foreground">{count}</span>
+        </div>
+        {action}
+      </div>
+      <div className="grid gap-3">{children}</div>
+    </section>
+  );
+}
+
 function DismissibleRunCard({
   run,
   onInspect,
@@ -350,12 +402,14 @@ function StatusMetric({
   label,
   value,
   loading,
-  tone = "default"
+  tone = "default",
+  to
 }: {
   label: string;
   value: number | string;
   loading: boolean;
   tone?: "default" | "warning" | "danger";
+  to: string;
 }): JSX.Element {
   const toneClass =
     tone === "danger"
@@ -364,10 +418,13 @@ function StatusMetric({
         ? "text-[hsl(var(--warning))]"
         : "text-foreground";
   return (
-    <div className="surface flex min-h-20 flex-col justify-between p-3">
+    <Link
+      to={to}
+      className="surface flex min-h-20 flex-col justify-between p-3 transition-colors hover:border-primary/50 hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <p className="text-xs font-medium uppercase text-muted-foreground">{label}</p>
       <p className={`text-lg font-semibold ${toneClass}`}>{loading ? "-" : formatMetricValue(value)}</p>
-    </div>
+    </Link>
   );
 }
 
