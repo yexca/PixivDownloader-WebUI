@@ -54,9 +54,29 @@ class WorkflowScheduleService:
         schedule: dict[str, object],
         enabled: bool = True,
         definition_id: str | None = None,
+        trigger_id: int | None = None,
     ) -> tuple[WorkflowDefinition, WorkflowTrigger]:
         saved = self.save_definition(definition, definition_id=definition_id)
         now = utc_now()
+        if trigger_id is not None:
+            current = self.repository.get_trigger(trigger_id)
+            if current is None:
+                raise ValueError(f"workflow trigger not found: {trigger_id}")
+            if current.workflow_definition_id != saved.id:
+                raise ValueError(f"workflow trigger {trigger_id} does not belong to definition {saved.id}")
+            updated = replace(
+                current,
+                status="active" if enabled else "paused",
+                schedule=schedule,
+                next_run_at=next_run_time(schedule, from_time=now) if enabled else None,
+                last_error_code=None if enabled else current.last_error_code,
+                last_error_message=None if enabled else current.last_error_message,
+            )
+            self.repository.update_trigger(updated)
+            reloaded = self.repository.get_trigger(trigger_id)
+            if reloaded is None:
+                raise ValueError(f"workflow trigger not found: {trigger_id}")
+            return saved, reloaded
         trigger = self.repository.create_trigger(
             WorkflowTrigger(
                 id=None,
@@ -70,6 +90,26 @@ class WorkflowScheduleService:
 
     def list_definitions(self) -> list[WorkflowDefinitionWithTriggers]:
         return self.repository.list_definitions()
+
+    def update_trigger_status(self, trigger_id: int, *, status: str) -> WorkflowTrigger:
+        if status not in {"active", "paused"}:
+            raise ValueError(f"unsupported workflow trigger status: {status}")
+        current = self.repository.get_trigger(trigger_id)
+        if current is None:
+            raise ValueError(f"workflow trigger not found: {trigger_id}")
+        now = utc_now()
+        updated = replace(
+            current,
+            status=status,
+            next_run_at=next_run_time(current.schedule, from_time=now) if status == "active" else None,
+            last_error_code=None if status == "active" else current.last_error_code,
+            last_error_message=None if status == "active" else current.last_error_message,
+        )
+        self.repository.update_trigger(updated)
+        reloaded = self.repository.get_trigger(trigger_id)
+        if reloaded is None:
+            raise ValueError(f"workflow trigger not found: {trigger_id}")
+        return reloaded
 
     def run_definition(
         self,

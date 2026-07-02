@@ -46,6 +46,59 @@ def test_workflow_trigger_creates_advanced_run(tmp_path):
     assert [node.node_id for node in runs] == ["actions"]
 
 
+def test_save_with_trigger_updates_existing_trigger(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Scheduled advanced workflow",
+            "nodes": [
+                {
+                    "id": "actions",
+                    "type": "execute_actions",
+                    "title": "Execute actions",
+                    "config": {"download": False},
+                }
+            ],
+        }
+    )
+    service = WorkflowScheduleService(db_path)
+    try:
+        saved, trigger = service.save_with_trigger(
+            definition,
+            schedule={"type": "interval", "every": 1, "unit": "days"},
+        )
+        updated_definition = AdvancedWorkflowDefinitionRequest.model_validate(
+            {
+                "name": "Updated scheduled workflow",
+                "nodes": [
+                    {
+                        "id": "actions",
+                        "type": "execute_actions",
+                        "title": "Execute actions",
+                        "config": {"download": True},
+                    }
+                ],
+            }
+        )
+        _, updated = service.save_with_trigger(
+            updated_definition,
+            definition_id=saved.id,
+            trigger_id=trigger.id,
+            schedule={"type": "interval", "every": 6, "unit": "hours"},
+        )
+        triggers = service.repository.list_triggers(saved.id)
+        reloaded = service.repository.get_definition(saved.id)
+    finally:
+        service.close()
+
+    assert reloaded is not None
+    assert reloaded.name == "Updated scheduled workflow"
+    assert len(triggers) == 1
+    assert updated.id == trigger.id
+    assert updated.schedule == {"type": "interval", "every": 6, "unit": "hours"}
+
+
 def test_next_run_time_supports_interval_daily_weekly_monthly():
     base = "2026-07-01T02:30:00Z"
 

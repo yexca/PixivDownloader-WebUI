@@ -96,6 +96,7 @@ export type WorkflowDefinitionSaveRequest = {
   definition_id?: string | null;
   definition: AdvancedWorkflowRunRequest["definition"];
   trigger?: {
+    trigger_id?: number | null;
     enabled: boolean;
     schedule: WorkflowScheduleRule;
     run_now: boolean;
@@ -130,6 +131,16 @@ export function saveWorkflowDefinition(request: WorkflowDefinitionSaveRequest): 
 export function runWorkflowDefinition(definitionId: string): Promise<WorkflowRun> {
   return apiRequest<WorkflowRun>(`/workflows/definitions/${definitionId}/run`, {
     method: "POST"
+  });
+}
+
+export function updateWorkflowDefinitionTrigger(
+  triggerId: number,
+  request: { status: "active" | "paused" }
+): Promise<WorkflowTrigger> {
+  return apiRequest<WorkflowTrigger>(`/workflows/definition-triggers/${triggerId}`, {
+    method: "PUT",
+    body: request
   });
 }
 

@@ -10,6 +10,8 @@ from backend.schemas.workflows import (
     WorkflowDefinitionSaveResponse,
     WorkflowRunListResponse,
     WorkflowRunResponse,
+    WorkflowTriggerResponse,
+    WorkflowTriggerUpdateRequest,
     workflow_definition_response,
     workflow_run_response,
     workflow_trigger_response,
@@ -74,6 +76,7 @@ def save_workflow_definition(
             definition, trigger = service.save_with_trigger(
                 request.definition,
                 definition_id=request.definition_id,
+                trigger_id=request.trigger.trigger_id,
                 enabled=request.trigger.enabled,
                 schedule=request.trigger.schedule,
             )
@@ -95,6 +98,27 @@ def save_workflow_definition(
         trigger=workflow_trigger_response(trigger) if trigger is not None else None,
         run=workflow_run_response(run) if run is not None else None,
     )
+
+
+@router.put("/definition-triggers/{trigger_id}", response_model=WorkflowTriggerResponse)
+def update_definition_trigger(
+    trigger_id: int,
+    request: WorkflowTriggerUpdateRequest,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> WorkflowTriggerResponse:
+    _ = settings_json_path
+    if request.status is None:
+        raise HTTPException(status_code=400, detail="No trigger update fields provided")
+    service = WorkflowScheduleService(db_path)
+    try:
+        try:
+            trigger = service.update_trigger_status(trigger_id, status=request.status)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    finally:
+        service.close()
+    return workflow_trigger_response(trigger)
 
 
 @router.post("/definitions/{definition_id}/run", response_model=WorkflowRunResponse)

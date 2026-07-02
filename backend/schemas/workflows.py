@@ -45,6 +45,7 @@ class AdvancedWorkflowRunRequest(BaseModel):
 
 
 class WorkflowTriggerRequest(BaseModel):
+    trigger_id: int | None = None
     enabled: bool = True
     schedule: dict[str, object] = Field(default_factory=dict)
     run_now: bool = False
@@ -54,6 +55,10 @@ class WorkflowDefinitionSaveRequest(BaseModel):
     definition_id: str | None = None
     definition: AdvancedWorkflowDefinitionRequest
     trigger: WorkflowTriggerRequest | None = None
+
+
+class WorkflowTriggerUpdateRequest(BaseModel):
+    status: Literal["active", "paused"] | None = None
 
 
 class WorkflowTriggerResponse(BaseModel):

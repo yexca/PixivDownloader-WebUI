@@ -4,10 +4,14 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Activity,
   CheckCircle2,
+  CalendarClock,
   Database,
+  Edit3,
   Filter,
   GitBranch,
   ListChecks,
+  Pause,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -20,10 +24,12 @@ import {
   listWorkflowDefinitions,
   listWorkflowRuns,
   runWorkflowDefinition,
+  updateWorkflowDefinitionTrigger,
   type AdvancedWorkflowNode,
   type WorkflowRun,
   type WorkflowDefinition,
-  type WorkflowNodeRun
+  type WorkflowNodeRun,
+  type WorkflowTrigger
 } from "@/api/workflows";
 import { listJobs, type Job } from "@/api/jobs";
 import { getSettings, updateSettings } from "@/api/settings";
@@ -35,7 +41,7 @@ import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
-import { AdvancedWorkflowBuilder } from "@/components/workflows/AdvancedWorkflowBuilder";
+import { AdvancedWorkflowBuilder, type AdvancedWorkflowBuilderStage } from "@/components/workflows/AdvancedWorkflowBuilder";
 import { WorkflowLimitPanel } from "@/components/workflows/WorkflowRuntimeCards";
 import { cn, formatDate, percent } from "@/lib/utils";
 
@@ -83,6 +89,8 @@ export function WorkflowsPage(): JSX.Element {
   const [search, setSearch] = React.useState(searchParams.get("q") ?? "");
   const [builderOpen, setBuilderOpen] = React.useState(false);
   const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
+  const [builderInitialStage, setBuilderInitialStage] = React.useState<AdvancedWorkflowBuilderStage>("target");
+  const [editingTriggerId, setEditingTriggerId] = React.useState<number | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
 
   const definitions = useQuery({
@@ -147,6 +155,20 @@ export function WorkflowsPage(): JSX.Element {
     },
     onError: (error) => pushToast({ title: "Run limit could not sync", description: error.message, tone: "error" })
   });
+  const triggerStatusMutation = useMutation({
+    mutationFn: ({ triggerId, status }: { triggerId: number; status: "active" | "paused" }) =>
+      updateWorkflowDefinitionTrigger(triggerId, { status }),
+    onSuccess: (trigger) => {
+      pushToast({
+        title: trigger.status === "active" ? "Schedule enabled" : "Schedule paused",
+        tone: "success"
+      });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
+      void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (error) => pushToast({ title: "Schedule could not update", description: error.message, tone: "error" })
+  });
 
   const refresh = () => {
     void definitions.refetch();
@@ -176,10 +198,18 @@ export function WorkflowsPage(): JSX.Element {
   };
   const openNewBuilder = () => {
     setEditingDefinition(null);
+    setBuilderInitialStage("target");
+    setEditingTriggerId(null);
     setBuilderOpen(true);
   };
-  const openEditBuilder = (definition: WorkflowDefinition) => {
+  const openEditBuilder = (
+    definition: WorkflowDefinition,
+    initialStage: AdvancedWorkflowBuilderStage = "target",
+    triggerId: number | null = null
+  ) => {
     setEditingDefinition(definition);
+    setBuilderInitialStage(initialStage);
+    setEditingTriggerId(triggerId);
     setBuilderOpen(true);
   };
 
@@ -252,6 +282,15 @@ export function WorkflowsPage(): JSX.Element {
               latestRun={latestDefinitionRun(selectedDefinition, runItems)}
               running={runDefinition.isPending}
               onEdit={() => openEditBuilder(selectedDefinition)}
+              onEditStage={(stage) => openEditBuilder(selectedDefinition, stage)}
+              onEditTrigger={(trigger) => openEditBuilder(selectedDefinition, "trigger", trigger.id)}
+              onToggleTrigger={(trigger) =>
+                triggerStatusMutation.mutate({
+                  triggerId: trigger.id,
+                  status: trigger.status === "active" ? "paused" : "active"
+                })
+              }
+              togglingTriggerId={triggerStatusMutation.isPending ? triggerStatusMutation.variables?.triggerId ?? null : null}
               onRun={() => runDefinition.mutate(selectedDefinition.id)}
             />
           ) : definitions.isLoading ? (
@@ -278,17 +317,23 @@ export function WorkflowsPage(): JSX.Element {
           setBuilderOpen(open);
           if (!open) {
             setEditingDefinition(null);
+            setBuilderInitialStage("target");
+            setEditingTriggerId(null);
           }
         }}
       >
         <AdvancedWorkflowBuilder
           definition={editingDefinition}
+          initialStage={builderInitialStage}
+          triggerId={editingTriggerId}
           onSubmitted={() => {
             setBuilderOpen(false);
             if (editingDefinition) {
               setSelectedDefinitionId(editingDefinition.id);
             }
             setEditingDefinition(null);
+            setBuilderInitialStage("target");
+            setEditingTriggerId(null);
             void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
             void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
             void queryClient.invalidateQueries({ queryKey: ["jobs"] });
@@ -354,6 +399,15 @@ function DefinitionList({
               ))}
               {nodes.length > 4 ? <Badge tone="muted">+{nodes.length - 4}</Badge> : null}
             </div>
+            {definition.triggers.length ? (
+              <div className="mt-3 rounded-md border bg-muted/20 px-2.5 py-2 text-xs text-muted-foreground">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="truncate">{scheduleRuleLabel(definition.triggers[0].schedule)}</span>
+                  <Badge tone={triggerStatusTone(definition.triggers[0].status)}>{definition.triggers[0].status}</Badge>
+                </div>
+                <div className="mt-1 truncate">Next {formatDate(definition.triggers[0].next_run_at)}</div>
+              </div>
+            ) : null}
           </button>
         );
       })}
@@ -366,12 +420,20 @@ function DefinitionWorkbench({
   latestRun,
   running,
   onEdit,
+  onEditStage,
+  onEditTrigger,
+  onToggleTrigger,
+  togglingTriggerId,
   onRun
 }: {
   definition: WorkflowDefinition;
   latestRun: WorkflowRun | null;
   running: boolean;
   onEdit: () => void;
+  onEditStage: (stage: AdvancedWorkflowBuilderStage) => void;
+  onEditTrigger: (trigger: WorkflowTrigger) => void;
+  onToggleTrigger: (trigger: WorkflowTrigger) => void;
+  togglingTriggerId: number | null;
   onRun: () => void;
 }): JSX.Element {
   const nodes = workflowNodes(definition);
@@ -403,7 +465,15 @@ function DefinitionWorkbench({
         </div>
       </section>
 
-      <WorkflowGraph nodes={nodes} latestRun={latestRun} />
+      <SchedulePanel
+        definition={definition}
+        togglingTriggerId={togglingTriggerId}
+        onEditDefinition={() => onEditStage("trigger")}
+        onEditTrigger={onEditTrigger}
+        onToggleTrigger={onToggleTrigger}
+      />
+
+      <WorkflowGraph nodes={nodes} latestRun={latestRun} onEditNode={onEditStage} />
 
       {latestRun ? (
         <section className="surface p-4">
@@ -427,7 +497,112 @@ function DefinitionWorkbench({
   );
 }
 
-function WorkflowGraph({ nodes, latestRun }: { nodes: AdvancedWorkflowNode[]; latestRun: WorkflowRun | null }): JSX.Element {
+function SchedulePanel({
+  definition,
+  togglingTriggerId,
+  onEditDefinition,
+  onEditTrigger,
+  onToggleTrigger
+}: {
+  definition: WorkflowDefinition;
+  togglingTriggerId: number | null;
+  onEditDefinition: () => void;
+  onEditTrigger: (trigger: WorkflowTrigger) => void;
+  onToggleTrigger: (trigger: WorkflowTrigger) => void;
+}): JSX.Element {
+  if (!definition.triggers.length) {
+    return (
+      <section className="surface p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <CalendarClock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <h3 className="text-sm font-semibold">Schedule</h3>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">Manual workflow. Add a schedule from the trigger editor.</p>
+          </div>
+          <Button type="button" size="sm" variant="outline" onClick={onEditDefinition}>
+            <Edit3 className="h-4 w-4" aria-hidden="true" />
+            Add Schedule
+          </Button>
+        </div>
+      </section>
+    );
+  }
+  return (
+    <section className="surface p-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <CalendarClock className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <h3 className="text-sm font-semibold">Schedule</h3>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">Rules, next trigger time, and quick controls.</p>
+        </div>
+        <Badge tone="muted">{definition.triggers.length}</Badge>
+      </div>
+      <div className="mt-4 space-y-2">
+        {definition.triggers.map((trigger) => {
+          const active = trigger.status === "active";
+          const busy = togglingTriggerId === trigger.id;
+          return (
+            <article key={trigger.id} className="rounded-md border bg-background p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={triggerStatusTone(trigger.status)}>{trigger.status}</Badge>
+                    <p className="truncate text-sm font-semibold">{scheduleRuleLabel(trigger.schedule)}</p>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>Next {formatDate(trigger.next_run_at)}</span>
+                    <span>Last {formatDate(trigger.last_run_at)}</span>
+                    <span>Success {formatDate(trigger.last_success_at)}</span>
+                  </div>
+                  {trigger.last_error_message ? (
+                    <p className="mt-2 text-xs text-destructive">{trigger.last_error_message}</p>
+                  ) : null}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    title={active ? "Pause schedule" : "Enable schedule"}
+                    aria-label={active ? "Pause schedule" : "Enable schedule"}
+                    disabled={busy}
+                    onClick={() => onToggleTrigger(trigger)}
+                  >
+                    {active ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="outline"
+                    title="Edit schedule"
+                    aria-label="Edit schedule"
+                    onClick={() => onEditTrigger(trigger)}
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden="true" />
+                  </Button>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function WorkflowGraph({
+  nodes,
+  latestRun,
+  onEditNode
+}: {
+  nodes: AdvancedWorkflowNode[];
+  latestRun: WorkflowRun | null;
+  onEditNode: (stage: AdvancedWorkflowBuilderStage) => void;
+}): JSX.Element {
   if (!nodes.length) {
     return <DataState title="Workflow has no nodes" variant="error" />;
   }
@@ -447,7 +622,7 @@ function WorkflowGraph({ nodes, latestRun }: { nodes: AdvancedWorkflowNode[]; la
             const run = nodeRuns.find((item) => item.node_id === node.id);
             return (
               <React.Fragment key={node.id}>
-                <WorkflowNodeCard node={node} nodeRun={run} />
+                <WorkflowNodeCard node={node} nodeRun={run} onEdit={() => onEditNode(stageForNode(node.type))} />
                 {index < nodes.length - 1 ? (
                   <div className="flex w-8 shrink-0 items-center">
                     <div className="h-px flex-1 bg-border" />
@@ -463,7 +638,15 @@ function WorkflowGraph({ nodes, latestRun }: { nodes: AdvancedWorkflowNode[]; la
   );
 }
 
-function WorkflowNodeCard({ node, nodeRun }: { node: AdvancedWorkflowNode; nodeRun?: WorkflowNodeRun }): JSX.Element {
+function WorkflowNodeCard({
+  node,
+  nodeRun,
+  onEdit
+}: {
+  node: AdvancedWorkflowNode;
+  nodeRun?: WorkflowNodeRun;
+  onEdit: () => void;
+}): JSX.Element {
   const Icon = nodeIcon(node.type);
   return (
     <article className="w-52 shrink-0 rounded-md border bg-background p-3">
@@ -471,9 +654,22 @@ function WorkflowNodeCard({ node, nodeRun }: { node: AdvancedWorkflowNode; nodeR
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted">
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
-        <Badge tone={nodeRun ? workflowStatusTone(nodeRun.status) : "muted"}>
-          {nodeRun?.status ?? "ready"}
-        </Badge>
+        <div className="flex items-center gap-1">
+          <Badge tone={nodeRun ? workflowStatusTone(nodeRun.status) : "muted"}>
+            {nodeRun?.status ?? "ready"}
+          </Badge>
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="h-7 w-7"
+            title={`Edit ${nodeTypeLabel(node.type)}`}
+            aria-label={`Edit ${nodeTypeLabel(node.type)}`}
+            onClick={onEdit}
+          >
+            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+          </Button>
+        </div>
       </div>
       <h4 className="mt-3 truncate text-sm font-semibold">{node.title || nodeTypeLabel(node.type)}</h4>
       <p className="mt-1 text-xs text-muted-foreground">{nodeTypeLabel(node.type)} · {node.id}</p>
@@ -730,6 +926,57 @@ function nodeTypeLabel(type: string): string {
   return nodeTypeLabels[type] ?? type.replaceAll("_", " ");
 }
 
+function stageForNode(type: string): AdvancedWorkflowBuilderStage {
+  if (type === "sync_metadata") {
+    return "sync";
+  }
+  if (type === "collect_artworks") {
+    return "collect";
+  }
+  if (type === "filter_artworks") {
+    return "filters";
+  }
+  if (type === "execute_actions" || type === "file_output") {
+    return "actions";
+  }
+  return "target";
+}
+
+function scheduleRuleLabel(schedule: Record<string, unknown>): string {
+  const type = String(schedule.type ?? "interval");
+  if (type === "daily") {
+    return `Daily at ${stringValue(schedule.time, "00:00")}`;
+  }
+  if (type === "weekly") {
+    return `Weekly ${weekdayLabels(schedule.days_of_week)} at ${stringValue(schedule.time, "00:00")}`;
+  }
+  if (type === "monthly") {
+    return `Monthly day ${String(schedule.day ?? "1")} at ${stringValue(schedule.time, "00:00")}`;
+  }
+  return `Every ${numberValue(schedule.every, 1)} ${String(schedule.unit ?? "days")}`;
+}
+
+function weekdayLabels(value: unknown): string {
+  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  if (!Array.isArray(value)) {
+    return "weekly";
+  }
+  const days = value
+    .map((item) => Number(item))
+    .filter((item) => Number.isInteger(item) && item >= 1 && item <= 7)
+    .map((item) => labels[item - 1]);
+  return days.length ? days.join(", ") : "weekly";
+}
+
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function sourceLabel(source: string): string {
   return sourceLabels[source] ?? source.replaceAll("_", " ");
 }
@@ -791,6 +1038,19 @@ function workflowStatusTone(status: string): "default" | "success" | "danger" | 
     return "default";
   }
   if (status === "pending" || status === "skipped") {
+    return "warning";
+  }
+  return "muted";
+}
+
+function triggerStatusTone(status: string): "default" | "success" | "danger" | "warning" | "muted" {
+  if (status === "active") {
+    return "success";
+  }
+  if (status === "blocked" || status === "archived") {
+    return "danger";
+  }
+  if (status === "paused" || status === "inactive") {
     return "warning";
   }
   return "muted";

@@ -85,7 +85,8 @@ type WorkflowDraft = {
   stopLimit: string;
 };
 
-type StageKey = "trigger" | "target" | "sync" | "collect" | "filters" | "actions";
+export type AdvancedWorkflowBuilderStage = "trigger" | "target" | "sync" | "collect" | "filters" | "actions";
+type StageKey = AdvancedWorkflowBuilderStage;
 
 const initialDraft: WorkflowDraft = {
   name: "Artist download pipeline",
@@ -142,21 +143,28 @@ const stages: Array<{ key: StageKey; title: string; icon: React.ComponentType<{ 
 
 type AdvancedWorkflowBuilderProps = {
   definition?: WorkflowDefinition | null;
+  initialStage?: AdvancedWorkflowBuilderStage;
+  triggerId?: number | null;
   onSubmitted?: () => void;
 };
 
-export function AdvancedWorkflowBuilder({ definition, onSubmitted }: AdvancedWorkflowBuilderProps): JSX.Element {
+export function AdvancedWorkflowBuilder({
+  definition,
+  initialStage = "target",
+  triggerId,
+  onSubmitted
+}: AdvancedWorkflowBuilderProps): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
   const hydratedDraft = React.useMemo(() => draftFromDefinition(definition), [definition]);
   const [draft, setDraft] = React.useState<WorkflowDraft>(hydratedDraft);
-  const [selectedStage, setSelectedStage] = React.useState<StageKey>("target");
+  const [selectedStage, setSelectedStage] = React.useState<StageKey>(initialStage);
   const [previewTab, setPreviewTab] = React.useState<PreviewTab>("summary");
 
   React.useEffect(() => {
     setDraft(hydratedDraft);
-    setSelectedStage("target");
-  }, [hydratedDraft]);
+    setSelectedStage(initialStage);
+  }, [hydratedDraft, initialStage]);
 
   const update = <K extends keyof WorkflowDraft>(key: K, value: WorkflowDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -233,6 +241,7 @@ export function AdvancedWorkflowBuilder({ definition, onSubmitted }: AdvancedWor
       definition: workflowJson.definition,
       trigger: shouldSchedule
         ? {
+            trigger_id: triggerId ?? definition?.triggers[0]?.id ?? null,
             enabled: true,
             schedule: buildScheduleRule(draft),
             run_now: draft.saveIntent === "run_and_schedule"
@@ -1132,6 +1141,7 @@ function draftFromDefinition(definition?: WorkflowDefinition | null): WorkflowDr
     return initialDraft;
   }
   const nodes = workflowNodesFromDefinition(definition);
+  const scheduleDraft = scheduleDraftFromTrigger(definition.triggers[0]?.schedule);
   const target = findNode(nodes, "artist_target");
   const sync = findNode(nodes, "sync_metadata");
   const collect = findNode(nodes, "collect_artworks");
@@ -1146,8 +1156,10 @@ function draftFromDefinition(definition?: WorkflowDefinition | null): WorkflowDr
   const maxArtworks = collectConfig.max_artworks;
   return {
     ...initialDraft,
+    ...scheduleDraft,
     name: definition.name,
-    saveIntent: "save_only",
+    triggerMode: definition.triggers.length ? "schedule" : "manual",
+    saveIntent: definition.triggers.length ? "save_and_schedule" : "save_only",
     modules: {
       sync: Boolean(sync),
       collect: Boolean(collect),
@@ -1175,6 +1187,39 @@ function draftFromDefinition(definition?: WorkflowDefinition | null): WorkflowDr
     executionUnit: executionUnitOption(actionConfig.execution_unit),
     conflictMode: conflictModeOption(actionConfig.conflict_mode),
     namingRule: stringOption(actionConfig.naming_rule, initialDraft.namingRule)
+  };
+}
+
+function scheduleDraftFromTrigger(schedule?: Record<string, unknown>): Partial<WorkflowDraft> {
+  if (!schedule) {
+    return {};
+  }
+  const type = scheduleTypeOption(schedule.type);
+  if (type === "daily") {
+    return {
+      scheduleType: "daily",
+      scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime)
+    };
+  }
+  if (type === "weekly") {
+    return {
+      scheduleType: "weekly",
+      scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime),
+      weeklyDays: numberArray(schedule.days_of_week, initialDraft.weeklyDays)
+    };
+  }
+  if (type === "monthly") {
+    const day = schedule.day;
+    return {
+      scheduleType: "monthly",
+      scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime),
+      monthlyDay: day === "last" ? "last" : numberText(day) || initialDraft.monthlyDay
+    };
+  }
+  return {
+    scheduleType: "interval",
+    intervalEvery: numberText(schedule.every) || initialDraft.intervalEvery,
+    intervalUnit: intervalUnitOption(schedule.unit)
   };
 }
 
@@ -1234,6 +1279,20 @@ function executionUnitOption(value: unknown): ExecutionUnit {
   return initialDraft.executionUnit;
 }
 
+function scheduleTypeOption(value: unknown): ScheduleType {
+  if (value === "daily" || value === "weekly" || value === "monthly" || value === "interval") {
+    return value;
+  }
+  return initialDraft.scheduleType;
+}
+
+function intervalUnitOption(value: unknown): IntervalUnit {
+  if (value === "minutes" || value === "hours" || value === "days") {
+    return value;
+  }
+  return initialDraft.intervalUnit;
+}
+
 function conflictModeOption(value: unknown): ConflictMode {
   if (value === "overwrite" || value === "rename" || value === "skip") {
     return value;
@@ -1257,6 +1316,14 @@ function arrayText(value: unknown, separator = "\n"): string {
     return "";
   }
   return value.map((item) => String(item)).filter(Boolean).join(separator);
+}
+
+function numberArray(value: unknown, fallback: number[]): number[] {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+  const parsed = value.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item >= 1 && item <= 7);
+  return parsed.length ? parsed : fallback;
 }
 
 function countLines(value: string): number {
