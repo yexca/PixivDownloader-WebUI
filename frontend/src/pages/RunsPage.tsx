@@ -16,7 +16,7 @@ import { cn, formatDate } from "@/lib/utils";
 import { sourceLabel, workflowRunTone } from "@/components/workflows/runtime";
 import { definitionRunTitle, matchingDefinitionForRun } from "@/components/workflows/definitionMatching";
 
-type RunFilter = "all" | "running" | "completed" | "failed" | "scheduled" | "manual" | "shortcuts";
+type RunFilter = "all" | "running" | "completed" | "failed" | "scheduled" | "manual" | "shortcuts" | "system";
 
 const runFilterTabs: Array<{ value: RunFilter; label: string }> = [
   { value: "all", label: "All" },
@@ -25,7 +25,8 @@ const runFilterTabs: Array<{ value: RunFilter; label: string }> = [
   { value: "failed", label: "Failed" },
   { value: "scheduled", label: "Scheduled" },
   { value: "manual", label: "Manual" },
-  { value: "shortcuts", label: "Shortcuts" }
+  { value: "shortcuts", label: "Shortcuts" },
+  { value: "system", label: "System" }
 ];
 
 const emptyRuns: WorkflowRun[] = [];
@@ -301,6 +302,9 @@ function filterRunsByKind(runs: WorkflowRun[], filter: RunFilter): WorkflowRun[]
   if (filter === "shortcuts") {
     return runs.filter((run) => isShortcutRun(run));
   }
+  if (filter === "system") {
+    return runs.filter((run) => isSystemRun(run));
+  }
   return runs;
 }
 
@@ -316,6 +320,10 @@ function isShortcutRun(run: WorkflowRun): boolean {
   return run.source.includes("shortcut") || run.source.includes("api");
 }
 
+function isSystemRun(run: WorkflowRun): boolean {
+  return run.source === "legacy_import" || run.source === "startup_recovery" || run.source.startsWith("system");
+}
+
 function runFilterFromParam(value: string | null): RunFilter {
   if (
     value === "running" ||
@@ -323,7 +331,8 @@ function runFilterFromParam(value: string | null): RunFilter {
     value === "failed" ||
     value === "scheduled" ||
     value === "manual" ||
-    value === "shortcuts"
+    value === "shortcuts" ||
+    value === "system"
   ) {
     return value;
   }

@@ -3,7 +3,7 @@ import { DatabaseBackup } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/pages/settings/shared";
 
-export type AdvancedSettingsTabProps = {
+export type MaintenanceSettingsTabProps = {
   importLegacyDatabaseData?: { workflow_run_id?: string | null; import_job_id?: string | null };
   isImporting: boolean;
   legacyDatabaseInputId: string;
@@ -11,13 +11,13 @@ export type AdvancedSettingsTabProps = {
   onRequestLegacyImport: () => void;
 };
 
-export function AdvancedSettingsTab({
+export function MaintenanceSettingsTab({
   importLegacyDatabaseData,
   isImporting,
   legacyDatabaseInputId,
   onImportLegacyDatabase,
   onRequestLegacyImport
-}: AdvancedSettingsTabProps): JSX.Element {
+}: MaintenanceSettingsTabProps): JSX.Element {
   return (
     <div className="mt-5 divide-y">
       <SettingsSection title="Data maintenance" description="Run one-off maintenance tasks for local library data.">

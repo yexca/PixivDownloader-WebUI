@@ -123,7 +123,7 @@ export function WorkflowsPage(): JSX.Element {
   );
   const selectedDefinition =
     filteredDefinitions.find((definition) => definition.id === selectedDefinitionId) ?? filteredDefinitions[0] ?? null;
-  const visibleShortcutJobs = filterShortcutJobs(jobs.data?.items ?? [], "");
+  const visibleBackgroundJobs = filterBackgroundJobs(jobs.data?.items ?? [], "");
 
   React.useEffect(() => {
     if (!selectedDefinitionId && definitionItems[0]) {
@@ -342,8 +342,8 @@ export function WorkflowsPage(): JSX.Element {
 
         <aside className="space-y-4 xl:sticky xl:top-20 xl:self-start">
           <RuntimeSummary definitions={definitionItems} runs={runItems} jobs={jobs.data?.items ?? []} />
-          <RecentRunsPanel runs={runItems} />
-          <ActiveShortcutPanel jobs={visibleShortcutJobs} />
+          <RecentActivityPanel runs={runItems} />
+          <ActiveBackgroundPanel jobs={visibleBackgroundJobs} runs={runItems} />
         </aside>
       </div>
 
@@ -939,14 +939,14 @@ function SummaryMetric({
   );
 }
 
-function RecentRunsPanel({ runs }: { runs: WorkflowRun[] }): JSX.Element {
+function RecentActivityPanel({ runs }: { runs: WorkflowRun[] }): JSX.Element {
   const recentRuns = runs.slice(0, 4);
   return (
     <section className="surface p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Recent Runs</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Open execution details in Runs.</p>
+          <h2 className="text-sm font-semibold">Recent Activity</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Global runs across workflows, shortcuts, and system tasks.</p>
         </div>
         <Button type="button" size="sm" variant="outline" asChild>
           <Link to="/runs">All</Link>
@@ -976,30 +976,46 @@ function RecentRunsPanel({ runs }: { runs: WorkflowRun[] }): JSX.Element {
   );
 }
 
-function ActiveShortcutPanel({ jobs }: { jobs: Job[] }): JSX.Element {
-  const activeShortcutJobs = jobs.slice(0, 4);
+function ActiveBackgroundPanel({ jobs, runs }: { jobs: Job[]; runs: WorkflowRun[] }): JSX.Element {
+  const activeBackgroundJobs = jobs.slice(0, 4);
+  const activeSystemRuns = runs.filter((run) => isSystemRun(run) && run.status === "running").slice(0, 2);
   return (
     <section className="surface p-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold">Active Shortcuts</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Shortcut jobs waiting or running now.</p>
+          <h2 className="text-sm font-semibold">Active Background</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Shortcut and system work running now.</p>
         </div>
-        <Badge tone="muted">{jobs.length}</Badge>
+        <Badge tone="muted">{jobs.length + activeSystemRuns.length}</Badge>
       </div>
       <div className="mt-4 space-y-2">
-        {activeShortcutJobs.map((job) => (
-          <ShortcutJobCard key={job.id} job={job} />
+        {activeSystemRuns.map((run) => (
+          <Link
+            key={run.id}
+            to={`/runs?filter=system&run=${encodeURIComponent(run.id)}`}
+            className="block rounded-md border bg-background p-3 text-sm transition-colors hover:bg-muted/50"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate font-semibold">{runTitle(run)}</span>
+              <Badge tone={workflowStatusTone(run.status)}>{run.status}</Badge>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {sourceLabel(run.source)} · {run.completed}/{run.total} nodes
+            </p>
+          </Link>
         ))}
-        {activeShortcutJobs.length === 0 ? (
-          <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No active shortcut jobs.</p>
+        {activeBackgroundJobs.map((job) => (
+          <BackgroundJobCard key={job.id} job={job} />
+        ))}
+        {activeSystemRuns.length === 0 && activeBackgroundJobs.length === 0 ? (
+          <p className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">No active background work.</p>
         ) : null}
       </div>
     </section>
   );
 }
 
-function ShortcutJobCard({ job }: { job: Job }): JSX.Element {
+function BackgroundJobCard({ job }: { job: Job }): JSX.Element {
   const completed = job.completed_files + job.skipped_files + job.failed_files;
   const progress = percent(completed, job.total_files);
   return (
@@ -1015,7 +1031,7 @@ function ShortcutJobCard({ job }: { job: Job }): JSX.Element {
         <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
       </div>
       <p className="mt-2 text-xs text-muted-foreground">
-        {completed}/{job.total_files || 0} files · {sourceLabel(job.workflow_source ?? "shortcut")}
+        {completed}/{job.total_files || 0} files · {sourceLabel(job.workflow_source ?? "background")}
       </p>
     </article>
   );
@@ -1057,10 +1073,10 @@ function filterDefinitionsByKind(definitions: WorkflowDefinition[], filter: Defi
   return definitions.filter((definition) => definition.triggers.length === 0);
 }
 
-function filterShortcutJobs(jobs: Job[], search: string): Job[] {
+function filterBackgroundJobs(jobs: Job[], search: string): Job[] {
   const query = search.trim().toLowerCase();
   return jobs
-    .filter((job) => isShortcutJob(job) && isActiveJob(job))
+    .filter((job) => (isShortcutJob(job) || isSystemJob(job)) && isActiveJob(job))
     .filter((job) =>
       query
         ? [job.id, job.type, job.workflow_source, job.input_user_id, job.input_artwork_id, job.status].join(" ").toLowerCase().includes(query)
@@ -1071,6 +1087,15 @@ function filterShortcutJobs(jobs: Job[], search: string): Job[] {
 function isShortcutJob(job: Job): boolean {
   const source = job.workflow_source ?? "";
   return source.includes("shortcut") || source.includes("api") || source === "download_api";
+}
+
+function isSystemJob(job: Job): boolean {
+  const source = job.workflow_source ?? "";
+  return source === "legacy_import" || source === "startup_recovery" || source.startsWith("system") || job.type === "import_legacy_database";
+}
+
+function isSystemRun(run: WorkflowRun): boolean {
+  return run.source === "legacy_import" || run.source === "startup_recovery" || run.source.startsWith("system");
 }
 
 function isActiveJob(job: Job): boolean {

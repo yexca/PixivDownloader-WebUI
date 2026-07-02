@@ -46,8 +46,8 @@ const PixivSettingsTab = React.lazy(() =>
 const AppearanceSettingsTab = React.lazy(() =>
   import("@/pages/settings/AppearanceSettingsTab").then((module) => ({ default: module.AppearanceSettingsTab }))
 );
-const AdvancedSettingsTab = React.lazy(() =>
-  import("@/pages/settings/AdvancedSettingsTab").then((module) => ({ default: module.AdvancedSettingsTab }))
+const MaintenanceSettingsTab = React.lazy(() =>
+  import("@/pages/settings/MaintenanceSettingsTab").then((module) => ({ default: module.MaintenanceSettingsTab }))
 );
 
 class AuthBrowserUnavailableError extends Error {
@@ -363,7 +363,7 @@ export function SettingsPage(): JSX.Element {
                 { value: "basic", label: "Basic" },
                 { value: "pixiv", label: "Pixiv" },
                 { value: "appearance", label: "Appearance" },
-                { value: "advanced", label: "Advanced" }
+                { value: "maintenance", label: "Maintenance" }
               ]}
             />
 
@@ -442,8 +442,8 @@ export function SettingsPage(): JSX.Element {
                 />
               ) : null}
 
-              {activeTab === "advanced" ? (
-                <AdvancedSettingsTab
+              {activeTab === "maintenance" ? (
+                <MaintenanceSettingsTab
                   importLegacyDatabaseData={importLegacyDatabaseMutation.data}
                   isImporting={importLegacyDatabaseMutation.isPending}
                   legacyDatabaseInputId={legacyDatabaseInputId}

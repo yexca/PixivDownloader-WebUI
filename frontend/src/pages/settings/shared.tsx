@@ -3,7 +3,7 @@ import type React from "react";
 import type { PixivBrowserAuthServiceStatusResponse, SettingsResponse, SettingsUpdateRequest } from "@/api/settings";
 import { Input } from "@/components/ui/input";
 
-export type SettingsTab = "basic" | "pixiv" | "appearance" | "advanced";
+export type SettingsTab = "basic" | "pixiv" | "appearance" | "maintenance";
 
 export type BasicForm = Pick<
   SettingsUpdateRequest,
