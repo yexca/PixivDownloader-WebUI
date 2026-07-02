@@ -145,20 +145,32 @@ type AdvancedWorkflowBuilderProps = {
   definition?: WorkflowDefinition | null;
   existingDefinitions?: WorkflowDefinition[];
   initialStage?: AdvancedWorkflowBuilderStage;
+  initialTriggerMode?: TriggerMode;
+  initialName?: string;
   triggerId?: number | null;
-  onSubmitted?: () => void;
+  onSubmitted?: (result: AdvancedWorkflowSubmitResult) => void;
+};
+
+export type AdvancedWorkflowSubmitResult = {
+  definitionId: string | null;
+  scheduled: boolean;
 };
 
 export function AdvancedWorkflowBuilder({
   definition,
   existingDefinitions = [],
   initialStage = "target",
+  initialTriggerMode = "manual",
+  initialName,
   triggerId,
   onSubmitted
 }: AdvancedWorkflowBuilderProps): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
-  const hydratedDraft = React.useMemo(() => draftFromDefinition(definition), [definition]);
+  const hydratedDraft = React.useMemo(
+    () => draftFromDefinition(definition, initialTriggerMode, initialName),
+    [definition, initialName, initialTriggerMode]
+  );
   const [draft, setDraft] = React.useState<WorkflowDraft>(hydratedDraft);
   const [selectedStage, setSelectedStage] = React.useState<StageKey>(initialStage);
   const [previewTab, setPreviewTab] = React.useState<PreviewTab>("summary");
@@ -205,7 +217,7 @@ export function AdvancedWorkflowBuilder({
       pushToast({ title: "Advanced workflow started", description: run.id, tone: "success" });
       void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      onSubmitted?.();
+      onSubmitted?.({ definitionId: null, scheduled: false });
     },
     onError: (error) => {
       pushToast({ title: "Advanced workflow failed", description: error.message, tone: "error" });
@@ -224,7 +236,10 @@ export function AdvancedWorkflowBuilder({
       void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
       void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      onSubmitted?.();
+      onSubmitted?.({
+        definitionId: response.definition.id,
+        scheduled: response.trigger !== null
+      });
     },
     onError: (error) => {
       pushToast({ title: "Workflow could not be saved", description: error.message, tone: "error" });
@@ -246,7 +261,7 @@ export function AdvancedWorkflowBuilder({
       runMutation.mutate(workflowJson);
       return;
     }
-    const shouldSchedule = draft.saveIntent === "save_and_schedule" || draft.saveIntent === "run_and_schedule";
+    const shouldSchedule = draft.triggerMode === "schedule";
     saveMutation.mutate({
       definition_id: definition?.id ?? null,
       definition: workflowJson.definition,
@@ -414,8 +429,7 @@ function StageEditor({
                 value={draft.saveIntent}
                 items={[
                   { value: "save_and_schedule", label: "Save schedule" },
-                  { value: "run_and_schedule", label: "Run + schedule" },
-                  { value: "save_only", label: "Save only" }
+                  { value: "run_and_schedule", label: "Run + schedule" }
                 ]}
                 onChange={(value) => update("saveIntent", value)}
               />
@@ -1163,9 +1177,18 @@ function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
   };
 }
 
-function draftFromDefinition(definition?: WorkflowDefinition | null): WorkflowDraft {
+function draftFromDefinition(
+  definition?: WorkflowDefinition | null,
+  initialTriggerMode: TriggerMode = "manual",
+  initialName = defaultWorkflowName()
+): WorkflowDraft {
   if (!definition) {
-    return initialDraft;
+    return {
+      ...initialDraft,
+      name: initialName,
+      triggerMode: initialTriggerMode,
+      saveIntent: initialTriggerMode === "schedule" ? "save_and_schedule" : "run_now"
+    };
   }
   const nodes = workflowNodesFromDefinition(definition);
   const scheduleDraft = scheduleDraftFromTrigger(definition.triggers[0]?.schedule);
@@ -1215,6 +1238,22 @@ function draftFromDefinition(definition?: WorkflowDefinition | null): WorkflowDr
     conflictMode: conflictModeOption(actionConfig.conflict_mode),
     namingRule: stringOption(actionConfig.naming_rule, initialDraft.namingRule)
   };
+}
+
+function defaultWorkflowName(date = new Date()): string {
+  const timestamp = [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+    padDatePart(date.getHours()),
+    padDatePart(date.getMinutes()),
+    padDatePart(date.getSeconds())
+  ].join("");
+  return `workflow_${timestamp}`;
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0");
 }
 
 function scheduleDraftFromTrigger(schedule?: Record<string, unknown>): Partial<WorkflowDraft> {

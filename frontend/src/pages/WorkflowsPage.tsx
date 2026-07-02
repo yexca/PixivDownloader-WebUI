@@ -43,7 +43,11 @@ import { Tabs } from "@/components/ui/tabs";
 import { DataState } from "@/components/DataState";
 import { PageHeader } from "@/components/PageHeader";
 import { useToast } from "@/components/ToastProvider";
-import { AdvancedWorkflowBuilder, type AdvancedWorkflowBuilderStage } from "@/components/workflows/AdvancedWorkflowBuilder";
+import {
+  AdvancedWorkflowBuilder,
+  type AdvancedWorkflowBuilderStage,
+  type AdvancedWorkflowSubmitResult
+} from "@/components/workflows/AdvancedWorkflowBuilder";
 import { definitionRunTitle, recentDefinitionRuns, workflowNodes } from "@/components/workflows/definitionMatching";
 import { WorkflowLimitPanel } from "@/components/workflows/WorkflowRuntimeCards";
 import { cn, formatDate, percent } from "@/lib/utils";
@@ -94,6 +98,8 @@ export function WorkflowsPage(): JSX.Element {
   const [builderOpen, setBuilderOpen] = React.useState(false);
   const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [builderInitialStage, setBuilderInitialStage] = React.useState<AdvancedWorkflowBuilderStage>("target");
+  const [builderInitialTriggerMode, setBuilderInitialTriggerMode] = React.useState<"manual" | "schedule">("manual");
+  const [builderInitialName, setBuilderInitialName] = React.useState<string | undefined>(undefined);
   const [editingTriggerId, setEditingTriggerId] = React.useState<number | null>(null);
   const [deleteDefinition, setDeleteDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
@@ -225,6 +231,8 @@ export function WorkflowsPage(): JSX.Element {
   const openNewBuilder = () => {
     setEditingDefinition(null);
     setBuilderInitialStage("trigger");
+    setBuilderInitialTriggerMode(definitionFilter === "scheduled" ? "schedule" : "manual");
+    setBuilderInitialName(defaultWorkflowName());
     setEditingTriggerId(null);
     setBuilderOpen(true);
   };
@@ -235,6 +243,8 @@ export function WorkflowsPage(): JSX.Element {
   ) => {
     setEditingDefinition(definition);
     setBuilderInitialStage(initialStage);
+    setBuilderInitialTriggerMode(definition.triggers.length ? "schedule" : "manual");
+    setBuilderInitialName(undefined);
     setEditingTriggerId(triggerId);
     setBuilderOpen(true);
   };
@@ -245,6 +255,23 @@ export function WorkflowsPage(): JSX.Element {
       return matchedRuns;
     }
     return [optimisticRun, ...matchedRuns];
+  };
+  const handleBuilderSubmitted = (result: AdvancedWorkflowSubmitResult) => {
+    setBuilderOpen(false);
+    if (result.definitionId) {
+      setDefinitionFilterParam(result.scheduled ? "scheduled" : "manual");
+      setSelectedDefinitionId(result.definitionId);
+    } else if (editingDefinition) {
+      setSelectedDefinitionId(editingDefinition.id);
+    }
+    setEditingDefinition(null);
+    setBuilderInitialStage("target");
+    setBuilderInitialTriggerMode("manual");
+    setBuilderInitialName(undefined);
+    setEditingTriggerId(null);
+    void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
+    void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
+    void queryClient.invalidateQueries({ queryKey: ["jobs"] });
   };
 
   return (
@@ -360,6 +387,8 @@ export function WorkflowsPage(): JSX.Element {
           if (!open) {
             setEditingDefinition(null);
             setBuilderInitialStage("target");
+            setBuilderInitialTriggerMode("manual");
+            setBuilderInitialName(undefined);
             setEditingTriggerId(null);
           }
         }}
@@ -368,19 +397,10 @@ export function WorkflowsPage(): JSX.Element {
           definition={editingDefinition}
           existingDefinitions={definitionItems}
           initialStage={builderInitialStage}
+          initialTriggerMode={builderInitialTriggerMode}
+          initialName={builderInitialName}
           triggerId={editingTriggerId}
-          onSubmitted={() => {
-            setBuilderOpen(false);
-            if (editingDefinition) {
-              setSelectedDefinitionId(editingDefinition.id);
-            }
-            setEditingDefinition(null);
-            setBuilderInitialStage("target");
-            setEditingTriggerId(null);
-            void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
-            void queryClient.invalidateQueries({ queryKey: ["workflow-runs"] });
-            void queryClient.invalidateQueries({ queryKey: ["jobs"] });
-          }}
+          onSubmitted={handleBuilderSubmitted}
         />
       </Dialog>
 
@@ -1256,4 +1276,20 @@ function jobStatusTone(status: Job["status"]): "default" | "success" | "danger" 
 
 function definitionFilterFromParam(value: string | null): DefinitionFilter {
   return value === "scheduled" ? "scheduled" : "manual";
+}
+
+function defaultWorkflowName(date = new Date()): string {
+  const timestamp = [
+    date.getFullYear(),
+    padDatePart(date.getMonth() + 1),
+    padDatePart(date.getDate()),
+    padDatePart(date.getHours()),
+    padDatePart(date.getMinutes()),
+    padDatePart(date.getSeconds())
+  ].join("");
+  return `workflow_${timestamp}`;
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0");
 }
