@@ -143,22 +143,27 @@ def test_download_uses_naming_rule_with_ai_token(tmp_path):
         name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
-        Artwork(
-            id="100",
-            artist_id=user_id,
-            title="Title",
-            tags=("AI生成",),
-            files=(
-                ArtworkFile(
-                    artwork_id="100",
-                    page_index=0,
-                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
-                    file_name="100_p0.jpg",
+
+    def get_artworks(user_id, *, stop_at_artwork_id=None):
+        _ = stop_at_artwork_id
+        return [
+            Artwork(
+                id="100",
+                artist_id=user_id,
+                title="Title",
+                tags=("AI生成",),
+                files=(
+                    ArtworkFile(
+                        artwork_id="100",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                        file_name="100_p0.jpg",
+                    ),
                 ),
-            ),
-        )
-    ]
+            )
+        ]
+
+    pixiv_client.get_artworks_by_user_id = get_artworks
 
     summary = service.download(
         user_id="123",
@@ -182,22 +187,27 @@ def test_download_uses_tag_variant_naming_rule(tmp_path):
         name_history_repository=ArtistNameHistoryRepository(db_path),
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
-        Artwork(
-            id="100",
-            artist_id=user_id,
-            title="Title",
-            tags=("AI生成",),
-            files=(
-                ArtworkFile(
-                    artwork_id="100",
-                    page_index=0,
-                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
-                    file_name="100_p0.jpg",
+
+    def get_artworks(user_id, *, stop_at_artwork_id=None):
+        _ = stop_at_artwork_id
+        return [
+            Artwork(
+                id="100",
+                artist_id=user_id,
+                title="Title",
+                tags=("AI生成",),
+                files=(
+                    ArtworkFile(
+                        artwork_id="100",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                        file_name="100_p0.jpg",
+                    ),
                 ),
-            ),
-        )
-    ]
+            )
+        ]
+
+    pixiv_client.get_artworks_by_user_id = get_artworks
 
     service.download(
         user_id="123",
@@ -230,33 +240,38 @@ def test_download_uses_tag_variant_behavior_skip(tmp_path):
         file_repository=ArtworkFileRepository(db_path),
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
-        Artwork(
-            id="100",
-            artist_id=user_id,
-            tags=("AI生成",),
-            files=(
-                ArtworkFile(
-                    artwork_id="100",
-                    page_index=0,
-                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
-                    file_name="100_p0.jpg",
+
+    def get_artworks(user_id, *, stop_at_artwork_id=None):
+        _ = stop_at_artwork_id
+        return [
+            Artwork(
+                id="100",
+                artist_id=user_id,
+                tags=("AI生成",),
+                files=(
+                    ArtworkFile(
+                        artwork_id="100",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                        file_name="100_p0.jpg",
+                    ),
                 ),
             ),
-        ),
-        Artwork(
-            id="101",
-            artist_id=user_id,
-            files=(
-                ArtworkFile(
-                    artwork_id="101",
-                    page_index=0,
-                    original_url="https://i.pximg.net/img-original/img/101_p0.jpg",
-                    file_name="101_p0.jpg",
+            Artwork(
+                id="101",
+                artist_id=user_id,
+                files=(
+                    ArtworkFile(
+                        artwork_id="101",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/101_p0.jpg",
+                        file_name="101_p0.jpg",
+                    ),
                 ),
             ),
-        ),
-    ]
+        ]
+
+    pixiv_client.get_artworks_by_user_id = get_artworks
 
     summary = service.download(
         user_id="123",
@@ -316,27 +331,32 @@ def test_download_uses_tag_variant_behavior_retry_failed_only(tmp_path):
         file_repository=file_repository,
         sleeper=lambda: None,
     )
-    pixiv_client.get_artworks_by_user_id = lambda user_id, *, stop_at_artwork_id=None: [
-        Artwork(
-            id="100",
-            artist_id=user_id,
-            tags=("AI生成",),
-            files=(
-                ArtworkFile(
-                    artwork_id="100",
-                    page_index=0,
-                    original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
-                    file_name="100_p0.jpg",
+
+    def get_artworks(user_id, *, stop_at_artwork_id=None):
+        _ = stop_at_artwork_id
+        return [
+            Artwork(
+                id="100",
+                artist_id=user_id,
+                tags=("AI生成",),
+                files=(
+                    ArtworkFile(
+                        artwork_id="100",
+                        page_index=0,
+                        original_url="https://i.pximg.net/img-original/img/100_p0.jpg",
+                        file_name="100_p0.jpg",
+                    ),
+                    ArtworkFile(
+                        artwork_id="100",
+                        page_index=1,
+                        original_url="https://i.pximg.net/img-original/img/100_p1.jpg",
+                        file_name="100_p1.jpg",
+                    ),
                 ),
-                ArtworkFile(
-                    artwork_id="100",
-                    page_index=1,
-                    original_url="https://i.pximg.net/img-original/img/100_p1.jpg",
-                    file_name="100_p1.jpg",
-                ),
-            ),
-        )
-    ]
+            )
+        ]
+
+    pixiv_client.get_artworks_by_user_id = get_artworks
 
     summary = service.download(
         user_id="123",

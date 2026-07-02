@@ -121,7 +121,6 @@ class DownloadService:
         self._check_cancelled(cancel_callback)
 
         files = self._select_known_files(
-            artist=artist,
             artworks=artworks,
             retry_failed=resolved_options.retry_failed,
             pending_only=resolved_options.pending_only,
@@ -309,7 +308,6 @@ class DownloadService:
     def _select_known_files(
         self,
         *,
-        artist: Artist,
         artworks: list[Artwork],
         retry_failed: bool,
         pending_only: bool,

@@ -63,7 +63,9 @@ class WorkflowScheduleService:
             if current is None:
                 raise ValueError(f"workflow trigger not found: {trigger_id}")
             if current.workflow_definition_id != saved.id:
-                raise ValueError(f"workflow trigger {trigger_id} does not belong to definition {saved.id}")
+                raise ValueError(
+                    f"workflow trigger {trigger_id} does not belong to definition {saved.id}"
+                )
             updated = replace(
                 current,
                 status="active" if enabled else "paused",
@@ -104,7 +106,9 @@ class WorkflowScheduleService:
         updated = replace(
             current,
             status=status,
-            next_run_at=next_run_time(current.schedule, from_time=now) if status == "active" else None,
+            next_run_at=(
+                next_run_time(current.schedule, from_time=now) if status == "active" else None
+            ),
             last_error_code=None if status == "active" else current.last_error_code,
             last_error_message=None if status == "active" else current.last_error_message,
         )

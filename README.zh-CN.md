@@ -52,7 +52,7 @@ docker compose stop pixiv-auth-browser
 docker compose down
 ```
 
-Compose 文件可构建 `yexca/pixivdownloader:v0.1.0`，映射 `7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。
+Compose 文件可构建 `yexca/pixivdownloader:v0.2.0`，映射 `7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。
 
 ## 本地 Windows 运行
 

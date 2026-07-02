@@ -42,7 +42,7 @@ WebUI の Settings で Pixiv サインインを開始し、noVNC ブラウザー
 docker compose down
 ```
 
-Compose ファイルは `yexca/pixivdownloader:v0.1.0` をビルドでき、`7653:7653` を公開し、永続化のためにローカルの `config/`、`resources/`、`downloads/` をマウントします。
+Compose ファイルは `yexca/pixivdownloader:v0.2.0` をビルドでき、`7653:7653` を公開し、永続化のためにローカルの `config/`、`resources/`、`downloads/` をマウントします。
 
 ## Windows ローカル実行
 

@@ -92,6 +92,7 @@ class FakePixivClient:
         *,
         stop_at_artwork_id: str | None = None,
     ) -> list[Artwork]:
+        _ = stop_at_artwork_id
         return self.artworks.get(user_id, [])
 
 

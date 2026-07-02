@@ -49,7 +49,7 @@ def test_health_endpoint(tmp_path):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.1.0"}
+    assert response.json() == {"status": "ok", "version": "0.2.0"}
 
 
 def test_dashboard_summary_endpoint_returns_runtime_and_library_counts(tmp_path):

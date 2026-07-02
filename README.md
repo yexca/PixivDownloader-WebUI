@@ -42,7 +42,7 @@ Stop:
 docker compose down
 ```
 
-The compose file can build `yexca/pixivdownloader:v0.1.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
+The compose file can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
 
 ## Local Windows Runtime
 
