@@ -31,6 +31,7 @@ from backend.services.legacy_import_hydration_service import (
     legacy_hydration_targets_from_options,
 )
 from backend.services.legacy_import_service import LegacyDatabaseImportService
+from backend.services.legacy_import_workflow_service import LegacyImportWorkflowService
 from backend.services.library_sync_service import LibrarySyncService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.pixiv_rate_policy import (
@@ -187,7 +188,14 @@ class DownloadWorker:
         finally:
             repository.close()
             if result is not None:
-                self._continue_advanced_workflow(result)
+                self._continue_workflow(result)
+
+    def _continue_workflow(self, job: Job) -> None:
+        if job.workflow_source == "advanced_workflow":
+            self._continue_advanced_workflow(job)
+            return
+        if job.workflow_source == "legacy_import":
+            self._continue_legacy_import_workflow(job)
 
     def _run_legacy_import_hydration_job(self, repository: JobRepository, job: Job) -> Job:
         targets = legacy_hydration_targets_from_options(job.options)
@@ -488,6 +496,13 @@ class DownloadWorker:
             logger.exception("advanced workflow continuation failed: %s", job.workflow_run_id)
         finally:
             runner.close()
+
+    def _continue_legacy_import_workflow(self, job: Job) -> None:
+        service = LegacyImportWorkflowService(
+            self.db_path,
+            settings_json_path=self.settings_json_path,
+        )
+        service.continue_after_job(job)
 
     def _record_legacy_hydration_progress(
         self,

@@ -77,6 +77,8 @@ const sourceLabels: Record<string, string> = {
   download_api: "download shortcut",
   library_shortcut: "library shortcut",
   artist_api: "library shortcut",
+  legacy_import: "legacy import",
+  startup_recovery: "startup recovery",
   artwork_file_retry: "file retry",
   import_api: "import"
 };

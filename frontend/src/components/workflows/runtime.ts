@@ -184,6 +184,12 @@ export function jobTarget(job: Job): string {
 }
 
 export function sourceLabel(source: string): string {
+  if (source === "legacy_import") {
+    return "legacy import";
+  }
+  if (source === "startup_recovery") {
+    return "startup recovery";
+  }
   if (source === "manual_workflow_trigger" || source === "workflow_trigger") {
     return "workflow trigger";
   }

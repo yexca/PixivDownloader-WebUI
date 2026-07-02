@@ -170,7 +170,7 @@ def test_startup_recovery_does_not_create_empty_run(tmp_path):
     assert total == 0
 
 
-def test_legacy_import_hydration_runs_inside_advanced_workflow_boundary(tmp_path):
+def test_legacy_import_hydration_runs_inside_legacy_import_boundary(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     settings_path = write_settings(tmp_path)
     migrate_database(db_path, settings_json_path=settings_path)
@@ -213,7 +213,7 @@ def test_legacy_import_hydration_runs_inside_advanced_workflow_boundary(tmp_path
     assert job.type == "hydrate_legacy_import"
     assert job.workflow_run_id == run.id
     assert job.workflow_node_run_id == run.node_runs[0].id
-    assert job.workflow_source == "advanced_workflow"
+    assert job.workflow_source == "legacy_import"
     assert job.options["source"] == "legacy_database"
 
 

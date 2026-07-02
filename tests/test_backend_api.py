@@ -528,7 +528,7 @@ def test_import_legacy_database_endpoint(tmp_path):
     assert job.type == "import_legacy_database"
     assert job.workflow_run_id is not None
     assert job.workflow_node_run_id is not None
-    assert job.workflow_source == "advanced_workflow"
+    assert job.workflow_source == "legacy_import"
     assert "workflow_source" not in job.options
     assert job.options["import_id"]
     workflow_repository = WorkflowRunRepository(tmp_path / "pixiv.sqlite3")
@@ -584,6 +584,7 @@ def test_legacy_import_workflow_import_job_imports_artists_and_continues(tmp_pat
         repository.close()
     assert hydration_job is not None
     assert hydration_job.type == "hydrate_legacy_import"
+    assert hydration_job.workflow_source == "legacy_import"
     assert hydration_job.options["artist_ids"] == ["100058387", "101013492"]
 
 
