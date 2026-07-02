@@ -91,6 +91,9 @@ class WorkflowScheduleService:
     def list_definitions(self) -> list[WorkflowDefinitionWithTriggers]:
         return self.repository.list_definitions()
 
+    def delete_definition(self, definition_id: str) -> bool:
+        return self.repository.delete_definition(definition_id)
+
     def update_trigger_status(self, trigger_id: int, *, status: str) -> WorkflowTrigger:
         if status not in {"active", "paused"}:
             raise ValueError(f"unsupported workflow trigger status: {status}")

@@ -17,6 +17,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Trash2,
   UserRoundSearch,
 } from "lucide-react";
 
@@ -24,6 +25,7 @@ import {
   listWorkflowDefinitions,
   listWorkflowRuns,
   runWorkflowDefinition,
+  deleteWorkflowDefinition,
   updateWorkflowDefinitionTrigger,
   type AdvancedWorkflowNode,
   type WorkflowRun,
@@ -91,6 +93,7 @@ export function WorkflowsPage(): JSX.Element {
   const [editingDefinition, setEditingDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [builderInitialStage, setBuilderInitialStage] = React.useState<AdvancedWorkflowBuilderStage>("target");
   const [editingTriggerId, setEditingTriggerId] = React.useState<number | null>(null);
+  const [deleteDefinition, setDeleteDefinition] = React.useState<WorkflowDefinition | null>(null);
   const [selectedDefinitionId, setSelectedDefinitionId] = React.useState<string | null>(null);
 
   const definitions = useQuery({
@@ -169,6 +172,18 @@ export function WorkflowsPage(): JSX.Element {
     },
     onError: (error) => pushToast({ title: "Schedule could not update", description: error.message, tone: "error" })
   });
+  const deleteMutation = useMutation({
+    mutationFn: (definition: WorkflowDefinition) => deleteWorkflowDefinition(definition.id),
+    onSuccess: (_, definition) => {
+      pushToast({ title: "Workflow deleted", description: definition.name, tone: "success" });
+      setDeleteDefinition(null);
+      const nextDefinition = filteredDefinitions.find((item) => item.id !== definition.id) ?? null;
+      setSelectedDefinitionId(nextDefinition?.id ?? null);
+      void queryClient.invalidateQueries({ queryKey: ["workflow-definitions"] });
+      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+    onError: (error) => pushToast({ title: "Workflow could not be deleted", description: error.message, tone: "error" })
+  });
 
   const refresh = () => {
     void definitions.refetch();
@@ -198,7 +213,7 @@ export function WorkflowsPage(): JSX.Element {
   };
   const openNewBuilder = () => {
     setEditingDefinition(null);
-    setBuilderInitialStage("target");
+    setBuilderInitialStage("trigger");
     setEditingTriggerId(null);
     setBuilderOpen(true);
   };
@@ -283,6 +298,7 @@ export function WorkflowsPage(): JSX.Element {
               running={runDefinition.isPending}
               onEdit={() => openEditBuilder(selectedDefinition)}
               onEditStage={(stage) => openEditBuilder(selectedDefinition, stage)}
+              onDelete={() => setDeleteDefinition(selectedDefinition)}
               onEditTrigger={(trigger) => openEditBuilder(selectedDefinition, "trigger", trigger.id)}
               onToggleTrigger={(trigger) =>
                 triggerStatusMutation.mutate({
@@ -324,6 +340,7 @@ export function WorkflowsPage(): JSX.Element {
       >
         <AdvancedWorkflowBuilder
           definition={editingDefinition}
+          existingDefinitions={definitionItems}
           initialStage={builderInitialStage}
           triggerId={editingTriggerId}
           onSubmitted={() => {
@@ -340,6 +357,21 @@ export function WorkflowsPage(): JSX.Element {
           }}
         />
       </Dialog>
+
+      <DeleteWorkflowConfirmDialog
+        definition={deleteDefinition}
+        isDeleting={deleteMutation.isPending}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteDefinition(null);
+          }
+        }}
+        onConfirm={() => {
+          if (deleteDefinition) {
+            deleteMutation.mutate(deleteDefinition);
+          }
+        }}
+      />
 
     </>
   );
@@ -415,12 +447,50 @@ function DefinitionList({
   );
 }
 
+function DeleteWorkflowConfirmDialog({
+  definition,
+  isDeleting,
+  onOpenChange,
+  onConfirm
+}: {
+  definition: WorkflowDefinition | null;
+  isDeleting: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  return (
+    <Dialog
+      open={Boolean(definition)}
+      title="Delete Workflow"
+      description={definition ? `${definition.name} will be removed from saved workflows.` : ""}
+      onOpenChange={onOpenChange}
+      bodyClassName="space-y-3"
+      footer={
+        <>
+          <Button type="button" variant="outline" disabled={isDeleting} onClick={() => onOpenChange(false)}>
+            Keep Workflow
+          </Button>
+          <Button type="button" variant="destructive" disabled={isDeleting} onClick={onConfirm}>
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Delete Workflow
+          </Button>
+        </>
+      }
+    >
+      <div className="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+        This deletes the workflow definition and its schedules. Existing run history is kept in Runs.
+      </div>
+    </Dialog>
+  );
+}
+
 function DefinitionWorkbench({
   definition,
   latestRun,
   running,
   onEdit,
   onEditStage,
+  onDelete,
   onEditTrigger,
   onToggleTrigger,
   togglingTriggerId,
@@ -431,6 +501,7 @@ function DefinitionWorkbench({
   running: boolean;
   onEdit: () => void;
   onEditStage: (stage: AdvancedWorkflowBuilderStage) => void;
+  onDelete: () => void;
   onEditTrigger: (trigger: WorkflowTrigger) => void;
   onToggleTrigger: (trigger: WorkflowTrigger) => void;
   togglingTriggerId: number | null;
@@ -453,6 +524,10 @@ function DefinitionWorkbench({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={onDelete}>
+              <Trash2 className="h-4 w-4" aria-hidden="true" />
+              Delete
+            </Button>
             <Button type="button" variant="outline" onClick={onEdit}>
               <Save className="h-4 w-4" aria-hidden="true" />
               Edit
@@ -603,6 +678,12 @@ function WorkflowGraph({
   latestRun: WorkflowRun | null;
   onEditNode: (stage: AdvancedWorkflowBuilderStage) => void;
 }): JSX.Element {
+  const [selectedNodeId, setSelectedNodeId] = React.useState(nodes[0]?.id ?? "");
+  React.useEffect(() => {
+    if (!nodes.some((node) => node.id === selectedNodeId)) {
+      setSelectedNodeId(nodes[0]?.id ?? "");
+    }
+  }, [nodes, selectedNodeId]);
   if (!nodes.length) {
     return <DataState title="Workflow has no nodes" variant="error" />;
   }
@@ -622,7 +703,19 @@ function WorkflowGraph({
             const run = nodeRuns.find((item) => item.node_id === node.id);
             return (
               <React.Fragment key={node.id}>
-                <WorkflowNodeCard node={node} nodeRun={run} onEdit={() => onEditNode(stageForNode(node.type))} />
+                <WorkflowNodeCard
+                  node={node}
+                  nodeRun={run}
+                  selected={selectedNodeId === node.id}
+                  onActivate={() => {
+                    if (selectedNodeId === node.id) {
+                      onEditNode(stageForNode(node.type));
+                      return;
+                    }
+                    setSelectedNodeId(node.id);
+                  }}
+                  onEdit={() => onEditNode(stageForNode(node.type))}
+                />
                 {index < nodes.length - 1 ? (
                   <div className="flex w-8 shrink-0 items-center">
                     <div className="h-px flex-1 bg-border" />
@@ -641,41 +734,63 @@ function WorkflowGraph({
 function WorkflowNodeCard({
   node,
   nodeRun,
+  selected,
+  onActivate,
   onEdit
 }: {
   node: AdvancedWorkflowNode;
   nodeRun?: WorkflowNodeRun;
+  selected: boolean;
+  onActivate: () => void;
   onEdit: () => void;
 }): JSX.Element {
   const Icon = nodeIcon(node.type);
   return (
-    <article className="w-52 shrink-0 rounded-md border bg-background p-3">
+    <article
+      className={cn(
+        "w-52 shrink-0 cursor-pointer rounded-md border bg-background p-3 transition-colors hover:bg-muted/35",
+        selected && "border-primary bg-primary/5 shadow-sm"
+      )}
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      onClick={onActivate}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onActivate();
+        }
+      }}
+    >
       <div className="flex items-start justify-between gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted">
+        <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted", selected && "border-primary/40 bg-primary/10 text-primary")}>
           <Icon className="h-4 w-4" aria-hidden="true" />
         </span>
-        <div className="flex items-center gap-1">
-          <Badge tone={nodeRun ? workflowStatusTone(nodeRun.status) : "muted"}>
-            {nodeRun?.status ?? "ready"}
-          </Badge>
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7"
-            title={`Edit ${nodeTypeLabel(node.type)}`}
-            aria-label={`Edit ${nodeTypeLabel(node.type)}`}
-            onClick={onEdit}
-          >
-            <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-          </Button>
-        </div>
+        <Badge tone={nodeRun ? workflowStatusTone(nodeRun.status) : "muted"}>
+          {nodeRun?.status ?? "ready"}
+        </Badge>
       </div>
       <h4 className="mt-3 truncate text-sm font-semibold">{node.title || nodeTypeLabel(node.type)}</h4>
       <p className="mt-1 text-xs text-muted-foreground">{nodeTypeLabel(node.type)} · {node.id}</p>
-      <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-        <div>{Object.keys(node.config ?? {}).length} config field(s)</div>
-        <div>{nodeRun?.job_ids.length ?? 0} linked job(s)</div>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <div>{Object.keys(node.config ?? {}).length} config field(s)</div>
+          <div>{nodeRun?.job_ids.length ?? 0} linked job(s)</div>
+        </div>
+        <Button
+          type="button"
+          size="icon"
+          variant="outline"
+          className="h-8 w-8 shrink-0"
+          title={`Edit ${nodeTypeLabel(node.type)}`}
+          aria-label={`Edit ${nodeTypeLabel(node.type)}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onEdit();
+          }}
+        >
+          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+        </Button>
       </div>
     </article>
   );

@@ -86,6 +86,21 @@ class WorkflowDefinitionRepository:
             raise DatabaseError(f"failed to fetch workflow definition {definition_id}") from exc
         return workflow_definition_from_row(row) if row is not None else None
 
+    def delete_definition(self, definition_id: str) -> bool:
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "DELETE FROM workflow_triggers WHERE workflow_definition_id = ?",
+                    (definition_id,),
+                )
+                cursor = self.conn.execute(
+                    "DELETE FROM workflow_definitions WHERE id = ?",
+                    (definition_id,),
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError(f"failed to delete workflow definition {definition_id}") from exc
+        return cursor.rowcount > 0
+
     def list_definitions(self) -> list[WorkflowDefinitionWithTriggers]:
         try:
             rows = self.conn.execute(

@@ -121,6 +121,21 @@ def update_definition_trigger(
     return workflow_trigger_response(trigger)
 
 
+@router.delete("/definitions/{definition_id}", status_code=204)
+def delete_workflow_definition(
+    definition_id: str,
+    db_path: DbPath,
+    settings_json_path: SettingsJsonPath,
+) -> None:
+    _ = settings_json_path
+    service = WorkflowScheduleService(db_path)
+    try:
+        if not service.delete_definition(definition_id):
+            raise HTTPException(status_code=404, detail="Workflow definition not found")
+    finally:
+        service.close()
+
+
 @router.post("/definitions/{definition_id}/run", response_model=WorkflowRunResponse)
 def run_workflow_definition(
     definition_id: str,

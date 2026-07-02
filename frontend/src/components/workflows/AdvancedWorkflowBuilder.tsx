@@ -105,7 +105,7 @@ const initialDraft: WorkflowDraft = {
   weeklyDays: [1, 3, 5],
   monthlyDay: "1",
   targetScope: "selected",
-  artistIds: "123456\n234567",
+  artistIds: "",
   artistTag: "",
   staleDays: "30",
   maxArtists: "20",
@@ -143,6 +143,7 @@ const stages: Array<{ key: StageKey; title: string; icon: React.ComponentType<{ 
 
 type AdvancedWorkflowBuilderProps = {
   definition?: WorkflowDefinition | null;
+  existingDefinitions?: WorkflowDefinition[];
   initialStage?: AdvancedWorkflowBuilderStage;
   triggerId?: number | null;
   onSubmitted?: () => void;
@@ -150,6 +151,7 @@ type AdvancedWorkflowBuilderProps = {
 
 export function AdvancedWorkflowBuilder({
   definition,
+  existingDefinitions = [],
   initialStage = "target",
   triggerId,
   onSubmitted
@@ -231,6 +233,15 @@ export function AdvancedWorkflowBuilder({
 
   const submitting = runMutation.isPending || saveMutation.isPending;
   const submitAdvanced = () => {
+    if (hasDuplicateDefinitionName(draft.name, existingDefinitions, definition?.id ?? null)) {
+      pushToast({
+        title: "Workflow name already exists",
+        description: "Choose a different name before saving this workflow.",
+        tone: "error"
+      });
+      setSelectedStage("trigger");
+      return;
+    }
     if (!definition && draft.saveIntent === "run_now") {
       runMutation.mutate(workflowJson);
       return;
@@ -383,7 +394,7 @@ function StageEditor({
     return (
       <EditorPanel icon={CalendarClock} title="Trigger" kicker="Schedule">
         <Field label="Workflow name">
-          <Input value={draft.name} onChange={(event) => update("name", event.target.value)} />
+          <Input value={draft.name} placeholder="Name this workflow" onChange={(event) => update("name", event.target.value)} />
         </Field>
         <Segmented
           value={draft.triggerMode}
@@ -491,7 +502,11 @@ function StageEditor({
         </Field>
         {draft.targetScope === "selected" ? (
           <Field label="Artist IDs">
-            <Textarea value={draft.artistIds} onChange={(event) => update("artistIds", event.target.value)} />
+            <Textarea
+              value={draft.artistIds}
+              placeholder="One artist ID per line"
+              onChange={(event) => update("artistIds", event.target.value)}
+            />
           </Field>
         ) : null}
         {draft.targetScope === "tagged" ? (
@@ -914,6 +929,18 @@ function submitLabel(draft: WorkflowDraft): string {
     run_and_schedule: "Run + Schedule"
   };
   return labels[draft.saveIntent];
+}
+
+function hasDuplicateDefinitionName(
+  name: string,
+  definitions: WorkflowDefinition[],
+  currentDefinitionId: string | null
+): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return definitions.some((definition) => definition.id !== currentDefinitionId && definition.name.trim().toLowerCase() === normalized);
 }
 
 function saveIntentText(intent: SaveIntent): string {

@@ -134,6 +134,12 @@ export function runWorkflowDefinition(definitionId: string): Promise<WorkflowRun
   });
 }
 
+export function deleteWorkflowDefinition(definitionId: string): Promise<void> {
+  return apiRequest<void>(`/workflows/definitions/${definitionId}`, {
+    method: "DELETE"
+  });
+}
+
 export function updateWorkflowDefinitionTrigger(
   triggerId: number,
   request: { status: "active" | "paused" }

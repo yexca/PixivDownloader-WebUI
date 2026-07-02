@@ -99,6 +99,39 @@ def test_save_with_trigger_updates_existing_trigger(tmp_path):
     assert updated.schedule == {"type": "interval", "every": 6, "unit": "hours"}
 
 
+def test_delete_definition_removes_triggers(tmp_path):
+    db_path = tmp_path / "pixiv.sqlite3"
+    migrate_database(db_path)
+    definition = AdvancedWorkflowDefinitionRequest.model_validate(
+        {
+            "name": "Delete scheduled workflow",
+            "nodes": [
+                {
+                    "id": "actions",
+                    "type": "execute_actions",
+                    "title": "Execute actions",
+                    "config": {"download": False},
+                }
+            ],
+        }
+    )
+    service = WorkflowScheduleService(db_path)
+    try:
+        saved, trigger = service.save_with_trigger(
+            definition,
+            schedule={"type": "interval", "every": 1, "unit": "days"},
+        )
+        deleted = service.delete_definition(saved.id)
+        reloaded_definition = service.repository.get_definition(saved.id)
+        reloaded_trigger = service.repository.get_trigger(trigger.id or 0)
+    finally:
+        service.close()
+
+    assert deleted is True
+    assert reloaded_definition is None
+    assert reloaded_trigger is None
+
+
 def test_next_run_time_supports_interval_daily_weekly_monthly():
     base = "2026-07-01T02:30:00Z"
 
