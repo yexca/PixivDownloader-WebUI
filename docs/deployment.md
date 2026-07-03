@@ -1,6 +1,6 @@
 # Deployment
 
-PixivDownloader-SQLite is deployed primarily with Docker Compose. Windows scripts remain available for local development or users who do not want to run Docker.
+PixivDownloader WebUI is deployed primarily with Docker Compose. Windows scripts remain available for local development or users who do not want to run Docker.
 
 ## Docker Compose
 
@@ -152,9 +152,9 @@ The image entrypoint is:
 python -m backend.app
 ```
 
-## Legacy Data Import
+## PixivDownloader-SQLite Database Import
 
-Legacy `pixiv.db` imports are handled through the WebUI Settings page. The old PyQt desktop application source is not copied into the Docker image and is not part of deployment.
+`pixiv.db` imports from [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite) are handled through the WebUI Settings page. The source project is not copied into the Docker image and is not part of deployment.
 
 ## Packaged Executable Expectations
 

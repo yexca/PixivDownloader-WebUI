@@ -13,7 +13,7 @@ env\python\python.exe -m pytest
 Expected current baseline:
 
 ```text
-35 passed
+137 passed
 ```
 
 There may be a third-party Starlette/FastAPI deprecation warning from `TestClient`.
@@ -81,18 +81,25 @@ docker compose down
 Use `run-webui.bat`, then verify:
 
 - Dashboard loads and shows recent job state.
+- Dashboard shows workflow run groups, trigger health, queue state, and library attention states.
 - Settings loads masked refresh token state.
 - Settings saves download path and request options.
 - Settings `Test Auth` reports success or a clear token failure.
-- Settings imports an old PyQt `pixiv.db` and updates Library artists.
-- Download creates a job from a Pixiv user ID.
-- Download creates a job from an artwork ID.
-- Active job progress and recent events update.
-- Running or queued jobs can be cancelled.
-- Failed files can be retried.
+- Settings imports a `pixiv.db` from PixivDownloader-SQLite and updates Library artists.
+- Workflows can create a manual definition and run it.
+- Workflows can create a scheduled definition and pause/resume its trigger.
+- Runs opens a workflow run and shows node-run details plus linked jobs.
 - Library lists artists after jobs discover them.
+- Library filters by file state, tags, update state, account status, and stale state.
 - Artist detail opens and lists artworks/files for the selected artist.
-- Logs page shows recent job events without exposing the refresh token.
+- Artist sync creates a workflow run from a Pixiv user ID.
+- Artwork or failed-file retry creates a workflow run and linked job.
+- Active job progress and recent events update.
+- Queue pause/resume changes job activation behavior.
+- Running or queued jobs can be cancelled.
+- Failed jobs can be retried, and previous jobs can be rerun.
+- Failed files can be retried.
+- Events page shows recent job events without exposing the refresh token.
 
 ## Pixiv Network Note
 
@@ -100,4 +107,4 @@ Do not run Pixiv network tests unless a valid local refresh token is configured 
 
 Automated regression tests should mock Pixiv and file download boundaries.
 
-Legacy verification is limited to explicit old `pixiv.db` import behavior.
+PixivDownloader-SQLite verification is limited to explicit `pixiv.db` import behavior.

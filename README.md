@@ -1,20 +1,24 @@
-# PixivDownloader-SQLite
+# PixivDownloader WebUI
 
-> Languages: [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
+> Languages: [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-PixivDownloader-SQLite is a local WebUI downloader for Pixiv artwork backup and management. It runs a FastAPI backend, serves a React + TypeScript frontend, and stores metadata in a local SQLite database.
+PixivDownloader WebUI is a local-first browser interface for Pixiv artwork backup, workflow automation, and library management. It runs a FastAPI backend, serves a React + TypeScript frontend, and stores metadata, jobs, workflow runs, and file status in a local SQLite database.
 
-This repository contains the WebUI rewrite. It keeps migration support for old PyQt `pixiv.db` files, but the old desktop application source is not part of this project.
+This repository contains the maintained WebUI for PixivDownloader. It supports importing `pixiv.db` databases created by [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite), but that source project is not bundled here.
 
 ## Features
 
-- Start downloads by Pixiv user ID or artwork ID.
-- Manage download settings, including download path and Pixiv refresh token.
-- Track jobs, progress, history, artists, artworks, and file status in SQLite.
-- Import old PyQt `pixiv.db` data explicitly from WebUI Settings.
-- Run the WebUI with Docker Compose or local Windows scripts.
+- Dashboard for workflow runs, trigger health, queue pressure, and library attention states.
+- Reusable workflow definitions with manual runs and scheduled triggers.
+- Shortcut downloads by Pixiv artist ID or artwork ID.
+- Library, artist detail, artwork file status, local tags, retry, sync, and delete actions.
+- Queue controls, job retry/rerun/cancel, bulk cancellation, and live job progress over WebSocket.
+- Settings for download path, Pixiv authentication, request/file delays, concurrency, disk-space guard, existing-file behavior, library stale checks, and theme preferences.
+- Optional Docker noVNC authentication sidecar for Pixiv browser login.
+- Explicit database import from [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite) through Settings.
+- Docker Compose runtime and local Windows script runtime.
 
-## Recommended: Docker Compose
+## Recommended Runtime: Docker Compose
 
 Start the WebUI:
 
@@ -28,21 +32,33 @@ Open:
 http://127.0.0.1:7653
 ```
 
-Docker Compose also starts the `pixiv-auth-browser` sidecar and exposes noVNC:
+The default Compose startup runs only the WebUI. When Pixiv browser authentication is needed, start the optional `pixiv-auth-browser` sidecar:
+
+```bat
+docker compose --profile auth up -d pixiv-auth-browser
+```
+
+The sidecar exposes noVNC:
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
 ```
 
-After clicking Pixiv sign-in in WebUI Settings, complete Pixiv login in the noVNC browser. The backend captures the callback and saves the `refresh_token` automatically.
+After clicking Pixiv sign-in in WebUI Settings, complete Pixiv login in the noVNC browser. The sidecar posts the callback to the backend and the backend saves the `refresh_token` automatically.
 
-Stop:
+After the token is configured and tested, stop the sidecar:
+
+```bat
+docker compose stop pixiv-auth-browser
+```
+
+Stop the WebUI:
 
 ```bat
 docker compose down
 ```
 
-The compose file can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
+The compose file can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence. The `auth` profile can also build and run `yexca/pixivdownloader-auth-browser:v0.2.0`.
 
 ## Local Windows Runtime
 
@@ -67,33 +83,36 @@ Set `PIXIVDOWNLOADER_PORT` before running the script if you need a different loc
 ```text
 Browser WebUI
   -> FastAPI backend on http://127.0.0.1:7653
+  -> workflow runs, triggers, queue, jobs, and workers
   -> SQLite database in resources/
   -> downloaded files in the configured download directory
 ```
 
 Main components:
 
-- `backend/`: FastAPI API, services, repositories, SQLite migrations, and download workers.
+- `backend/`: FastAPI API, services, repositories, SQLite migrations, workflow runners, schedulers, and download workers.
 - `frontend/`: React, TypeScript, Vite, Tailwind CSS WebUI.
-- `auth-browser/`: Docker sidecar for Pixiv browser authentication.
-- `config/`: WebUI configuration; `settings.example.json` is committed and `settings.json` stores local user settings.
-- `resources/`: SQLite database and static resources.
+- `auth-browser/`: optional Docker sidecar for Pixiv browser authentication.
+- `config/`: WebUI configuration; `settings.example.json` is committed and `settings.json` stores local user settings and secrets.
+- `resources/`: SQLite database, imported PixivDownloader-SQLite databases, cached assets, and static resources.
+- `tools/`: maintenance helpers such as historical settings migration.
+- `tests/`: backend regression tests.
 
 ## Configuration Migration
 
-WebUI settings now load defaults from:
+WebUI settings load defaults from:
 
 ```text
 config\settings.example.json
 ```
 
-Local user overrides and secrets are saved to ignored file:
+Local user overrides and secrets are saved to the ignored file:
 
 ```text
 config\settings.json
 ```
 
-Legacy `resources\conf\settings.json` is not read automatically. To migrate it explicitly:
+Previous `resources\conf\settings.json` is not read automatically. To migrate it explicitly:
 
 ```bat
 env\python\python.exe tools\migrate_settings_to_config.py
@@ -136,9 +155,12 @@ npm run build
 - [Documentation index](docs/README.md)
 - [Getting Started](docs/getting-started.md)
 - [Architecture](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [API Reference](docs/api-reference.md)
 - [Deployment](docs/deployment.md)
 - [Database](docs/database.md)
 - [Development Guide](docs/development.md)
+- [Verification](docs/verification.md)
 
 ## Packaging Notes
 

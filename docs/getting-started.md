@@ -1,6 +1,6 @@
 # Getting Started
 
-PixivDownloader-SQLite is a local Pixiv artwork backup and management tool. The maintained UI is a browser-based WebUI served by a FastAPI backend.
+PixivDownloader WebUI is a local Pixiv artwork backup, workflow automation, and library management tool. The maintained UI is a browser-based WebUI served by a FastAPI backend.
 
 ## Recommended Path
 
@@ -97,19 +97,40 @@ Open the Settings page and configure:
 - Download path.
 - Pixiv authentication. In Docker Compose, use **Sign in with Pixiv**. If the auth sidecar is stopped, the WebUI shows the command to start it, then opens the noVNC browser. In the script runtime, paste a callback URL, authorization code, or known Pixiv `refresh_token` if browser sidecar authentication is not configured.
 - Request delay options.
+- File download delay options.
+- Queue, workflow trigger, and per-run job limits.
+- Minimum free disk space.
 - Existing file behavior.
+- Library stale-check interval.
 
 The WebUI masks the refresh token in normal API responses. The full token should not appear in logs.
 
-## Start A Download
+## Start Work
 
-Open the Download page and choose one input mode:
+Open the Dashboard and use **New Workflow**, or open the Workflows page directly. The current WebUI is workflow-first:
 
-- Pixiv user ID.
+- Create a saved manual workflow and run it when needed.
+- Create a scheduled workflow trigger for recurring work.
+- Use shortcut actions from Library or Artist Detail to sync an artist, retry failed files, or start a targeted download.
+- Use the queue page to pause/resume work, cancel jobs, retry jobs, or rerun previous jobs.
+
+Shortcut download requests still accept one target mode:
+
+- Pixiv artist ID.
 - Pixiv artwork ID.
 
-The backend creates a job, runs downloads in the background, writes progress into SQLite, and streams updates to the WebUI.
+The backend creates a workflow run, links one or more jobs to workflow node runs, executes jobs in the background, writes progress into SQLite, and streams updates to the WebUI.
 
-## Legacy Data Import
+## Main Pages
 
-If you used the old PyQt desktop application, import its `pixiv.db` from WebUI Settings. The old desktop application source is not part of this WebUI project.
+- Dashboard: live operations, attention states, trigger health, and library snapshot.
+- Library: filter artists by file state, tags, update state, account status, and stale checks.
+- Workflows: create, edit, run, schedule, pause, and delete reusable workflow definitions.
+- Runs: inspect workflow run history and node-level output.
+- Queue: inspect jobs, pause/resume the queue, cancel, retry, rerun, and bulk-cancel jobs.
+- Events: inspect recent job events.
+- Settings: runtime settings, Pixiv auth, appearance, maintenance, and PixivDownloader-SQLite database import.
+
+## PixivDownloader-SQLite Database Import
+
+If you used [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite), import its `pixiv.db` from WebUI Settings. The source project is not bundled with PixivDownloader WebUI; only explicit database import is supported.

@@ -1,6 +1,6 @@
 # Architecture
 
-PixivDownloader-SQLite is split into a local WebUI, a Python backend, and local persistent storage.
+PixivDownloader WebUI is split into a local WebUI, a Python backend, and local persistent storage.
 
 ## Runtime Shape
 
@@ -12,6 +12,7 @@ Browser WebUI
 FastAPI backend
     |
     +-- workflow runs and workflow triggers
+    +-- trigger scheduler and startup recovery
     +-- job queue and workers
     +-- Pixiv API client
     +-- file downloader
@@ -48,16 +49,16 @@ backend/
   domain/           typed domain entities.
   repositories/     SQL access layer.
   schemas/          Pydantic request and response models.
-  services/         Workflows, jobs, Pixiv, settings, files, and downloads.
+  services/         Workflows, triggers, jobs, Pixiv, settings, files, imports, and downloads.
   services/workflow_nodes/
                     Independent advanced workflow node executors.
-  workers/          in-process background job queue and download worker.
+  workers/          in-process background job queue, download worker, and trigger runner.
 
 frontend/
   src/api/          typed frontend API functions.
   src/components/   app shell, job UI, data states, and UI primitives.
   src/hooks/        WebSocket streaming and local UI state.
-  src/pages/        Dashboard, Download, Library, Jobs, Settings, Logs.
+  src/pages/        Dashboard, Library, Workflows, Runs, Artists, Queue, Events, Settings, About.
 
 auth-browser/
   Docker sidecar for Pixiv browser authentication.
@@ -79,8 +80,9 @@ resources/
 2. Registers API routers.
 3. Installs exception handlers.
 4. Runs database migrations during lifespan startup.
-5. Starts the background job queue.
-6. Serves `frontend/dist` when the build exists.
+5. Recovers interrupted workflow runs.
+6. Starts the background job queue and workflow trigger runner.
+7. Serves `frontend/dist` when the build exists.
 
 `backend.app:main()` reads:
 
@@ -163,7 +165,9 @@ sync_metadata
 collect_artworks
 filter_artworks
 execute_actions
-file_output
+job_action
+legacy_database_import
+legacy_import_hydration
 ```
 
 The workflow runner owns only orchestration:
@@ -196,10 +200,11 @@ WorkflowNodeRun
 
 The runtime boundary is `WorkflowRun -> WorkflowNodeRun -> Job[]`.
 
-Workflow triggers are reusable workflow definitions with schedule rules. When a
-trigger is due, it creates a workflow run from its stored definition. Manual
-runs, shortcut runs, and trigger runs all use the same node-run and job
-execution layer.
+Workflow definitions are reusable saved workflow graphs. Workflow triggers attach
+schedule rules to definitions. When a trigger is due, it creates a workflow run
+from its stored definition. Manual definition runs, shortcut runs, trigger runs,
+PixivDownloader-SQLite import runs, retry/rerun actions, and startup recovery all use the same
+node-run and job execution layer.
 
 Downloads run as persisted jobs.
 
@@ -217,9 +222,9 @@ Workflow run status is aggregated from node-run statuses. A run stays `running`
 while any node is pending or running, and reaches `completed`, `failed`,
 `partial`, or `skipped` after node runs reach terminal states.
 
-## Legacy Data Import
+## PixivDownloader-SQLite Data Import
 
-The WebUI can import old PyQt `pixiv.db` files for user migration. The old desktop application source is not part of this repository.
+The WebUI can import `pixiv.db` files created by [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite). That source project is not part of this repository.
 
 The maintained architecture is:
 
@@ -228,4 +233,4 @@ The maintained architecture is:
 - `auth-browser/` for Docker browser authentication.
 - `resources/` and migrations for local data.
 
-New work should target the WebUI and backend. Legacy compatibility code should stay limited to explicit data import paths.
+New work should target the WebUI and backend. PixivDownloader-SQLite compatibility code should stay limited to explicit database import paths.

@@ -25,9 +25,9 @@ resources/pixiv.sqlite3
 The WebUI loads `settings.example.json` first, then overlays values from
 `settings.json` when it exists. WebUI saves write to `config/settings.json`.
 The SQLite `settings` table is kept in sync for repository compatibility, but
-startup database migrations do not import legacy settings automatically.
+startup database migrations do not import previous settings automatically.
 
-Legacy `resources/conf/settings.json` is not read by the WebUI. Use the explicit
+Previous `resources/conf/settings.json` is not read by the WebUI. Use the explicit
 migration tool if you need to copy old settings:
 
 ```bat
@@ -43,9 +43,16 @@ env\python\python.exe tools\migrate_settings_to_config.py
 - `file_download_base_delay_seconds`: minimum delay before real image file downloads.
 - `file_download_random_delay_seconds`: random delay range for image file downloads.
 - `max_concurrent_downloads`: configured concurrency limit.
-- `max_active_run_jobs`: workflow run job activation limit.
-- `overwrite_existing_files`: whether existing files should be overwritten.
-- `skip_existing_files`: whether existing files should be skipped.
+- `max_active_workflow_triggers`: concurrent workflow-trigger activation limit.
+- `max_active_run_jobs`: per-run job activation limit.
+- `min_free_space_gb`: minimum free disk space required before downloads continue.
+- `existing_file_behavior`: one of `skip`, `overwrite`, or `save_duplicate`.
+- `library_stale_check_days`: number of days before a library artist is considered stale.
+
+Compatibility notes:
+
+- `max_active_scheduled_tasks` is still accepted as a legacy alias for `max_active_workflow_triggers`.
+- `overwrite_existing_files` and `skip_existing_files` are still returned for compatibility, but `existing_file_behavior` is the canonical setting.
 
 ## Secrets
 
@@ -115,6 +122,7 @@ Backend runtime:
 ```text
 PIXIVDOWNLOADER_HOST
 PIXIVDOWNLOADER_PORT
+PIXIVDOWNLOADER_RUNTIME
 ```
 
 Defaults:
@@ -129,6 +137,7 @@ Docker Compose sets:
 ```text
 PIXIVDOWNLOADER_HOST=0.0.0.0
 PIXIVDOWNLOADER_PORT=7653
+PIXIVDOWNLOADER_RUNTIME=docker
 ```
 
 Frontend development:
