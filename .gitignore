@@ -15,3 +15,7 @@ node_modules/
 downloads/
 resources/cache/
 config/settings.json
+
+# CodeGraph local indexes
+.codegraph/
+.codegraph-*/
