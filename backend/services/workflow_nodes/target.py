@@ -32,7 +32,7 @@ class ArtistTargetNodeExecutor(WorkflowNodeExecutorBase):
             len(artist_ids) + len(artwork_ids),
         )
         output = {
-            "target_scope": str(config.get("scope") or "selected"),
+            "target_scope": target_scope(config),
             "max_artists": max_artists,
             "input_artist_ids": list(artist_ids),
             "input_artwork_ids": list(artwork_ids),
@@ -107,7 +107,7 @@ def latest_resolver_payload(db_path: object, job_ids: list[str]) -> dict[str, ob
 
 def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
     explicit_ids = string_list(config.get("artist_ids"))
-    scope = str(config.get("scope") or "selected")
+    scope = target_scope(config)
     single_artist = config.get("artist_id")
     if scope in {"single_artwork", "artworks"} or (
         scope == "artists" and config.get("artist_source") == "artwork_ids"
@@ -153,7 +153,7 @@ def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
             finally:
                 repository.close()
     if scope == "artists_not_checked":
-        days = positive_int(config.get("days")) or 30
+        days = positive_int(config.get("days") or config.get("stale_days")) or 30
         artists = [artist for artist in artists if artist_is_stale(artist, days)]
     filters = config.get("filters")
     if isinstance(filters, list):
@@ -178,7 +178,7 @@ def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
 
 
 def resolve_artwork_ids(config: dict[str, object]) -> list[str]:
-    scope = str(config.get("scope") or "selected")
+    scope = target_scope(config)
     if scope not in {"selected", "single_artwork", "artworks"} and not (
         scope == "artists" and config.get("artist_source") == "artwork_ids"
     ):
@@ -196,6 +196,16 @@ def resolve_artwork_ids(config: dict[str, object]) -> list[str]:
 
 def max_targets(config: dict[str, object], default: int) -> int:
     return positive_int(config.get("max_artists")) or max(1, default)
+
+
+def target_scope(config: dict[str, object]) -> str:
+    scope = str(config.get("scope") or "selected")
+    # Definitions saved by the original advanced builder use the short names.
+    return {
+        "all": "all_artists",
+        "tagged": "artists_with_tag",
+        "stale": "artists_not_checked",
+    }.get(scope, scope)
 
 
 def scheduled_config_for_selection(config: dict[str, object]):

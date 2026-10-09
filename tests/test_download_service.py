@@ -551,7 +551,7 @@ def test_library_sync_persists_remote_only_files_and_preserves_download_cursor(t
     assert file_repository.list_by_artwork("101")[0].status == "remote_only"
 
 
-def test_incremental_sync_stops_at_local_max_artwork_id_but_downloads_after_cursor(tmp_path):
+def test_incremental_sync_stops_at_metadata_watermark_but_downloads_after_cursor(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     artist_repository = ArtistRepository(db_path)
@@ -570,6 +570,8 @@ def test_incremental_sync_stops_at_local_max_artwork_id_but_downloads_after_curs
     )
     pixiv_client = FakePixivClient()
     sync_requests = []
+    with artist_repository.conn:
+        artist_repository.advance_metadata_sync_watermark("123", "253", conn=artist_repository.conn)
 
     def get_artworks(user_id, *, stop_at_artwork_id=None):
         sync_requests.append((user_id, stop_at_artwork_id))

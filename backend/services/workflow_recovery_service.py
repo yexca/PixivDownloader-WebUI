@@ -34,6 +34,20 @@ class WorkflowRecoveryService:
         with self.repository.conn:
             self.repository.conn.execute("DELETE FROM workflow_execution_claims")
             self.repository.conn.execute("DELETE FROM workflow_scheduler_claim")
+            self.repository.conn.execute(
+                """
+                UPDATE artwork_files SET
+                    status = (SELECT previous_status FROM artwork_file_download_claims
+                              WHERE file_id = artwork_files.id),
+                    error_message = (SELECT previous_error_message FROM artwork_file_download_claims
+                                     WHERE file_id = artwork_files.id),
+                    updated_at = ?
+                WHERE status = 'downloading'
+                  AND id IN (SELECT file_id FROM artwork_file_download_claims)
+                """,
+                (utc_now(),),
+            )
+            self.repository.conn.execute("DELETE FROM artwork_file_download_claims")
         recovered: list[WorkflowRun] = []
         for run in self.repository.list_runs_by_status("running"):
             recovered.append(self._recover_running_run(run))

@@ -211,6 +211,8 @@ Common codes:
 
 ## Execution and Validation Contracts
 
+The advanced `artist_target` node uses `selected` with `artist_ids`, `all_artists`, `artists_with_tag` with `tag` (or the existing `tags` list), and `artists_not_checked` with `days`. `max_artists` limits the selected range. Bulk scopes ignore artist/artwork IDs and parameters belonging to other scopes. Existing definitions using `all`, `tagged`, `stale`, or `stale_days` remain executable; the advanced editor reads either protocol and saves canonical scopes and `days`, emitting only the active scope's fields.
+
 Workflow list/detail GETs only read persisted state; background executors progress runs. Download failures propagate through job/node/run failure details, and workflow nodes may end partial or cancelled. Explicit null settings values are rejected while omitted fields are retained. Validation responses are HTTP 422 with JSON-safe `error.details.errors` entries containing `loc`, `msg` and `type`.
 
 Legacy database import accepts at most 64 MiB per file and 65 MiB for the total multipart request, returning HTTP 413 for excess input before unbounded parsing.

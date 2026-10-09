@@ -1,9 +1,14 @@
 import asyncio
 import json
+import subprocess
+import sys
+import textwrap
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack, closing
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 import requests
@@ -21,10 +26,12 @@ from backend.db.migrate import (
     migrate_database,
 )
 from backend.domain.entities import Artist, Artwork, ArtworkFile, Job
+from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.job_repository import JobRepository
+from backend.repositories.tag_repository import LocalTagRepository
 from backend.repositories.workflow_candidate_repository import (
     CollectArtworkCandidatesRequest,
     FilterArtworkCandidatesRequest,
@@ -39,9 +46,10 @@ from backend.schemas.downloads import DownloadCreateRequest
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
 from backend.services.candidate_download_service import CandidateDownloadService
-from backend.services.download_service import DownloadOptions
-from backend.services.file_downloader import FileDownloader
+from backend.services.download_service import DownloadOptions, DownloadService
+from backend.services.file_downloader import FileDownloader, FileDownloadResult
 from backend.services.job_service import JobService, WorkflowJobLink
+from backend.services.library_sync_service import LibrarySyncService
 from backend.services.pixiv_rate_policy import (
     PixivRequestPolicy,
     RateLimiter,
@@ -1260,3 +1268,372 @@ def test_node_job_idempotency_preserves_distinct_selected_source_jobs(store):
     )
     assert duplicate.id == first.id and second.id != first.id
     assert store[7].count() == 2
+
+
+def sync_snapshot(store, artworks, *, name="Remote", full_sync=False):
+    requests = []
+
+    def fetch(_artist_id, *, stop_at_artwork_id=None):
+        requests.append(stop_at_artwork_id)
+        return [
+            art
+            for art in artworks
+            if stop_at_artwork_id is None or int(art.id) > int(stop_at_artwork_id)
+        ]
+
+    with closing(ArtistNameHistoryRepository(store[0])) as names:
+        sync = LibrarySyncService(
+            pixiv_client=SimpleNamespace(
+                get_artist_by_user_id=lambda artist_id: Artist(
+                    id=artist_id, name=name, account_status="available"
+                ),
+                get_artworks_by_user_id=fetch,
+            ),
+            artist_repository=store[2],
+            name_history_repository=names,
+            artwork_repository=store[3],
+            file_repository=store[4],
+            avatar_cache_service=SimpleNamespace(cache_artist_avatar=lambda _artist: False),
+        )
+        summary = sync.sync_artist("1", full_sync=full_sync)
+    return summary, requests
+
+
+def remote_artwork(artwork_id, pages=2):
+    return Artwork(
+        id=str(artwork_id),
+        artist_id="1",
+        page_count=pages,
+        files=tuple(
+            ArtworkFile(
+                artwork_id=str(artwork_id),
+                page_index=page,
+                original_url=f"https://example.test/{artwork_id}_p{page}.jpg",
+                file_name=f"{artwork_id}_p{page}.jpg",
+            )
+            for page in range(pages)
+        ),
+    )
+
+
+def test_first_available_artist_sync_and_rename_history(store):
+    summary, boundaries = sync_snapshot(store, [remote_artwork(100)], name="First")
+    assert summary.artist.name == "First" and boundaries == [None]
+    assert summary.file_count == 2
+    sync_snapshot(store, [remote_artwork(100), remote_artwork(101)], name="Second")
+    with closing(ArtistNameHistoryRepository(store[0])) as names:
+        assert {item.name for item in names.list_for_artist("1")} == {"First", "Second"}
+    assert store[2].get_metadata_sync_watermark("1") == "101"
+
+
+@pytest.mark.parametrize("failure", [RuntimeError, KeyboardInterrupt, JobCancelledError])
+def test_failed_snapshot_rolls_back_all_pages_history_and_watermark(store, monkeypatch, failure):
+    seed(store, statuses=("downloaded",), pages=2)
+    original_artist = store[2].get_by_id("1")
+    original_files = store[4].list_by_artwork("100")
+    original = store[4].upsert_remote
+
+    def interrupt(file, *, conn=None):
+        result = original(file, conn=conn)
+        if file.artwork_id == "102" and file.page_index == 1:
+            raise failure("interrupted persistence")
+        return result
+
+    monkeypatch.setattr(store[4], "upsert_remote", interrupt)
+    with pytest.raises(failure):
+        sync_snapshot(
+            store,
+            [remote_artwork(103), remote_artwork(102), remote_artwork(101), remote_artwork(100)],
+        )
+    assert store[2].get_by_id("1") == original_artist
+    assert store[2].get_metadata_sync_watermark("1") is None
+    assert store[3].max_artwork_id_by_artist("1") == "100"
+    assert store[4].list_by_artwork("100") == original_files
+    assert store[4].list_by_artwork("103") == []
+    with closing(ArtistNameHistoryRepository(store[0])) as names:
+        assert names.list_for_artist("1") == []
+    monkeypatch.setattr(store[4], "upsert_remote", original)
+    summary, boundaries = sync_snapshot(
+        store, [remote_artwork(103), remote_artwork(102), remote_artwork(101), remote_artwork(100)]
+    )
+    assert boundaries == [None] and summary.file_count == 8
+    assert store[4].list_by_artwork("100") == original_files
+    assert store[2].get_by_id("1").last_download_id == "99"
+    assert store[2].get_metadata_sync_watermark("1") == "103"
+    _, boundaries = sync_snapshot(store, [remote_artwork(104), remote_artwork(103)])
+    assert boundaries == ["103"]
+
+
+def test_process_exit_cannot_commit_only_newest_metadata_page(store):
+    seed(store, statuses=("downloaded",), pages=2)
+    script = textwrap.dedent("""
+        import os, sys
+        from types import SimpleNamespace
+        from backend.domain.entities import Artist, Artwork, ArtworkFile
+        from backend.repositories.artist_repository import ArtistRepository
+        from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
+        from backend.repositories.artwork_repository import ArtworkRepository
+        from backend.repositories.file_repository import ArtworkFileRepository
+        from backend.services.library_sync_service import LibrarySyncService
+        db = sys.argv[1]
+        files = ArtworkFileRepository(db)
+        original = files.upsert_remote
+        def interrupt(file, *, conn=None):
+            original(file, conn=conn)
+            os._exit(19)
+        files.upsert_remote = interrupt
+        artwork = Artwork(id="200", artist_id="1", page_count=2, files=tuple(
+            ArtworkFile(artwork_id="200", page_index=i,
+                        original_url="https://example.test/200.jpg", file_name="200.jpg")
+            for i in range(2)))
+        LibrarySyncService(
+            pixiv_client=SimpleNamespace(
+                get_artist_by_user_id=lambda user: Artist(
+                    id=user, name="Remote", account_status="available"),
+                get_artworks_by_user_id=lambda user, **kw: [artwork]),
+            artist_repository=ArtistRepository(db),
+            name_history_repository=ArtistNameHistoryRepository(db),
+            artwork_repository=ArtworkRepository(db), file_repository=files,
+            avatar_cache_service=SimpleNamespace(cache_artist_avatar=lambda artist: False),
+        ).sync_artist("1")
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(store[0])], check=False, capture_output=True, timeout=30
+    )
+    assert result.returncode == 19, result.stderr.decode()
+    assert store[3].max_artwork_id_by_artist("1") == "100"
+    assert store[4].list_by_artwork("200") == []
+    assert store[2].get_by_id("1").name == "Artist"
+    assert store[2].get_metadata_sync_watermark("1") is None
+    sync_snapshot(store, [remote_artwork(200), remote_artwork(150), remote_artwork(100)])
+    assert len(store[4].list_by_artwork("150")) == 2
+    assert store[2].get_metadata_sync_watermark("1") == "200"
+
+
+@pytest.mark.parametrize(
+    "scope,expected",
+    [
+        ("all", {"1", "2", "3"}),
+        ("all_artists", {"1", "2", "3"}),
+        ("tagged", {"2"}),
+        ("artists_with_tag", {"2"}),
+        ("stale", {"1", "2"}),
+        ("artists_not_checked", {"1", "2"}),
+    ],
+)
+@pytest.mark.parametrize("day_field", ["days", "stale_days"])
+def test_bulk_targets_support_saved_protocols_and_ignore_unused_values(
+    store, scope, expected, day_field
+):
+    from backend.services.workflow_nodes.target import resolve_artist_ids, resolve_artwork_ids
+
+    for artist_id, days in [("1", 100), ("2", 10), ("3", 1)]:
+        store[2].upsert(
+            Artist(
+                id=artist_id,
+                name=artist_id,
+                account_status="available",
+                last_checked_at=(datetime.now(UTC) - timedelta(days=days)).isoformat(),
+            )
+        )
+    with closing(LocalTagRepository(store[0])) as tags:
+        tags.set_artist_tags("2", ["chosen"])
+    config = {
+        "scope": scope,
+        "artist_ids": ["999"],
+        "artist_id": "998",
+        "artwork_ids": ["997"],
+        "artwork_id": "996",
+        "artist_source": "artwork_ids",
+        "tag": "chosen",
+        day_field: 5,
+        "max_artists": 20,
+    }
+    assert set(resolve_artist_ids(config, store[0])) == expected
+    assert resolve_artwork_ids(config) == []
+
+
+@pytest.mark.parametrize("kind", ["candidate", "legacy"])
+@pytest.mark.parametrize("outcome", ["cancel", "fail", "complete"])
+def test_competing_download_waiter_cannot_replace_success(store, tmp_path, kind, outcome):
+    seed(store, statuses=("pending",))
+    candidate = collect(store, source="all_synced")
+    selected = threading.Event()
+    completed = threading.Event()
+    downloader_calls = []
+    file_id = store[4].list_by_artwork("100")[0].id
+
+    class LateDownloader:
+        def download(self, _name, _artist_id, url, **_kwargs):
+            downloader_calls.append(url)
+            if outcome == "cancel":
+                raise JobCancelledError("cancelled late")
+            if outcome == "fail":
+                raise DownloadError("failed late")
+            return FileDownloadResult(
+                url=url, file_name="100.jpg", local_path=tmp_path / "second.jpg", size_bytes=22
+            )
+
+    def second_task():
+        with ExitStack() as stack:
+            artists = stack.enter_context(closing(ArtistRepository(store[0])))
+            files = stack.enter_context(closing(ArtworkFileRepository(store[0])))
+            original = files.claim_download
+
+            def claim(*args, **kwargs):
+                selected.set()
+                return original(*args, **kwargs)
+
+            files.claim_download = claim
+            if kind == "candidate":
+                candidates = stack.enter_context(closing(WorkflowCandidateRepository(store[0])))
+
+                def operation():
+                    return CandidateDownloadService(
+                        candidate_repository=candidates,
+                        artist_repository=artists,
+                        file_repository=files,
+                        file_downloader=LateDownloader(),
+                    ).download(candidate_set_id=candidate.id)
+            else:
+                sync_artworks = stack.enter_context(closing(ArtworkRepository(store[0])))
+                names = stack.enter_context(closing(ArtistNameHistoryRepository(store[0])))
+                legacy = DownloadService(
+                    artist_repository=artists,
+                    artwork_repository=sync_artworks,
+                    name_history_repository=names,
+                    file_repository=files,
+                    file_downloader=LateDownloader(),
+                    pixiv_client=SimpleNamespace(),
+                    sleeper=lambda: None,
+                )
+                legacy._sync_metadata = lambda **_kwargs: artists.get_by_id("1")
+
+                def operation():
+                    return legacy.download(user_id="1", options=DownloadOptions(force_rescan=True))
+
+            if outcome == "cancel":
+                with pytest.raises(JobCancelledError):
+                    operation()
+            else:
+                summary = operation()
+                assert summary.failed_files == (1 if outcome == "fail" else 0)
+            completed.set()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with store[4].claim_download(file_id) as first:
+            future = pool.submit(second_task)
+            assert selected.wait(5)
+            assert not completed.wait(0.2)
+            assert downloader_calls == []
+            assert store[4].update_claim(
+                first,
+                status="downloaded",
+                local_path=tmp_path / "first.jpg",
+                size_bytes=11,
+                downloaded_at="2026-01-01T00:00:00Z",
+            )
+            store[2].advance_download_cursor("1")
+        future.result(timeout=10)
+    result = store[4].get_by_id(file_id)
+    assert result.status == "downloaded"
+    assert result.local_path == tmp_path / ("second.jpg" if outcome == "complete" else "first.jpg")
+    assert result.size_bytes == (22 if outcome == "complete" else 11)
+    assert store[2].get_by_id("1").last_download_id == "100"
+    assert (
+        store[4].conn.execute("SELECT COUNT(*) FROM artwork_file_download_claims").fetchone()[0]
+        == 0
+    )
+
+
+def test_cancelled_ownership_waiter_and_stale_owner_never_write(store):
+    seed(store, statuses=("pending",))
+    file_id = store[4].list_by_artwork("100")[0].id
+    with (
+        store[4].claim_download(file_id) as first,
+        closing(ArtworkFileRepository(store[0])) as other,
+    ):
+        checks = 0
+
+        def cancel():
+            nonlocal checks
+            checks += 1
+            return checks > 1
+
+        with (
+            pytest.raises(JobCancelledError),
+            other.claim_download(file_id, cancel_callback=cancel),
+        ):
+            pytest.fail("Cancelled waiter must not own the file")
+        assert store[4].get_by_id(file_id).status == "downloading"
+        assert store[4].update_claim(first, status="downloaded")
+    with closing(ArtworkFileRepository(store[0])) as files, files.claim_download(file_id) as second:
+        assert not store[4].update_claim(first, status="failed")
+        assert files.update_claim(second, status="downloaded")
+    assert store[4].get_by_id(file_id).status == "downloaded"
+
+
+def test_startup_restores_only_abandoned_owned_file_states(store):
+    seed(store, statuses=("downloaded", "pending"))
+    file_id = store[4].list_by_artwork("100")[0].id
+    with store[4].conn:
+        store[4].conn.execute(
+            "INSERT INTO artwork_file_download_claims VALUES(?, 'abandoned', 'downloaded', NULL)",
+            (file_id,),
+        )
+    store[4].update_status(file_id, status="downloading")
+    with closing(WorkflowRecoveryService(store[0], settings_json_path=store[1])) as recovery:
+        recovery.recover_startup()
+    assert store[4].get_by_id(file_id).status == "downloaded"
+    assert store[4].list_by_artwork("101")[0].status == "pending"
+    assert (
+        store[4].conn.execute("SELECT COUNT(*) FROM artwork_file_download_claims").fetchone()[0]
+        == 0
+    )
+
+
+@pytest.mark.parametrize("page_indexes", [(0,), (0, 0), (0, 2)])
+def test_incomplete_page_metadata_cannot_establish_a_sync_boundary(store, page_indexes):
+    from backend.core.errors import PixivApiError
+
+    artwork = remote_artwork(100)
+    invalid = replace(
+        artwork, files=tuple(replace(artwork.files[0], page_index=index) for index in page_indexes)
+    )
+    with pytest.raises(PixivApiError, match="incomplete page metadata"):
+        sync_snapshot(store, [invalid])
+    assert store[2].get_by_id("1") is None
+    assert store[3].get_by_id("100") is None
+
+
+def test_other_metadata_writers_cannot_advance_committed_sync_boundary(store):
+    sync_snapshot(store, [remote_artwork(100)])
+    # A legacy import or single-artwork writer stores only part of the newest artwork.
+    store[3].upsert(remote_artwork(200))
+    store[4].upsert_remote(remote_artwork(200).files[0])
+    _, boundaries = sync_snapshot(
+        store, [remote_artwork(200), remote_artwork(150), remote_artwork(100)]
+    )
+    assert boundaries == ["100"]
+    assert len(store[4].list_by_artwork("150")) == 2
+    assert len(store[4].list_by_artwork("200")) == 2
+    assert store[2].get_metadata_sync_watermark("1") == "200"
+
+
+def test_cancelled_orphan_download_stays_eligible_for_incomplete_file_retry(store):
+    seed(store, statuses=("downloading",))
+    file_id = store[4].list_by_artwork("100")[0].id
+    with pytest.raises(JobCancelledError), store[4].claim_download(file_id):
+        raise JobCancelledError("cancel retry")
+    assert store[4].get_by_id(file_id).status == "failed"
+
+
+def test_ownership_is_per_file_and_preserves_other_download_concurrency(store):
+    seed(store, statuses=("pending", "pending"))
+    first_id = store[4].list_by_artwork("100")[0].id
+    second_id = store[4].list_by_artwork("101")[0].id
+    with store[4].claim_download(first_id), closing(ArtworkFileRepository(store[0])) as other:
+        with other.claim_download(second_id) as claim:
+            assert other.update_claim(claim, status="downloaded")
+        assert store[4].get_by_id(first_id).status == "downloading"
+        assert store[4].get_by_id(second_id).status == "downloaded"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import nullcontext
 from pathlib import Path
 
 from backend.core.errors import DatabaseError
@@ -13,14 +14,22 @@ class ArtistNameHistoryRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.conn = connect(db_path)
 
-    def record_name(self, artist_id: str, name: str, *, source: str = "pixiv") -> None:
+    def record_name(
+        self,
+        artist_id: str,
+        name: str,
+        *,
+        source: str = "pixiv",
+        conn: sqlite3.Connection | None = None,
+    ) -> None:
         normalized_name = name.strip()
         if not normalized_name:
             return
         now = utc_now()
+        connection = conn if conn is not None else self.conn
         try:
-            with self.conn:
-                self.conn.execute(
+            with nullcontext() if conn is not None else connection:
+                connection.execute(
                     """
                     INSERT INTO artist_name_history(
                         artist_id,

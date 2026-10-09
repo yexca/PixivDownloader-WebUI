@@ -1092,10 +1092,10 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
       type: "artist_target",
       title: "Target artists",
       config: {
-        scope: draft.targetScope,
-        artist_ids: draft.targetScope === "selected" ? lines(draft.artistIds) : [],
-        tag: draft.targetScope === "tagged" ? draft.artistTag : null,
-        stale_days: draft.targetScope === "stale" ? numberOrNull(draft.staleDays) : null,
+        scope: targetScopeToProtocol(draft.targetScope),
+        ...(draft.targetScope === "selected" ? { artist_ids: lines(draft.artistIds) } : {}),
+        ...(draft.targetScope === "tagged" ? { tag: draft.artistTag.trim() } : {}),
+        ...(draft.targetScope === "stale" ? { days: numberOrNull(draft.staleDays) } : {}),
         max_artists: numberOrNull(draft.maxArtists)
       }
     }
@@ -1208,7 +1208,7 @@ function draftFromDefinition(
   const collectConfig = collect?.config ?? {};
   const filterConfig = filters?.config ?? {};
   const actionConfig = actions?.config ?? {};
-  const scope = stringOption(targetConfig.scope, initialDraft.targetScope) as TargetScope;
+  const scope = targetScopeFromProtocol(targetConfig.scope);
   const maxArtworks = collectConfig.max_artworks;
   return {
     ...initialDraft,
@@ -1222,10 +1222,10 @@ function draftFromDefinition(
       filters: Boolean(filters),
       actions: Boolean(actions)
     },
-    targetScope: isTargetScope(scope) ? scope : initialDraft.targetScope,
+    targetScope: scope,
     artistIds: arrayText(targetConfig.artist_ids),
     artistTag: stringOption(targetConfig.tag, ""),
-    staleDays: numberText(targetConfig.stale_days),
+    staleDays: numberText(targetConfig.days ?? targetConfig.stale_days) || initialDraft.staleDays,
     maxArtists: numberText(targetConfig.max_artists) || initialDraft.maxArtists,
     syncMode: sync ? syncModeOption(syncConfig.mode) : initialDraft.syncMode,
     collectMode: collectModeOption(collectConfig.mode),
@@ -1318,8 +1318,21 @@ function findNode(nodes: AdvancedWorkflowNode[], type: AdvancedWorkflowNode["typ
   return nodes.find((node) => node.type === type);
 }
 
-function isTargetScope(value: string): value is TargetScope {
-  return value === "selected" || value === "all" || value === "tagged" || value === "stale";
+function targetScopeToProtocol(scope: TargetScope): string {
+  return { selected: "selected", all: "all_artists", tagged: "artists_with_tag", stale: "artists_not_checked" }[scope];
+}
+
+function targetScopeFromProtocol(value: unknown): TargetScope {
+  if (value === "all_artists" || value === "all") {
+    return "all";
+  }
+  if (value === "artists_with_tag" || value === "tagged") {
+    return "tagged";
+  }
+  if (value === "artists_not_checked" || value === "stale") {
+    return "stale";
+  }
+  return "selected";
 }
 
 function syncModeOption(value: unknown): SyncMode {

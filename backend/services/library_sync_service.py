@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from backend.core.errors import PixivApiError
 from backend.domain.entities import Artist
 from backend.repositories._time import utc_now
 from backend.repositories.artist_name_history_repository import ArtistNameHistoryRepository
@@ -64,17 +66,16 @@ class LibrarySyncService:
                 artist.id,
                 stop_at_artwork_id=None
                 if full_sync
-                else self.artwork_repository.max_artwork_id_by_artist(artist.id),
+                else self.artist_repository.get_metadata_sync_watermark(artist.id),
             ):
                 raise_if_cancelled(cancel_callback)
+                if artwork.page_count > 0 and sorted(
+                    file.page_index for file in artwork.files
+                ) != list(range(artwork.page_count)):
+                    raise PixivApiError(f"incomplete page metadata for artwork {artwork.id}")
                 artworks.append(artwork)
         raise_if_cancelled(cancel_callback)
         remote_latest_artwork_id = latest_artwork_id(artworks)
-        record_name_change(
-            self.name_history_repository,
-            existing_artist=existing_artist,
-            fetched_artist=artist,
-        )
         synced_artist = Artist(
             id=artist.id,
             name=next_artist_text(
@@ -109,16 +110,28 @@ class LibrarySyncService:
             or (existing_artist.remote_latest_artwork_id if existing_artist else None),
             remote_latest_checked_at=now,
         )
-        self.artist_repository.upsert(synced_artist)
-        self.avatar_cache_service.cache_artist_avatar(synced_artist)
         file_count = 0
-        # Finish persisting the fetched snapshot before observing cancellation;
-        # interrupting this loop could make the next incremental fetch skip holes.
-        for artwork in artworks:
-            self.artwork_repository.upsert(artwork)
-            for file in artwork.files:
-                self.file_repository.upsert_remote(file)
-                file_count += 1
+        # Use one connection and commit the whole snapshot. Neither a failed page
+        # write nor a process interruption may advance the incremental boundary.
+        conn = self.artist_repository.conn
+        with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self.artist_repository.upsert(synced_artist, conn=conn)
+            record_name_change(
+                self.name_history_repository,
+                existing_artist=existing_artist,
+                fetched_artist=artist,
+                conn=conn,
+            )
+            for artwork in artworks:
+                self.artwork_repository.upsert(artwork, conn=conn)
+                for file in artwork.files:
+                    self.file_repository.upsert_remote(file, conn=conn)
+                    file_count += 1
+            self.artist_repository.advance_metadata_sync_watermark(
+                artist.id, remote_latest_artwork_id, conn=conn
+            )
+        self.avatar_cache_service.cache_artist_avatar(synced_artist)
         raise_if_cancelled(cancel_callback)
         return LibrarySyncSummary(
             artist=synced_artist,
@@ -151,11 +164,12 @@ def record_name_change(
     *,
     existing_artist: Artist | None,
     fetched_artist: Artist,
+    conn: sqlite3.Connection | None = None,
 ) -> None:
     if existing_artist is not None:
-        repository.record_name(existing_artist.id, existing_artist.name)
+        repository.record_name(existing_artist.id, existing_artist.name, conn=conn)
     if fetched_artist.account_status == "available":
-        repository.record_name(fetched_artist.id, fetched_artist.name)
+        repository.record_name(fetched_artist.id, fetched_artist.name, conn=conn)
 
 
 def next_artist_text(value: str, fallback: str | None, *, account_status: str) -> str:

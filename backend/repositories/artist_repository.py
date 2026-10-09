@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import nullcontext
 from pathlib import Path
 
 from backend.core.errors import DatabaseError
@@ -13,12 +14,13 @@ class ArtistRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.conn = connect(db_path)
 
-    def upsert(self, artist: Artist) -> None:
+    def upsert(self, artist: Artist, *, conn: sqlite3.Connection | None = None) -> None:
         now = utc_now()
         profile_url = artist.profile_url or f"https://www.pixiv.net/users/{artist.id}"
+        connection = conn if conn is not None else self.conn
         try:
-            with self.conn:
-                self.conn.execute(
+            with nullcontext() if conn is not None else connection:
+                connection.execute(
                     """
                     INSERT INTO artists(
                         id,
@@ -112,6 +114,25 @@ class ArtistRepository:
                 """,
                 (artist_id,),
             )
+
+    def get_metadata_sync_watermark(self, artist_id: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT metadata_synced_artwork_id FROM artists WHERE id = ?", (artist_id,)
+        ).fetchone()
+        return row["metadata_synced_artwork_id"] if row is not None else None
+
+    def advance_metadata_sync_watermark(
+        self, artist_id: str, artwork_id: str | None, *, conn: sqlite3.Connection
+    ) -> None:
+        # Caller commits this watermark together with every artwork and page.
+        conn.execute(
+            """
+            UPDATE artists SET metadata_synced_artwork_id = ?
+            WHERE id = ? AND CAST(COALESCE(metadata_synced_artwork_id, '0') AS INTEGER)
+                            < CAST(? AS INTEGER)
+            """,
+            (artwork_id, artist_id, artwork_id),
+        )
 
     def list(
         self,

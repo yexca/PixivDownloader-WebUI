@@ -66,6 +66,7 @@ Main WebUI tables:
 - `artists`
 - `artworks`
 - `artwork_files`
+- `artwork_file_download_claims`
 - `jobs`
 - `job_events`
 - `workflow_definitions`
@@ -75,6 +76,7 @@ Main WebUI tables:
 - `settings`
 
 `artists.latest_downloaded_artwork_id` stores the latest artwork ID reached by incremental artist downloads.
+`artists.metadata_synced_artwork_id` separately stores the latest artwork ID from a completely committed metadata snapshot.
 
 ## Legacy Database Import
 
@@ -169,6 +171,16 @@ Migration SQL and its version record now execute in one explicit transaction; a 
 023 repairs generated `scheduled-task:*` definitions produced by 017, using their preserved compatibility snapshot. Sync-only actions stay sync-only, retry actions select failed pages, and targets, filters and download options are recompiled with their original intent. Trigger status, next execution time and success/error history are preserved; the migration creates no jobs and does not execute a workflow. Definitions edited after 017 are left untouched and require a deliberate review; it is unsafe to overwrite a user's later workflow design from its old snapshot.
 
 No migration deletes user downloads or resets historic watermarks. Already present incomplete records below a historic watermark are accessible through pending/failed collection. New download progress advances the watermark only across a complete prefix of the known library.
+
+## Metadata Snapshots And File Ownership (024)
+
+024 adds an independent metadata sync watermark and per-page download claims. Existing download cursors, file status, paths, and download timestamps are retained. Existing artists start without the new metadata watermark: their next sync fetches all metadata once, so a historic partial write or an incomplete legacy import cannot hide older artworks behind a local maximum ID.
+
+Artist metadata is inserted before name history. The artist, old and new names, all fetched artworks, all fetched pages, and the metadata watermark commit together in one SQLite transaction. Missing or duplicate declared pages are rejected before persistence. Any write error or process interruption rolls back the entire snapshot. Remote-page upserts update only the remote URL and name, preserving current download status and local download details. Avatar caching runs after the database commit.
+
+Both candidate downloads and the legacy download service acquire ownership of a page before changing its status. Other tasks wait for that page with cancellation checks; unrelated pages continue concurrently. Each claimant reads the current page state under the SQLite write lock. Completion, failure, and cancellation use conditional updates that require the same owner and a still-active `downloading` state. Cancelling a waiter changes no file status. Cancelling an owner restores its acquisition-time state; a failed overwrite retains a previously downloaded file and its path while the task still reports failure. Download cursors advance from committed file states.
+
+Before workers start, startup recovery restores only abandoned claims that still have `downloading` status and releases their ownership. A file already completed before an interruption is retained. This continues the existing single-application-process deployment contract; simultaneous application startups against the same database are unsupported.
 
 ## Adding A Migration
 
