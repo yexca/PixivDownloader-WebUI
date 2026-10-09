@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from backend.domain.types import FailureReason
+from backend.domain.workflow_schedule import effective_weekdays
 from backend.repositories.workflow_definition_repository import (
     WorkflowDefinition,
     WorkflowDefinitionWithTriggers,
@@ -50,7 +52,28 @@ class WorkflowTriggerRequest(BaseModel):
     trigger_id: int | None = None
     enabled: bool = True
     schedule: dict[str, object] = Field(default_factory=dict)
+    schedule_patch: dict[str, object] | None = None
     run_now: bool = False
+
+    @model_validator(mode="after")
+    def validate_schedule_patch(self) -> WorkflowTriggerRequest:
+        if self.schedule_patch is not None:
+            if self.trigger_id is None:
+                raise ValueError("schedule_patch requires an existing trigger_id")
+            if "schedule" in self.model_fields_set:
+                raise ValueError("provide schedule or schedule_patch, not both")
+        return self
+
+    def resolve_schedule(self, original: dict[str, object]) -> dict[str, object]:
+        if self.schedule_patch is None:
+            return self.schedule
+        schedule = dict(original)
+        # An explicit type selection constructs a new rule, even when switching back.
+        if "type" in self.schedule_patch:
+            for key in ("every", "unit", "time", "timezone", "days_of_week", "day"):
+                schedule.pop(key, None)
+        schedule.update(self.schedule_patch)
+        return self.validate_schedule(schedule)
 
     @field_validator("schedule")
     @classmethod
@@ -98,6 +121,7 @@ class WorkflowTriggerResponse(BaseModel):
     workflow_definition_id: str
     status: str
     schedule: dict[str, object]
+    effective_days_of_week: list[int] | None = None
     next_run_at: str | None
     last_run_at: str | None
     last_success_at: str | None
@@ -214,11 +238,17 @@ def workflow_definition_response(
 def workflow_trigger_response(trigger: WorkflowTrigger) -> WorkflowTriggerResponse:
     if trigger.id is None:
         raise ValueError("workflow trigger id is required")
+    weekdays = None
+    if trigger.schedule.get("type") == "weekly":
+        # Invalid legacy rules must remain readable without inventing execution semantics.
+        with suppress(ValueError):
+            weekdays = effective_weekdays(trigger.schedule.get("days_of_week"))
     return WorkflowTriggerResponse(
         id=trigger.id,
         workflow_definition_id=trigger.workflow_definition_id,
         status=trigger.status,
         schedule=trigger.schedule,
+        effective_days_of_week=weekdays,
         next_run_at=trigger.next_run_at,
         last_run_at=trigger.last_run_at,
         last_success_at=trigger.last_success_at,

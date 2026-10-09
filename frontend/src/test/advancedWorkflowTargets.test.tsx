@@ -343,6 +343,7 @@ describe("advanced workflow target protocol", () => {
     const definition = savedDefinition({ scope: "single_artist", artist_id: "42" });
     definition.triggers = [1, 2].map((id) => ({ id, workflow_definition_id: definition.id, status,
       schedule: { type: "interval", every: 6, unit: "hours", run_after_startup: true },
+      effective_days_of_week: null,
       next_run_at: "2030-01-01T00:00:00Z", last_run_at: null, last_success_at: null, last_error_code: null,
       last_error_message: null, created_at: null, updated_at: null }));
     const save = mockSave(definition);
@@ -359,6 +360,7 @@ describe("advanced workflow target protocol", () => {
     const definition = savedDefinition({ scope: "selected", artist_ids: ["42"] });
     definition.triggers = [{ id: 1, workflow_definition_id: definition.id, status: "paused",
       schedule: { type: "interval", every: 6, unit: "hours", timezone: "Asia/Tokyo", run_after_startup: true },
+      effective_days_of_week: null,
       next_run_at: null, last_run_at: null, last_success_at: null, last_error_code: "old_error",
       last_error_message: "Old error", created_at: null, updated_at: null }];
     const save = mockSave(definition);
@@ -368,7 +370,7 @@ describe("advanced workflow target protocol", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save Schedule" }));
     await waitFor(() => expect(save).toHaveBeenCalledOnce());
     expect(save.mock.calls[0][0].trigger).toEqual({ trigger_id: 1, enabled: false, run_now: false,
-      schedule: { ...definition.triggers[0].schedule, every: 8 } });
+      schedule_patch: { every: 8 } });
     client.clear();
   });
 });

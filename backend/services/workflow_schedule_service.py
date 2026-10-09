@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from backend.domain.workflow_schedule import effective_weekdays
 from backend.repositories._time import utc_now
 from backend.repositories.workflow_definition_repository import (
     WorkflowDefinition,
@@ -289,10 +290,7 @@ def next_run_time(schedule: dict[str, object], *, from_time: str) -> str:
     if schedule_type == "daily":
         return isoformat_utc(next_daily(base, time_text(schedule.get("time"))))
     if schedule_type == "weekly":
-        days = schedule.get("days_of_week")
-        if not isinstance(days, list):
-            days = []
-        weekdays = sorted({int(day) for day in days if str(day).isdigit() and 1 <= int(day) <= 7})
+        weekdays = effective_weekdays(schedule.get("days_of_week"))
         return isoformat_utc(
             next_weekly(base, weekdays or [base.isoweekday()], time_text(schedule.get("time")))
         )

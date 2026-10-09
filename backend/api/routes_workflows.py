@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.schemas.workflows import (
@@ -73,12 +74,34 @@ def save_workflow_definition(
                 definition_id=request.definition_id,
             )
         else:
+            schedule = request.trigger.schedule
+            if request.trigger.schedule_patch is not None:
+                current = service.repository.get_trigger(request.trigger.trigger_id)
+                if current is None:
+                    raise HTTPException(status_code=404, detail="Workflow trigger not found")
+                if current.workflow_definition_id != request.definition_id:
+                    raise HTTPException(
+                        status_code=400, detail="Trigger does not belong to definition"
+                    )
+                try:
+                    schedule = request.trigger.resolve_schedule(current.schedule)
+                except ValueError as exc:
+                    raise RequestValidationError(
+                        [
+                            {
+                                "type": "value_error",
+                                "loc": ("body", "trigger", "schedule_patch"),
+                                "msg": str(exc),
+                                "input": request.trigger.schedule_patch,
+                            }
+                        ]
+                    ) from exc
             definition, trigger = service.save_with_trigger(
                 request.definition,
                 definition_id=request.definition_id,
                 trigger_id=request.trigger.trigger_id,
                 enabled=request.trigger.enabled,
-                schedule=request.trigger.schedule,
+                schedule=schedule,
             )
         run = (
             service.run_definition(

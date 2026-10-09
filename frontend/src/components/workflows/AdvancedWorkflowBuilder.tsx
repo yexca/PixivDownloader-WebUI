@@ -58,6 +58,8 @@ type WorkflowDraft = {
   triggerMode: TriggerMode;
   saveIntent: SaveIntent;
   scheduleType: ScheduleType;
+  scheduleTypeChanged: boolean;
+  scheduleError: string | null;
   intervalEvery: string;
   intervalUnit: IntervalUnit;
   scheduleTime: string;
@@ -105,6 +107,8 @@ const initialDraft: WorkflowDraft = {
   triggerMode: "manual",
   saveIntent: "run_now",
   scheduleType: "interval",
+  scheduleTypeChanged: false,
+  scheduleError: null,
   intervalEvery: "6",
   intervalUnit: "hours",
   scheduleTime: "03:00",
@@ -206,6 +210,7 @@ export function AdvancedWorkflowBuilder({
       const next = {
         ...current,
         [key]: value,
+        scheduleTypeChanged: current.scheduleTypeChanged || (key === "scheduleType" && value !== current.scheduleType),
         targetScopeChanged: current.targetScopeChanged || (key === "targetScope" && value !== current.targetScope)
       };
       if (key === "targetScope" && value === "selected" && current.targetScope === "single") {
@@ -296,6 +301,11 @@ export function AdvancedWorkflowBuilder({
       setSelectedStage("target");
       return;
     }
+    if (draft.scheduleError) {
+      pushToast({ title: "Schedule cannot be edited safely", description: draft.scheduleError, tone: "error" });
+      setSelectedStage("trigger");
+      return;
+    }
     if (hasDuplicateDefinitionName(draft.name, existingDefinitions, definition?.id ?? null)) {
       pushToast({
         title: "Workflow name already exists",
@@ -310,11 +320,11 @@ export function AdvancedWorkflowBuilder({
       return;
     }
     const schedule = buildScheduleRule(draft);
-    const originalSchedule = buildScheduleRule(hydratedDraft);
+    const schedulePatch = scheduleChanges(schedule, buildScheduleRule(hydratedDraft), draft.scheduleTypeChanged);
     // Saving target edits must not resume paused triggers or reschedule their next run.
     const shouldSchedule = draft.triggerMode === "schedule" && (
       !selectedTrigger || hydratedDraft.triggerMode !== "schedule" ||
-      JSON.stringify(schedule) !== JSON.stringify(originalSchedule) || draft.saveIntent === "run_and_schedule"
+      Object.keys(schedulePatch).length > 0 || draft.saveIntent === "run_and_schedule"
     );
     saveMutation.mutate({
       definition_id: definition?.id ?? null,
@@ -323,9 +333,7 @@ export function AdvancedWorkflowBuilder({
         ? {
             trigger_id: selectedTrigger?.id ?? null,
             enabled: selectedTrigger ? selectedTrigger.status === "active" : true,
-            schedule: selectedTrigger
-              ? mergeScheduleRule(selectedTrigger.schedule, schedule)
-              : schedule,
+            ...(selectedTrigger ? { schedule_patch: schedulePatch } : { schedule }),
             run_now: draft.saveIntent === "run_and_schedule"
           }
         : null
@@ -357,7 +365,7 @@ export function AdvancedWorkflowBuilder({
             </Button>
             <Button
               type="button"
-              disabled={submitting || Boolean(draft.targetError) || Boolean(triggerError)}
+              disabled={submitting || Boolean(draft.targetError) || Boolean(triggerError) || Boolean(draft.scheduleError)}
               onClick={submitAdvanced}
             >
               <Save className="h-4 w-4" aria-hidden="true" />
@@ -374,6 +382,12 @@ export function AdvancedWorkflowBuilder({
             <p role="alert" className="mt-3 text-sm text-destructive">
               {draft.targetError} The original configuration is preserved. Saving and running are disabled;
               edit this definition outside the advanced editor.
+            </p>
+          ) : null}
+          {draft.scheduleError ? (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {draft.scheduleError} The original schedule is preserved. Saving and running are disabled;
+              edit this trigger outside the advanced editor.
             </p>
           ) : null}
           <ModuleSwitches draft={draft} onChange={updateModule} />
@@ -506,63 +520,71 @@ function StageEditor({
                 onChange={(value) => update("saveIntent", value)}
               />
             </Field>
-            {draft.scheduleType !== "interval" ? (
-              <Field label="Time zone (IANA)">
-                <Input value={draft.scheduleTimezone} onChange={(event) => update("scheduleTimezone", event.target.value)} />
+            <fieldset disabled={Boolean(draft.scheduleError)} className="space-y-4">
+              {draft.scheduleType !== "interval" ? (
+                <Field label="Time zone (IANA)">
+                  <Input value={draft.scheduleTimezone} onChange={(event) => update("scheduleTimezone", event.target.value)} />
+                </Field>
+              ) : null}
+              <Field label="Schedule type">
+                <Select value={draft.scheduleType} onChange={(event) => update("scheduleType", event.target.value as ScheduleType)} className="w-full">
+                  <option value="interval">Interval</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                </Select>
               </Field>
-            ) : null}
-            <Field label="Schedule type">
-              <Select value={draft.scheduleType} onChange={(event) => update("scheduleType", event.target.value as ScheduleType)} className="w-full">
-                <option value="interval">Interval</option>
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-                <option value="monthly">Monthly</option>
-              </Select>
-            </Field>
-            {draft.scheduleType === "interval" ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Every">
-                  <Input value={draft.intervalEvery} inputMode="numeric" onChange={(event) => update("intervalEvery", event.target.value)} />
-                </Field>
-                <Field label="Unit">
-                  <Select value={draft.intervalUnit} onChange={(event) => update("intervalUnit", event.target.value as IntervalUnit)} className="w-full">
-                    <option value="minutes">Minutes</option>
-                    <option value="hours">Hours</option>
-                    <option value="days">Days</option>
-                  </Select>
-                </Field>
-              </div>
-            ) : null}
-            {draft.scheduleType === "daily" ? (
-              <Field label="Time">
-                <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
-              </Field>
-            ) : null}
-            {draft.scheduleType === "weekly" ? (
-              <div className="space-y-3">
-                <Field label="Days">
-                  <WeekdayPicker value={draft.weeklyDays} onChange={(value) => update("weeklyDays", value)} />
-                </Field>
+              {draft.scheduleType === "interval" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Every">
+                    <Input value={draft.intervalEvery} inputMode="numeric" onChange={(event) => update("intervalEvery", event.target.value)} />
+                  </Field>
+                  <Field label="Unit">
+                    <Select value={draft.intervalUnit} onChange={(event) => update("intervalUnit", event.target.value as IntervalUnit)} className="w-full">
+                      <option value="minutes">Minutes</option>
+                      <option value="hours">Hours</option>
+                      <option value="days">Days</option>
+                    </Select>
+                  </Field>
+                </div>
+              ) : null}
+              {draft.scheduleType === "daily" ? (
                 <Field label="Time">
                   <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
                 </Field>
-              </div>
-            ) : null}
-            {draft.scheduleType === "monthly" ? (
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Day">
-                  <Select value={draft.monthlyDay} onChange={(event) => update("monthlyDay", event.target.value)} className="w-full">
-                    {Array.from({ length: 31 }, (_, index) => String(index + 1)).map((day) => (
-                      <option key={day} value={day}>{day}</option>
-                    ))}
-                    <option value="last">Last day</option>
-                  </Select>
-                </Field>
-                <Field label="Time">
-                  <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
-                </Field>
-              </div>
-            ) : null}
+              ) : null}
+              {draft.scheduleType === "weekly" ? (
+                <div className="space-y-3">
+                  <Field label="Days">
+                    <WeekdayPicker value={draft.weeklyDays} onChange={(value) => update("weeklyDays", value)} />
+                  </Field>
+                  <p className="text-sm text-muted-foreground">
+                    {draft.scheduleError ? "The stored weekday semantics cannot be edited safely."
+                      : draft.weeklyDays.length
+                      ? "Runs on the selected weekdays. Clear all days to use the backend's dynamic weekday."
+                      : "Dynamic weekday: uses the local weekday when the backend calculates the next run. No fixed weekdays are selected."}
+                  </p>
+                  <Field label="Time">
+                    <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
+                  </Field>
+                </div>
+              ) : null}
+              {draft.scheduleType === "monthly" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field label="Day">
+                    <Select value={draft.monthlyDay} onChange={(event) => update("monthlyDay", event.target.value)} className="w-full">
+                      {Array.from({ length: 31 }, (_, index) => String(index + 1)).map((day) => (
+                        <option key={day} value={day}>{day}</option>
+                      ))}
+                      <option value="last">Last day</option>
+                    </Select>
+                  </Field>
+                  <Field label="Time">
+                    <Input value={draft.scheduleTime} type="time" onChange={(event) => update("scheduleTime", event.target.value)} />
+                  </Field>
+                </div>
+              ) : null}
+            </fieldset>
           </div>
         ) : (
           <Field label="On submit">
@@ -956,6 +978,8 @@ function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (value:
           <button
             key={day.value}
             type="button"
+            aria-label={day.label}
+            aria-pressed={selected}
             className={cn(
               "h-8 rounded-md border px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted",
               selected && "border-primary bg-primary/10 text-primary"
@@ -964,7 +988,7 @@ function WeekdayPicker({ value, onChange }: { value: number[]; onChange: (value:
               const next = selected
                 ? value.filter((item) => item !== day.value)
                 : [...value, day.value].sort((left, right) => left - right);
-              onChange(next.length ? next : [day.value]);
+              onChange(next);
             }}
           >
             {day.label}
@@ -1062,11 +1086,12 @@ function saveIntentText(intent: SaveIntent): string {
 }
 
 function scheduleRuleText(draft: WorkflowDraft): string {
+  if (draft.scheduleError) return "Schedule cannot be edited safely";
   if (draft.scheduleType === "daily") {
     return `Daily at ${draft.scheduleTime || "--:--"}`;
   }
   if (draft.scheduleType === "weekly") {
-    return `Weekly at ${draft.scheduleTime || "--:--"}`;
+    return `Weekly (${draft.weeklyDays.length ? "selected weekdays" : "dynamic weekday"}) at ${draft.scheduleTime || "--:--"}`;
   }
   if (draft.scheduleType === "monthly") {
     return `Monthly day ${draft.monthlyDay || "-"} at ${draft.scheduleTime || "--:--"}`;
@@ -1347,33 +1372,31 @@ function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
   if (draft.scheduleType === "weekly") {
     return {
       type: "weekly",
-      days_of_week: draft.weeklyDays.length ? draft.weeklyDays : [1],
+      days_of_week: draft.weeklyDays,
       time: draft.scheduleTime || "00:00", timezone: draft.scheduleTimezone
     };
   }
   if (draft.scheduleType === "monthly") {
     return {
       type: "monthly",
-      day: draft.monthlyDay === "last" ? "last" : Math.max(1, Number(draft.monthlyDay) || 1),
+      day: draft.monthlyDay === "last" ? "last" : Math.max(1, Math.trunc(Number(draft.monthlyDay)) || 1),
       time: draft.scheduleTime || "00:00", timezone: draft.scheduleTimezone
     };
   }
   return {
     type: "interval",
-    every: Math.max(1, Number(draft.intervalEvery) || 1),
+    every: Math.max(1, Math.trunc(Number(draft.intervalEvery)) || 1),
     unit: draft.intervalUnit
   };
 }
 
-function mergeScheduleRule(original: Record<string, unknown>, edited: WorkflowScheduleRule): WorkflowScheduleRule {
-  // Write the displayed rule in full when explicitly edited, retaining compatibility options.
-  const schedule: Record<string, unknown> = { ...original, ...edited };
-  if ((original.type ?? "interval") !== edited.type) {
-    for (const key of ["every", "unit", "time", "timezone", "days_of_week", "day"]) {
-      if (!(key in edited)) delete schedule[key];
-    }
-  }
-  return schedule as WorkflowScheduleRule;
+function scheduleChanges(
+  edited: WorkflowScheduleRule,
+  baseline: WorkflowScheduleRule,
+  typeChanged: boolean
+): Record<string, unknown> {
+  // Leave untouched values on the server: JSON.stringify would turn a stored 1.0 into 1.
+  return typeChanged ? { ...edited } : mergeConfigChanges({}, edited, baseline);
 }
 
 function draftFromDefinition(
@@ -1391,7 +1414,7 @@ function draftFromDefinition(
     };
   }
   const nodes = workflowNodesFromDefinition(definition);
-  const scheduleDraft = scheduleDraftFromTrigger(selectedTrigger?.schedule);
+  const scheduleDraft = scheduleDraftFromTrigger(selectedTrigger);
   const target = findNode(nodes, "artist_target");
   const sync = findNode(nodes, "sync_metadata");
   const collect = findNode(nodes, "collect_artworks");
@@ -1462,41 +1485,86 @@ function padDatePart(value: number): string {
   return String(value).padStart(2, "0");
 }
 
-function scheduleDraftFromTrigger(schedule?: Record<string, unknown>): Partial<WorkflowDraft> {
+function scheduleDraftFromTrigger(trigger?: WorkflowTrigger): Partial<WorkflowDraft> {
+  const schedule = trigger?.schedule;
   if (!schedule) {
     return {};
   }
   const type = scheduleTypeOption(schedule.type);
+  const weekdays = trigger?.effective_days_of_week;
+  const scheduleError = scheduleEditingError(schedule, type, weekdays);
+  const common = { scheduleType: type, scheduleError, scheduleTimezone: stringOption(schedule.timezone, "UTC") || "UTC" };
   if (type === "daily") {
     return {
-      scheduleType: "daily",
-      scheduleTimezone: stringOption(schedule.timezone, "UTC"),
-      scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime)
+      ...common,
+      scheduleTime: stringOption(schedule.time, "00:00")
     };
   }
   if (type === "weekly") {
     return {
-      scheduleType: "weekly",
-      scheduleTimezone: stringOption(schedule.timezone, "UTC"),
-      scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime),
-      weeklyDays: numberArray(schedule.days_of_week, initialDraft.weeklyDays)
+      ...common,
+      scheduleTime: stringOption(schedule.time, "00:00"),
+      weeklyDays: weekdays ?? []
     };
   }
   if (type === "monthly") {
-    const day = schedule.day;
+    const day = schedulePositiveInt(schedule.day);
     return {
-      scheduleType: "monthly",
-      scheduleTimezone: stringOption(schedule.timezone, "UTC"),
-      scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime),
-      monthlyDay: day === "last" ? "last" : numberText(day) || initialDraft.monthlyDay
+      ...common,
+      scheduleTime: stringOption(schedule.time, "00:00"),
+      monthlyDay: schedule.day === "last" || day > 31 ? "last" : String(day)
     };
   }
   return {
-    scheduleType: "interval",
-    scheduleTimezone: stringOption(schedule.timezone, "UTC"),
-    intervalEvery: numberText(schedule.every) || initialDraft.intervalEvery,
+    ...common,
+    intervalEvery: String(schedulePositiveInt(schedule.every)),
     intervalUnit: intervalUnitOption(schedule.unit)
   };
+}
+
+function scheduleEditingError(
+  schedule: Record<string, unknown>, type: ScheduleType, weekdays?: number[] | null
+): string | null {
+  if (weekdays === undefined) {
+    return "Backend schedule editing support is unavailable. Reload this workflow with an updated backend before editing.";
+  }
+  if ("type" in schedule && schedule.type !== type) {
+    return "The stored schedule type is unsupported by this editor.";
+  }
+  if ("timezone" in schedule) {
+    if (typeof schedule.timezone !== "string" || !schedule.timezone) {
+      return "The stored timezone cannot be saved safely through the schedule API.";
+    }
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: schedule.timezone });
+    } catch {
+      return "The stored timezone is not supported by this editor.";
+    }
+  }
+  if (type !== "interval" && "time" in schedule && (
+    typeof schedule.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(schedule.time)
+  )) {
+    return "The stored time cannot be represented and saved safely through the schedule API.";
+  }
+  if (type === "weekly" && weekdays === null) {
+    return "The backend could not determine the stored weekday semantics safely.";
+  }
+  const number = type === "interval" ? schedule.every : type === "monthly" ? schedule.day : undefined;
+  const numeric = typeof number === "string" && /^[+-]?\d+(?:_\d+)*$/.test(number.trim())
+    ? Number(number.trim().replaceAll("_", "")) : number;
+  if ((typeof numeric === "number" && !Number.isSafeInteger(Math.trunc(numeric))) ||
+      (typeof number === "string" && [...number].some((character) => character.charCodeAt(0) > 127))) {
+    return "The stored numeric schedule values cannot be represented safely by this editor.";
+  }
+  return null;
+}
+
+// Match positive_int in workflow_schedule_service.py; numeric strings accept integers only.
+function schedulePositiveInt(value: unknown): number {
+  const text = typeof value === "string" ? value.trim() : "";
+  const parsed = typeof value === "number" ? Math.trunc(value)
+    : /^[+-]?\d+(?:_\d+)*$/.test(text) ? Number(text.replaceAll("_", "")) : 1;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
 function workflowNodesFromDefinition(definition: WorkflowDefinition): AdvancedWorkflowNode[] {
@@ -1624,7 +1692,7 @@ function intervalUnitOption(value: unknown): IntervalUnit {
   if (value === "minutes" || value === "hours" || value === "days") {
     return value;
   }
-  return initialDraft.intervalUnit;
+  return "days";
 }
 
 function conflictModeOption(value: unknown): ConflictMode {
@@ -1650,14 +1718,6 @@ function arrayText(value: unknown, separator = "\n"): string {
     return "";
   }
   return value.map((item) => String(item)).filter(Boolean).join(separator);
-}
-
-function numberArray(value: unknown, fallback: number[]): number[] {
-  if (!Array.isArray(value)) {
-    return fallback;
-  }
-  const parsed = value.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item >= 1 && item <= 7);
-  return parsed.length ? parsed : fallback;
 }
 
 function countLines(value: string): number {

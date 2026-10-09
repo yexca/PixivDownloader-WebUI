@@ -74,6 +74,8 @@ export type WorkflowTrigger = {
   workflow_definition_id: string;
   status: string;
   schedule: Record<string, unknown>;
+  // Computed before JSON serialization, which erases Python int/float distinctions.
+  effective_days_of_week?: number[] | null;
   next_run_at: string | null;
   last_run_at: string | null;
   last_success_at: string | null;
@@ -98,7 +100,9 @@ export type WorkflowDefinitionSaveRequest = {
   trigger?: {
     trigger_id?: number | null;
     enabled: boolean;
-    schedule: WorkflowScheduleRule;
+    // Existing rules may omit parameters and rely on backend defaults.
+    schedule?: WorkflowScheduleRule | Record<string, unknown>;
+    schedule_patch?: Record<string, unknown>;
     run_now: boolean;
   } | null;
 };

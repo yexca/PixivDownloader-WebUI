@@ -480,7 +480,7 @@ function DefinitionList({
             {definition.triggers.length ? (
               <div className="mt-3 rounded-md border bg-muted/20 px-2.5 py-2 text-xs text-muted-foreground">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate">{scheduleRuleLabel(definition.triggers[0].schedule)}</span>
+                  <span className="truncate">{scheduleRuleLabel(definition.triggers[0])}</span>
                   <Badge tone={triggerStatusTone(definition.triggers[0].status)}>{definition.triggers[0].status}</Badge>
                 </div>
                 <div className="mt-1 truncate">Next {formatDate(definition.triggers[0].next_run_at)}</div>
@@ -704,7 +704,7 @@ function SchedulePanel({
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={triggerStatusTone(trigger.status)}>{trigger.status}</Badge>
-                    <p className="truncate text-sm font-semibold">{scheduleRuleLabel(trigger.schedule)}</p>
+                    <p className="truncate text-sm font-semibold">{scheduleRuleLabel(trigger)}</p>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                     <span>Next {formatDate(trigger.next_run_at)}</span>
@@ -1144,13 +1144,14 @@ function stageForNode(type: string): AdvancedWorkflowBuilderStage {
   return "target";
 }
 
-function scheduleRuleLabel(schedule: Record<string, unknown>): string {
+function scheduleRuleLabel(trigger: WorkflowTrigger): string {
+  const schedule = trigger.schedule;
   const type = String(schedule.type ?? "interval");
   if (type === "daily") {
     return `Daily at ${stringValue(schedule.time, "00:00")}`;
   }
   if (type === "weekly") {
-    return `Weekly ${weekdayLabels(schedule.days_of_week)} at ${stringValue(schedule.time, "00:00")}`;
+    return `Weekly ${weekdayLabels(trigger.effective_days_of_week)} at ${stringValue(schedule.time, "00:00")}`;
   }
   if (type === "monthly") {
     return `Monthly day ${String(schedule.day ?? "1")} at ${stringValue(schedule.time, "00:00")}`;
@@ -1158,16 +1159,10 @@ function scheduleRuleLabel(schedule: Record<string, unknown>): string {
   return `Every ${numberValue(schedule.every, 1)} ${String(schedule.unit ?? "days")}`;
 }
 
-function weekdayLabels(value: unknown): string {
+function weekdayLabels(value?: number[] | null): string {
   const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-  if (!Array.isArray(value)) {
-    return "weekly";
-  }
-  const days = value
-    .map((item) => Number(item))
-    .filter((item) => Number.isInteger(item) && item >= 1 && item <= 7)
-    .map((item) => labels[item - 1]);
-  return days.length ? days.join(", ") : "weekly";
+  if (value == null) return "(weekday semantics unavailable)";
+  return value.length ? value.map((day) => labels[day - 1]).join(", ") : "(dynamic weekday)";
 }
 
 function stringValue(value: unknown, fallback: string): string {
