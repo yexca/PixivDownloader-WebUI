@@ -33,7 +33,7 @@ type TriggerMode = "manual" | "schedule";
 type SaveIntent = "run_now" | "save_only" | "save_and_schedule" | "run_and_schedule";
 type ScheduleType = "interval" | "daily" | "weekly" | "monthly";
 type IntervalUnit = "minutes" | "hours" | "days";
-type TargetScope = "selected" | "all" | "tagged" | "stale";
+type TargetScope = "selected" | "single" | "all" | "tagged" | "stale" | "unsupported";
 type SyncMode = "none" | "incremental" | "full";
 type CollectMode =
   | "new_since_last_download"
@@ -64,8 +64,12 @@ type WorkflowDraft = {
   weeklyDays: number[];
   monthlyDay: string;
   targetScope: TargetScope;
+  targetScopeChanged: boolean;
+  targetError: string | null;
+  artistId: string;
   artistIds: string;
   artistTag: string;
+  artistTags: string;
   staleDays: string;
   maxArtists: string;
   syncMode: SyncMode;
@@ -107,8 +111,12 @@ const initialDraft: WorkflowDraft = {
   weeklyDays: [1, 3, 5],
   monthlyDay: "1",
   targetScope: "selected",
+  targetScopeChanged: false,
+  targetError: null,
+  artistId: "",
   artistIds: "",
   artistTag: "",
+  artistTags: "",
   staleDays: "30",
   maxArtists: "20",
   syncMode: "incremental",
@@ -183,7 +191,21 @@ export function AdvancedWorkflowBuilder({
   }, [hydratedDraft, initialStage]);
 
   const update = <K extends keyof WorkflowDraft>(key: K, value: WorkflowDraft[K]) => {
-    setDraft((current) => ({ ...current, [key]: value }));
+    setDraft((current) => {
+      const next = {
+        ...current,
+        [key]: value,
+        targetScopeChanged: current.targetScopeChanged || (key === "targetScope" && value !== current.targetScope)
+      };
+      if (key === "targetScope" && value === "selected" && current.targetScope === "single") {
+        next.artistIds = current.artistId.trim();
+      }
+      if (key === "targetScope" && value === "single" && current.targetScope === "selected") {
+        const ids = [...new Set(lines(current.artistIds))];
+        next.artistId = ids.length === 1 ? ids[0] : "";
+      }
+      return next;
+    });
   };
   const updateModule = (module: keyof WorkflowDraft["modules"], enabled: boolean) => {
     setDraft((current) => {
@@ -212,7 +234,10 @@ export function AdvancedWorkflowBuilder({
   };
 
   const candidateSummary = candidateText(draft);
-  const workflowJson = React.useMemo(() => buildAdvancedRequest(draft), [draft]);
+  const workflowJson = React.useMemo(
+    () => buildAdvancedRequest(draft, definition, hydratedDraft),
+    [draft, definition, hydratedDraft]
+  );
   const runMutation = useMutation({
     mutationFn: createAdvancedWorkflowRun,
     onSuccess: (run) => {
@@ -240,7 +265,7 @@ export function AdvancedWorkflowBuilder({
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
       onSubmitted?.({
         definitionId: response.definition.id,
-        scheduled: response.trigger !== null
+        scheduled: response.trigger !== null || Boolean(definition?.triggers.length)
       });
     },
     onError: (error) => {
@@ -250,6 +275,11 @@ export function AdvancedWorkflowBuilder({
 
   const submitting = runMutation.isPending || saveMutation.isPending;
   const submitAdvanced = () => {
+    if (draft.targetError) {
+      pushToast({ title: "Target cannot be edited safely", description: draft.targetError, tone: "error" });
+      setSelectedStage("target");
+      return;
+    }
     if (hasDuplicateDefinitionName(draft.name, existingDefinitions, definition?.id ?? null)) {
       pushToast({
         title: "Workflow name already exists",
@@ -263,15 +293,24 @@ export function AdvancedWorkflowBuilder({
       runMutation.mutate(workflowJson);
       return;
     }
-    const shouldSchedule = draft.triggerMode === "schedule";
+    const existingTrigger = definition?.triggers.find((trigger) => trigger.id === triggerId) ?? definition?.triggers[0];
+    const schedule = buildScheduleRule(draft);
+    const originalSchedule = buildScheduleRule(hydratedDraft);
+    // Saving target edits must not resume paused triggers or reschedule their next run.
+    const shouldSchedule = draft.triggerMode === "schedule" && (
+      !existingTrigger || hydratedDraft.triggerMode !== "schedule" ||
+      JSON.stringify(schedule) !== JSON.stringify(originalSchedule) || draft.saveIntent === "run_and_schedule"
+    );
     saveMutation.mutate({
       definition_id: definition?.id ?? null,
       definition: workflowJson.definition,
       trigger: shouldSchedule
         ? {
-            trigger_id: triggerId ?? definition?.triggers[0]?.id ?? null,
-            enabled: true,
-            schedule: buildScheduleRule(draft),
+            trigger_id: triggerId ?? existingTrigger?.id ?? null,
+            enabled: existingTrigger ? existingTrigger.status === "active" : true,
+            schedule: existingTrigger && schedule.type === originalSchedule.type
+              ? mergeConfigChanges(existingTrigger.schedule, schedule, originalSchedule) as WorkflowScheduleRule
+              : schedule,
             run_now: draft.saveIntent === "run_and_schedule"
           }
         : null
@@ -298,7 +337,7 @@ export function AdvancedWorkflowBuilder({
             </Button>
             <Button
               type="button"
-              disabled={submitting}
+              disabled={submitting || Boolean(draft.targetError)}
               onClick={submitAdvanced}
             >
               <Save className="h-4 w-4" aria-hidden="true" />
@@ -306,6 +345,12 @@ export function AdvancedWorkflowBuilder({
             </Button>
             </div>
           </div>
+          {draft.targetError ? (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {draft.targetError} The original configuration is preserved. Saving and running are disabled;
+              edit this definition outside the advanced editor.
+            </p>
+          ) : null}
           <ModuleSwitches draft={draft} onChange={updateModule} />
         </div>
           <div className="surface p-4">
@@ -512,13 +557,20 @@ function StageEditor({
     return (
       <EditorPanel icon={UserRoundSearch} title="Target" kicker="Artist range">
         <Field label="Artist scope">
-          <Select value={draft.targetScope} onChange={(event) => update("targetScope", event.target.value as TargetScope)} className="w-full">
+          <Select value={draft.targetScope} disabled={Boolean(draft.targetError)} onChange={(event) => update("targetScope", event.target.value as TargetScope)} className="w-full">
             <option value="selected">Selected artists</option>
+            <option value="single">Single artist</option>
             <option value="all">All local artists</option>
             <option value="tagged">Artists with local tag</option>
             <option value="stale">Artists not checked recently</option>
+            {draft.targetScope === "unsupported" ? <option value="unsupported">Unsupported target configuration</option> : null}
           </Select>
         </Field>
+        {draft.targetScope === "single" ? (
+          <Field label="Artist ID">
+            <Input value={draft.artistId} onChange={(event) => update("artistId", event.target.value)} />
+          </Field>
+        ) : null}
         {draft.targetScope === "selected" ? (
           <Field label="Artist IDs">
             <Textarea
@@ -533,14 +585,23 @@ function StageEditor({
             <Input value={draft.artistTag} onChange={(event) => update("artistTag", event.target.value)} />
           </Field>
         ) : null}
+        {draft.targetScope === "tagged" ? (
+          <div className="space-y-1">
+            <Field label="Additional local tags (one per line)">
+              <Textarea value={draft.artistTags} onChange={(event) => update("artistTags", event.target.value)} />
+            </Field>
+            <p className="text-xs text-muted-foreground">Matches any listed tag or the local tag above. Spaces and commas are part of each tag.</p>
+          </div>
+        ) : null}
         {draft.targetScope === "stale" ? (
           <Field label="Not checked for days">
             <Input value={draft.staleDays} inputMode="numeric" onChange={(event) => update("staleDays", event.target.value)} />
           </Field>
         ) : null}
         <Field label="Max artists per run">
-          <Input value={draft.maxArtists} inputMode="numeric" onChange={(event) => update("maxArtists", event.target.value)} />
+          <Input value={draft.maxArtists} disabled={Boolean(draft.targetError)} inputMode="numeric" onChange={(event) => update("maxArtists", event.target.value)} />
         </Field>
+        <p className="text-xs text-muted-foreground">Leave blank to use the target's default limit.</p>
       </EditorPanel>
     );
   }
@@ -987,11 +1048,17 @@ function scheduleRuleText(draft: WorkflowDraft): string {
 }
 
 function targetDetail(draft: WorkflowDraft): string {
+  if (draft.targetScope === "unsupported") {
+    return "Target cannot be edited safely";
+  }
+  if (draft.targetScope === "single") {
+    return `Artist ${draft.artistId || "-"}`;
+  }
   if (draft.targetScope === "selected") {
     return `${countLines(draft.artistIds)} selected artist(s)`;
   }
   if (draft.targetScope === "tagged") {
-    return `Artists tagged ${draft.artistTag || "-"}`;
+    return `Artists matching any tag: ${[...tagLines(draft.artistTags), draft.artistTag.trim()].filter(Boolean).join(", ") || "-"}`;
   }
   if (draft.targetScope === "stale") {
     return `Not checked for ${draft.staleDays || "-"} day(s)`;
@@ -1050,6 +1117,8 @@ function actionDetail(draft: WorkflowDraft): string {
 }
 
 function targetMetric(draft: WorkflowDraft): string {
+  if (draft.targetScope === "unsupported") return "Unsupported";
+  if (draft.targetScope === "single") return draft.artistId.trim() ? "1" : "0";
   if (draft.targetScope === "selected") {
     return String(countLines(draft.artistIds));
   }
@@ -1085,19 +1154,20 @@ function previewPath(rule: string): string {
     .replaceAll("{ai}", "non-AI");
 }
 
-function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest {
+function buildAdvancedRequest(
+  draft: WorkflowDraft,
+  definition?: WorkflowDefinition | null,
+  baseline?: WorkflowDraft
+): AdvancedWorkflowRunRequest {
+  if (definition && draft.targetError) {
+    return { definition: { ...definition.definition, name: draft.name, nodes: workflowNodesFromDefinition(definition) } };
+  }
   const nodes: AdvancedWorkflowRunRequest["definition"]["nodes"] = [
     {
       id: "target",
       type: "artist_target",
       title: "Target artists",
-      config: {
-        scope: targetScopeToProtocol(draft.targetScope),
-        ...(draft.targetScope === "selected" ? { artist_ids: lines(draft.artistIds) } : {}),
-        ...(draft.targetScope === "tagged" ? { tag: draft.artistTag.trim() } : {}),
-        ...(draft.targetScope === "stale" ? { days: numberOrNull(draft.staleDays) } : {}),
-        max_artists: numberOrNull(draft.maxArtists)
-      }
+      config: buildTargetConfig(draft, definition, baseline)
     }
   ];
   if (draft.modules.sync && draft.syncMode !== "none") {
@@ -1152,10 +1222,95 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
   }
   return {
     definition: {
+      ...(definition && baseline ? definition.definition : {}),
       name: draft.name,
-      nodes
+      nodes: definition && baseline ? preserveDefinitionNodes(definition, nodes, baseline, draft) : nodes
     }
   };
+}
+
+function mergeConfigChanges(
+  original: Record<string, unknown>,
+  edited: Record<string, unknown>,
+  baseline: Record<string, unknown>
+): Record<string, unknown> {
+  const config = { ...original };
+  for (const [key, value] of Object.entries(edited)) {
+    if (JSON.stringify(value) !== JSON.stringify(baseline[key])) config[key] = value;
+  }
+  return config;
+}
+
+function preserveDefinitionNodes(
+  definition: WorkflowDefinition,
+  edited: AdvancedWorkflowNode[],
+  baseline: WorkflowDraft,
+  draft: WorkflowDraft
+): AdvancedWorkflowNode[] {
+  const baselineNodes = buildAdvancedRequest(baseline).definition.nodes;
+  const moduleByType: Partial<Record<AdvancedWorkflowNode["type"], keyof WorkflowDraft["modules"]>> = {
+    sync_metadata: "sync", collect_artworks: "collect", filter_artworks: "filters", execute_actions: "actions"
+  };
+  const seen = new Set<string>();
+  const nodes = workflowNodesFromDefinition(definition).flatMap((node) => {
+    const module = moduleByType[node.type];
+    if (module && !draft.modules[module]) return [];
+    if (node.type === "sync_metadata" && draft.syncMode === "none" && baseline.syncMode !== "none") return [];
+    const replacement = findNode(edited, node.type);
+    if (!replacement || seen.has(node.type)) return [node];
+    seen.add(node.type);
+    return [{
+      ...node,
+      config: node.type === "artist_target" ? replacement.config : mergeConfigChanges(
+        node.config ?? {}, replacement.config, findNode(baselineNodes, node.type)?.config ?? {}
+      )
+    }];
+  });
+  // Insert newly enabled modules without reordering existing nodes, including retry pipelines.
+  for (const node of edited) {
+    if (nodes.some((existing) => existing.type === node.type)) continue;
+    const position = nodes.findIndex((existing) => edited.findIndex((item) => item.type === existing.type) > edited.indexOf(node));
+    nodes.splice(position < 0 ? nodes.length : position, 0, node);
+  }
+  return nodes;
+}
+
+function buildTargetConfig(
+  draft: WorkflowDraft,
+  definition?: WorkflowDefinition | null,
+  baseline?: WorkflowDraft
+): Record<string, unknown> {
+  const original = definition ? findNode(workflowNodesFromDefinition(definition), "artist_target")?.config ?? {} : {};
+  if (draft.targetError) return { ...original };
+  const config = { ...original };
+  if (draft.targetScopeChanged) {
+    for (const key of ["artist_id", "artist_ids", "artwork_id", "artwork_ids", "artist_source", "tag", "tags", "days", "stale_days"]) {
+      delete config[key];
+    }
+  }
+  const changed = (key: keyof WorkflowDraft) => !definition || !baseline || draft.targetScopeChanged || draft[key] !== baseline[key];
+  // The artists scope ignores artwork IDs; converting it to selected would activate them.
+  config.scope = !draft.targetScopeChanged && original.scope === "artists" ? "artists" : targetScopeToProtocol(draft.targetScope);
+  if (draft.targetScope === "single" && changed("artistId")) {
+    config.artist_id = draft.artistId.trim();
+    // A blank single ID must not resurrect the backend's fallback artist_ids.
+    if (!config.artist_id && "artist_ids" in config) config.artist_ids = [];
+  }
+  if (draft.targetScope === "selected" && changed("artistIds")) {
+    config.artist_ids = lines(draft.artistIds);
+    delete config.artist_id;
+  }
+  if (draft.targetScope === "tagged") {
+    if (changed("artistTag")) config.tag = draft.artistTag.trim();
+    if (changed("artistTags") && (definition || draft.artistTags.trim())) config.tags = tagLines(draft.artistTags);
+  }
+  if (draft.targetScope === "stale" && changed("staleDays")) {
+    config.days = numberOrNull(draft.staleDays);
+    delete config.stale_days;
+  }
+  // Missing/null limits have backend defaults; opening the editor must not replace them with 20.
+  if (!definition || !baseline || draft.maxArtists !== baseline.maxArtists) config.max_artists = numberOrNull(draft.maxArtists);
+  return config;
 }
 
 function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
@@ -1209,6 +1364,8 @@ function draftFromDefinition(
   const filterConfig = filters?.config ?? {};
   const actionConfig = actions?.config ?? {};
   const scope = targetScopeFromProtocol(targetConfig.scope);
+  const targetError = targetEditingError(nodes, targetConfig, scope);
+  const explicitIds = targetArtistIds(targetConfig);
   const maxArtworks = collectConfig.max_artworks;
   return {
     ...initialDraft,
@@ -1222,11 +1379,15 @@ function draftFromDefinition(
       filters: Boolean(filters),
       actions: Boolean(actions)
     },
-    targetScope: scope,
-    artistIds: arrayText(targetConfig.artist_ids),
+    targetScope: targetError ? "unsupported" : scope,
+    targetError,
+    artistId: typeof targetConfig.artist_id === "string" && targetConfig.artist_id.trim()
+      ? targetConfig.artist_id.trim() : explicitIds[0] ?? "",
+    artistIds: explicitIds.join("\n"),
     artistTag: stringOption(targetConfig.tag, ""),
-    staleDays: numberText(targetConfig.days ?? targetConfig.stale_days) || initialDraft.staleDays,
-    maxArtists: numberText(targetConfig.max_artists) || initialDraft.maxArtists,
+    artistTags: arrayText(targetConfig.tags),
+    staleDays: numberText(targetConfig.days || targetConfig.stale_days) || initialDraft.staleDays,
+    maxArtists: numberText(targetConfig.max_artists),
     syncMode: sync ? syncModeOption(syncConfig.mode) : initialDraft.syncMode,
     collectMode: collectModeOption(collectConfig.mode),
     collectLimitMode: maxArtworks === null || maxArtworks === undefined || maxArtworks === "" ? "none" : "limit",
@@ -1311,7 +1472,8 @@ function isAdvancedWorkflowNode(value: unknown): value is AdvancedWorkflowNode {
     return false;
   }
   const node = value as Partial<AdvancedWorkflowNode>;
-  return typeof node.id === "string" && typeof node.type === "string" && typeof node.config === "object";
+  return typeof node.id === "string" && typeof node.type === "string" &&
+    (node.config === undefined || (node.config !== null && typeof node.config === "object" && !Array.isArray(node.config)));
 }
 
 function findNode(nodes: AdvancedWorkflowNode[], type: AdvancedWorkflowNode["type"]): AdvancedWorkflowNode | undefined {
@@ -1319,10 +1481,12 @@ function findNode(nodes: AdvancedWorkflowNode[], type: AdvancedWorkflowNode["typ
 }
 
 function targetScopeToProtocol(scope: TargetScope): string {
-  return { selected: "selected", all: "all_artists", tagged: "artists_with_tag", stale: "artists_not_checked" }[scope];
+  return { selected: "selected", single: "single_artist", all: "all_artists", tagged: "artists_with_tag", stale: "artists_not_checked", unsupported: "unsupported" }[scope];
 }
 
 function targetScopeFromProtocol(value: unknown): TargetScope {
+  if (!value || value === "selected" || value === "artists") return "selected";
+  if (value === "single_artist") return "single";
   if (value === "all_artists" || value === "all") {
     return "all";
   }
@@ -1332,7 +1496,49 @@ function targetScopeFromProtocol(value: unknown): TargetScope {
   if (value === "artists_not_checked" || value === "stale") {
     return "stale";
   }
-  return "selected";
+  return "unsupported";
+}
+
+function targetArtistIds(config: Record<string, unknown>): string[] {
+  const ids = Array.isArray(config.artist_ids) ? config.artist_ids.map(String).map((id) => id.trim()).filter(Boolean) : [];
+  const single = typeof config.artist_id === "string" ? config.artist_id.trim() : "";
+  return single ? config.scope === "single_artist" ? [single] : [single, ...ids] : ids;
+}
+
+function targetEditingError(nodes: AdvancedWorkflowNode[], config: Record<string, unknown>, scope: TargetScope): string | null {
+  if (nodes.filter((node) => node.type === "artist_target").length !== 1) {
+    return "This editor requires exactly one artist target node.";
+  }
+  if (scope === "unsupported" || (config.scope === "artists" && config.artist_source === "artwork_ids")) {
+    return `Target scope '${String(config.scope)}'${config.artist_source === "artwork_ids" ? " with artwork IDs" : ""} is not supported by this editor.`;
+  }
+  if (scope === "selected" && config.scope !== "artists" && (
+    (typeof config.artwork_id === "string" && config.artwork_id.trim()) ||
+    (Array.isArray(config.artwork_ids) && config.artwork_ids.some((id) => String(id).trim()))
+  )) {
+    return "This target includes artwork IDs, which this editor cannot represent.";
+  }
+  if (scope === "single" && targetArtistIds(config).length > 1) {
+    return "This single_artist target falls back to multiple artist IDs, which this editor cannot represent.";
+  }
+  const values = scope === "tagged" ? config.tags : scope === "selected" || scope === "single" ? config.artist_ids : undefined;
+  const singleTakesPrecedence = scope === "single" && typeof config.artist_id === "string" && config.artist_id.trim();
+  if (!singleTakesPrecedence && Array.isArray(values) && values.some((value) =>
+    typeof value !== "string" ||
+    /[\r\n]/.test(String(value)) || (scope === "selected" && /[,\s]/.test(String(value).trim()))
+  )) {
+    return "This target contains values that cannot be represented safely in the target fields.";
+  }
+  if (scope === "selected" && typeof config.artist_id === "string" && /[,\s]/.test(config.artist_id.trim())) {
+    return "This artist ID cannot be represented safely in the artist list.";
+  }
+  if (scope === "single" && targetArtistIds(config).some((id) => /[\r\n]/.test(id))) {
+    return "This artist ID contains line breaks, which this editor cannot represent.";
+  }
+  if (scope === "tagged" && typeof config.tag === "string" && /[\r\n]/.test(config.tag)) {
+    return "This target contains a tag with line breaks, which this editor cannot represent.";
+  }
+  return null;
 }
 
 function syncModeOption(value: unknown): SyncMode {
@@ -1424,6 +1630,10 @@ function lines(value: string): string[] {
 
 function commaList(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function tagLines(value: string): string[] {
+  return value.split(/\r?\n/).map((item) => item.trim()).filter(Boolean);
 }
 
 function numberOrNull(value: string): number | null {

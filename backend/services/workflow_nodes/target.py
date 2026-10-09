@@ -106,6 +106,14 @@ def latest_resolver_payload(db_path: object, job_ids: list[str]) -> dict[str, ob
 
 
 def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
+    """Resolve the stored target protocol without interpreting inactive scope fields.
+
+    selected combines artist_id and artist_ids (and can also resolve artworks).
+    single_artist gives a nonempty artist_id precedence over artist_ids; artists
+    reads artist IDs unless artist_source is artwork_ids. Bulk scopes ignore IDs.
+    artists_with_tag matches the union of tags and tag before common filters,
+    availability checks, selection order, and the max_artists limit are applied.
+    """
     explicit_ids = string_list(config.get("artist_ids"))
     scope = target_scope(config)
     single_artist = config.get("artist_id")

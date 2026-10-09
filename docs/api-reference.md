@@ -211,7 +211,23 @@ Common codes:
 
 ## Execution and Validation Contracts
 
-The advanced `artist_target` node uses `selected` with `artist_ids`, `all_artists`, `artists_with_tag` with `tag` (or the existing `tags` list), and `artists_not_checked` with `days`. `max_artists` limits the selected range. Bulk scopes ignore artist/artwork IDs and parameters belonging to other scopes. Existing definitions using `all`, `tagged`, `stale`, or `stale_days` remain executable; the advanced editor reads either protocol and saves canonical scopes and `days`, emitting only the active scope's fields.
+The `artist_target` node resolves these target protocols:
+
+| Scope | Active target fields | Advanced editor |
+| --- | --- | --- |
+| `selected` (also the default when scope is absent) | `artist_id` plus `artist_ids`, and `artwork_id` plus `artwork_ids` | Artist IDs are editable; nonempty artwork targets block editing/saving. |
+| `single_artist` | A nonempty `artist_id` takes precedence; otherwise uses `artist_ids`. | Single artist field; a fallback list with multiple artists blocks editing/saving. Switching to Selected artists explicitly converts the effective single ID into `artist_ids`. |
+| `artists` | Artist IDs, unless `artist_source="artwork_ids"`, which uses artwork IDs instead. | Artist ID sources are editable and retain the original scope so dormant artwork IDs stay inactive. Artwork sources block editing/saving. |
+| `single_artwork` / `artworks` | `artwork_id` / `artwork_ids`; a nonempty scalar takes precedence for `single_artwork`. | Blocks editing/saving. |
+| `all_artists` / `all` | All local artists; ignores artist/artwork IDs. | Editable. |
+| `artists_with_tag` / `tagged` | Union of the `tags` list and scalar `tag`; each matching artist appears once. Empty tags select nobody. | Scalar tag and additional tags are separately editable. Additional tags use one tag per line; spaces and commas remain part of a tag. |
+| `artists_not_checked` / `stale` | `days`, falling back to `stale_days`, then 30 days. | Editable; an edited day value is saved as `days`. |
+
+Common target options include `filters` with `last_checked_before_days`, `artist_selection` (`oldest_checked_first`, `newest_checked_first`, or `random`), `skip_unavailable_artists`, and `max_artists`. The editor preserves existing options even when it has no dedicated controls for them. Missing/null limits retain the backend defaults: bulk/ordered selection defaults to 25; explicit unordered artist lists default to their size. Bulk scopes ignore fields belonging to other scopes. Resolution and execution behavior are unchanged.
+
+Opening and saving a supported definition retains its original valid target parameters, other nodes (including node IDs, titles and retry pipelines), and metadata. Only edited fields are updated; bulk scope aliases are saved canonically. Explicitly switching the target scope clears incompatible target fields, while common selection/filter options remain. Reset restores the loaded configuration. Unknown scopes and target values that cannot be represented safely display an error, preserve the original JSON for inspection, and disable saving/running in this editor; use the workflow APIs to edit those definitions.
+
+Saving target or node edits leaves unchanged schedules and every existing trigger untouched, including pause state and next-run time. Explicit schedule edits retain compatibility options and the existing pause state.
 
 Workflow list/detail GETs only read persisted state; background executors progress runs. Download failures propagate through job/node/run failure details, and workflow nodes may end partial or cancelled. Explicit null settings values are rejected while omitted fields are retained. Validation responses are HTTP 422 with JSON-safe `error.details.errors` entries containing `loc`, `msg` and `type`.
 
