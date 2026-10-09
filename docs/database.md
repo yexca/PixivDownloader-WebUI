@@ -1,6 +1,6 @@
 # Database
 
-PixivDownloader-SQLite uses SQLite for local metadata, migration state, settings, jobs, and file status.
+PixivDownloader WebUI uses SQLite for local metadata, migration state, settings, jobs, and file status.
 
 ## Location
 
@@ -16,7 +16,7 @@ Resolved by:
 backend.core.paths.database_path()
 ```
 
-The old PyQt application used `resources/pixiv.db`. That file is treated only as an optional legacy import source.
+[yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite) uses `resources/pixiv.db`. That file is treated only as an optional import source for PixivDownloader WebUI.
 
 ## Migration Runner
 
@@ -47,7 +47,7 @@ Startup flow:
 5. Applied versions are recorded.
 6. Runtime settings are synced by the settings service when the WebUI reads or saves them.
 
-Schema migrations do not create or read legacy PyQt tables.
+Schema migrations do not create or read PixivDownloader-SQLite source tables.
 
 ## Migration Metadata
 
@@ -64,25 +64,45 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 Main WebUI tables:
 
 - `artists`
+- `artist_name_history`
 - `artworks`
 - `artwork_files`
 - `artwork_file_download_claims`
+- `local_tags`
+- `artist_local_tags`
 - `jobs`
 - `job_events`
+- `workflow_candidate_sets`
+- `workflow_candidate_artworks`
 - `workflow_definitions`
 - `workflow_triggers`
 - `workflow_runs`
 - `workflow_node_runs`
+- `legacy_imports`
+- `legacy_import_artists`
 - `settings`
 
 `artists.latest_downloaded_artwork_id` stores the latest artwork ID reached by incremental artist downloads.
 `artists.metadata_synced_artwork_id` separately stores the latest artwork ID from a completely committed metadata snapshot.
 
-## Legacy Database Import
+## PixivDownloader-SQLite Database Import
 
-Legacy PyQt databases are not migrated automatically. Use Settings -> Import Legacy Database to upload an old `pixiv.db`.
+PixivDownloader-SQLite databases are not migrated automatically. Use WebUI Settings to upload a `pixiv.db` from [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite).
 
-The import reads the old `pic` table and upserts rows into `artists`:
+The upload is copied to:
+
+```text
+resources/imports/{import_id}/pixiv.db
+```
+
+The backend then creates a `legacy_import` workflow run with two nodes:
+
+```text
+legacy_database_import
+legacy_import_hydration
+```
+
+The import reads the source `pic` table and upserts rows into `artists`:
 
 ```text
 pic.ID             -> artists.id
@@ -92,7 +112,9 @@ pic.downloadedDate -> artists.last_checked_at
 pic.lastDownloadID -> artists.latest_downloaded_artwork_id
 ```
 
-The old database is read-only during import. The WebUI continues to use `resources/pixiv.sqlite3`.
+The source database is read-only during import. Import state is tracked in
+`legacy_imports` and `legacy_import_artists`. The WebUI continues to use
+`resources/pixiv.sqlite3`.
 
 ## Job And File State
 
@@ -148,6 +170,17 @@ skipped
 cancelled
 ```
 
+Common workflow node-run statuses:
+
+```text
+pending
+running
+completed
+failed
+skipped
+cancelled
+```
+
 Workflow run status is derived from node runs. A run remains `running` while any
 node run is pending or running. Node runs that create jobs remain running until
 their linked jobs become terminal.
@@ -187,7 +220,7 @@ Before workers start, startup recovery restores only abandoned claims that still
 1. Add a SQL file under `backend/db/migrations/`.
 2. Use the next numeric prefix, for example `003_add_example.sql`.
 3. Keep it idempotent where practical.
-4. Do not put one-time legacy import logic in schema migrations.
+4. Do not put one-time PixivDownloader-SQLite import logic in schema migrations.
 5. Add or update tests.
 6. Run:
 

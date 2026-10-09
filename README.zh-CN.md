@@ -1,109 +1,118 @@
-# PixivDownloader-SQLite
+# PixivDownloader WebUI
 
-> Languages: [English](README.md) | [日本語](README.ja.md)
+> 语言: [English](README.md) | [简体中文](README.zh-CN.md) | [日本語](README.ja.md)
 
-PixivDownloader-SQLite 是一个本地 Pixiv 下载与管理 WebUI。当前维护的运行时由 FastAPI 后端、React + TypeScript 前端和本地 SQLite 数据库组成。
+> 注意: 当前程序界面仅支持英语。后续是否加入 i18n / 多语言界面，将根据开发情况决定。
 
-本仓库是 WebUI 重写版本。项目保留旧版 PyQt `pixiv.db` 数据导入能力，但旧桌面程序源码不属于本项目。
+PixivDownloader WebUI 是一个本地优先的 Pixiv 作品备份、工作流自动化和图库管理 WebUI。它由 FastAPI 后端、React + TypeScript 前端和本地 SQLite 数据库组成。
+
+本仓库是 PixivDownloader 的 WebUI 项目。它支持导入 [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite) 生成的 `pixiv.db` 数据库，但不会捆绑该项目的源码。
 
 ## 功能
 
-- 通过 Pixiv 用户 ID 或作品 ID 创建下载任务。
-- 在 WebUI 中管理下载目录和 Pixiv `refresh_token`。
-- 使用 SQLite 记录任务、画师、作品和文件状态。
-- 可在 WebUI 设置页显式导入旧版 PyQt `pixiv.db` 数据。
-- 优先通过 Docker Compose 运行，也可以使用本地 Windows 脚本运行 WebUI。
+- Dashboard 显示工作流运行、触发器健康状态、队列压力和图库注意事项。
+- 支持可复用的工作流定义，可手动运行或创建计划触发器。
+- 支持通过 Pixiv 画师 ID 或作品 ID 创建快捷下载。
+- 支持图库、画师详情、作品文件状态、本地标签、重试、同步和删除操作。
+- 支持队列暂停/恢复、任务重试/重新运行/取消、批量取消和 WebSocket 实时进度。
+- 支持配置下载目录、Pixiv 登录、请求/文件下载延迟、并发限制、磁盘空间保护、已有文件处理方式和图库过期检查。
+- Docker 环境下可使用可选 noVNC 认证浏览器 sidecar 完成 Pixiv 登录。
+- 可在 Settings 中显式导入 [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite) 的 `pixiv.db`。
+- 支持 Docker Compose 运行，也支持本地 Windows 脚本运行。
 
-## 推荐方式：Docker Compose
+## 推荐运行方式: Docker Compose
 
-启动 WebUI：
+启动 WebUI:
 
 ```bat
 docker compose up -d
 ```
 
-打开：
+打开:
 
 ```text
 http://127.0.0.1:7653
 ```
 
-默认启动只包含 WebUI，两个端口均仅绑定本地回环地址。使用认证浏览器前，请按[部署文档](docs/deployment.md#browser-authentication)在私有 `.env` 中设置随机共享 token 和 VNC 密码，再启动 `pixiv-auth-browser`：
+默认 Compose 启动只运行 WebUI，两个端口均仅绑定本地回环地址。需要通过浏览器登录 Pixiv 时，请按[部署文档](docs/deployment.md#browser-authentication)在私有 `.env` 中设置随机共享 token 和 VNC 密码，再启动可选的 `pixiv-auth-browser` sidecar：
 
 ```bat
 docker compose --profile auth up -d pixiv-auth-browser
 ```
 
-认证浏览器 sidecar 会映射 noVNC：
+sidecar 会暴露 noVNC:
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
 ```
 
-在 WebUI 设置页点击 Pixiv 登录后，输入 VNC 密码并在 noVNC 浏览器中完成 Pixiv 登录。后端会自动捕获回调并保存 `refresh_token`。配置完成并通过测试后，WebUI 会提示可以关闭认证浏览器：
+在 WebUI Settings 中点击 Pixiv 登录后，输入 VNC 密码并在 noVNC 浏览器中完成 Pixiv 登录。sidecar 会把回调发送给后端，后端会自动保存 `refresh_token`。配置完成并通过测试后，WebUI 会提示可以关闭认证浏览器：
 
 ```bat
 docker compose stop pixiv-auth-browser
 ```
 
-停止：
+停止 WebUI:
 
 ```bat
 docker compose down
 ```
 
-Compose 文件可构建 `yexca/pixivdownloader:v0.2.0`，映射 `127.0.0.1:7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。
+Compose 文件可构建 `yexca/pixivdownloader:v0.2.0`，映射 `127.0.0.1:7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。 `auth` profile 也可以构建和运行 `yexca/pixivdownloader-auth-browser:v0.2.0`。
 
 ## 本地 Windows 运行
 
-在项目目录安装：
+在项目目录安装:
 
 ```bat
 run-install.bat
 ```
 
-启动 WebUI：
+运行:
 
 ```bat
 run-webui.bat
 ```
 
-脚本会检查 `env\python\python.exe` 和 `frontend\dist\index.html` 是否存在，然后启动后端并打开 <http://127.0.0.1:7653>。
+脚本会检查 `env\python\python.exe` 和 `frontend\dist\index.html` 是否存在，启动后端，并打开 <http://127.0.0.1:7653>。
 
-如果需要使用其他本地端口，可以在运行脚本前设置 `PIXIVDOWNLOADER_PORT`。
+如果需要使用其他本地端口，请在运行脚本前设置 `PIXIVDOWNLOADER_PORT`。
 
 ## 运行架构
 
 ```text
 浏览器 WebUI
   -> http://127.0.0.1:7653 上的 FastAPI 后端
+  -> 工作流运行、触发器、队列、任务和 worker
   -> resources/ 中的 SQLite 数据库
   -> 配置的下载目录
 ```
 
-主要目录：
+主要目录:
 
-- `backend/`: FastAPI 接口、服务、仓储、SQLite 迁移和后台下载队列。
-- `frontend/`: React、TypeScript、Vite、Tailwind CSS 前端。
-- `auth-browser/`: Docker 下用于 Pixiv 浏览器登录的 sidecar。
-- `config/`: WebUI 配置；`settings.example.json` 可提交，`settings.json` 保存本地用户配置。
-- `resources/`: SQLite 数据库与静态资源。
+- `backend/`: FastAPI API、服务、仓库、SQLite 迁移、工作流运行器、调度器和下载 worker。
+- `frontend/`: React、TypeScript、Vite、Tailwind CSS WebUI。
+- `auth-browser/`: 可选 Docker sidecar，用于 Pixiv 浏览器登录。
+- `config/`: WebUI 配置；`settings.example.json` 提交到仓库，`settings.json` 保存本地用户配置和密钥。
+- `resources/`: SQLite 数据库、导入的 PixivDownloader-SQLite 数据库、缓存资源和静态资源。
+- `tools/`: 维护工具，例如历史配置迁移。
+- `tests/`: 后端回归测试。
 
 ## 配置迁移
 
-WebUI 默认配置来自：
+WebUI 默认配置来自:
 
 ```text
 config\settings.example.json
 ```
 
-本地用户配置和密钥保存到被忽略的文件：
+本地用户配置和密钥会保存到被忽略的文件:
 
 ```text
 config\settings.json
 ```
 
-旧版 `resources\conf\settings.json` 不会自动读取。如需显式迁移：
+旧的 `resources\conf\settings.json` 不会自动读取。如需显式迁移:
 
 ```bat
 env\python\python.exe tools\migrate_settings_to_config.py
@@ -113,20 +122,20 @@ env\python\python.exe tools\migrate_settings_to_config.py
 
 ## 开发
 
-后端开发服务：
+后端开发服务:
 
 ```bat
 env\python\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
-前端开发服务：
+前端开发服务:
 
 ```bat
 cd frontend
 npm run dev
 ```
 
-检查命令：
+检查命令:
 
 ```bat
 env\python\python.exe -m ruff format --check .
@@ -145,25 +154,28 @@ npm run build
 ## 文档
 
 - [文档入口](docs/README.md)
-- [快速开始](docs/getting-started.md)
-- [架构](docs/architecture.md)
-- [部署](docs/deployment.md)
-- [数据库](docs/database.md)
-- [开发指南](docs/development.md)
+- [Getting Started](docs/getting-started.md)
+- [Architecture](docs/architecture.md)
+- [Configuration](docs/configuration.md)
+- [API Reference](docs/api-reference.md)
+- [Deployment](docs/deployment.md)
+- [Database](docs/database.md)
+- [Development Guide](docs/development.md)
+- [Verification](docs/verification.md)
 
 ## 打包说明
 
-源码运行模式下，后端从仓库根目录解析资源：
+源码运行模式下，后端会从仓库根目录解析资源:
 
 - `config\settings.example.json`
 - `config\settings.json`
 - `resources\pixiv.sqlite3`
 - `frontend\dist`
 
-如果以后制作冻结可执行文件，应将这些资源按相同相对结构放在可执行文件旁边。后端路径解析器在冻结运行时会使用可执行文件所在目录。
+如果未来制作冻结可执行文件，应将这些资源按相同相对结构放在可执行文件旁边。后端路径解析器在冻结运行时会使用可执行文件所在目录。
 
 ## 重要声明
 
-本工具仅供个人学习、研究或数据备份使用。请遵守 Pixiv 的服务条款，不要将本工具用于批量下载或内容再分发。
+本工具仅供个人学习、研究或数据备份使用。请遵守 Pixiv 的服务条款，不要将本工具用于滥用式批量下载或内容再分发。
 
 当前测试基线、兼容性处理和依赖审计见[验证文档](docs/verification.md)与[修复交付报告](docs/repair-report.md)。远程访问请使用部署文档中的 SSH 隧道。

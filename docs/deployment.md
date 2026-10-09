@@ -1,5 +1,7 @@
 # Deployment
 
+PixivDownloader WebUI is deployed primarily with Docker Compose. Windows scripts remain available for local development or users who do not want to run Docker.
+
 The supported deployment runs one FastAPI process and one queue/scheduler against a local SQLite database. Do not use Uvicorn `--workers` or share the database between application replicas: startup recovery releases claims left by a stopped process. Downloads can run concurrently inside this process.
 
 ## Local Docker Compose
@@ -79,4 +81,31 @@ Use `docker compose config --quiet` to validate without printing resolved secret
 
 Legacy database uploads are limited to 64 MiB per file and 65 MiB including multipart framing, with bounded temporary buffering before multipart parsing. OAuth exchange requests time out after 30 seconds, sidecar API calls after 10 seconds, and sidecar callback delivery after 15 seconds. Pixiv metadata connections have connect/read timeouts of 10/30 seconds; file transfer reads time out after 60 seconds. Cancellation is cooperative and may await the current bounded network read or metadata snapshot write.
 
-Legacy `pixiv.db` import remains an explicit Settings action. No PyQt runtime is included. A future frozen executable keeps `config/`, `resources/` and `frontend/dist/` beside the executable.
+## Dockerfile
+
+1. `node:22-bookworm-slim` builds `frontend/dist`.
+2. `python:3.12-slim` installs the backend package and serves the built frontend.
+
+The image entrypoint is:
+
+```text
+python -m backend.app
+```
+
+## PixivDownloader-SQLite Database Import
+
+`pixiv.db` imports from [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite) are handled through the WebUI Settings page. The source project is not copied into the Docker image and is not part of deployment.
+
+## Packaged Executable Expectations
+
+For a future frozen executable, keep runtime resources beside the executable:
+
+```text
+release-folder/
+  PixivDownloader.exe
+  config/
+  frontend/dist/
+  resources/
+```
+
+`backend.core.paths.project_root()` uses the executable directory when `sys.frozen` is set. In source checkout mode it uses the repository root.

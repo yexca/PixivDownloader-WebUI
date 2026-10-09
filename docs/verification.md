@@ -20,6 +20,10 @@ env\python\python.exe -m pip check
 
 For an independently created venv use `.venv\Scripts\python.exe` instead. See [Development](development.md).
 
+There may be a third-party Starlette/FastAPI deprecation warning from `TestClient`.
+
+## Frontend Checks
+
 ```bat
 cd frontend
 npm ci
@@ -114,6 +118,39 @@ A live healthy `/api/health` returns HTTP 200 and:
 A stopped or faulting enabled executor returns HTTP 503. Tests that explicitly disable executors report `enabled=false` and remain healthy.
 
 Manual checks against a disposable environment should include settings errors, job progress/cancellation, filtered candidates, node selection while polling and timezone editing. Running a real Pixiv authentication/download or existing scheduled trigger requires the user's authorization. Do not use a user's runtime data for automated smoke tests.
+
+## Manual WebUI Checklist
+
+In a disposable local environment, use `run-webui.bat`, then verify:
+
+- Dashboard loads and shows recent job state.
+- Dashboard shows workflow run groups, trigger health, queue state, and library attention states.
+- Settings loads masked refresh token state.
+- Settings saves download path and request options.
+- Settings `Test Auth` reports success or a clear token failure.
+- Settings imports a `pixiv.db` from PixivDownloader-SQLite and updates Library artists.
+- Workflows can create a manual definition and run it.
+- Workflows can create a scheduled definition and pause/resume its trigger.
+- Runs opens a workflow run and shows node-run details plus linked jobs.
+- Library lists artists after jobs discover them.
+- Library filters by file state, tags, update state, account status, and stale state.
+- Artist detail opens and lists artworks/files for the selected artist.
+- Artist sync creates a workflow run from a Pixiv user ID.
+- Artwork or failed-file retry creates a workflow run and linked job.
+- Active job progress and recent events update.
+- Queue pause/resume changes job activation behavior.
+- Running or queued jobs can be cancelled.
+- Failed jobs can be retried, and previous jobs can be rerun.
+- Failed files can be retried.
+- Events page shows recent job events without exposing the refresh token.
+
+## Pixiv Network Note
+
+Do not run Pixiv network tests unless a valid local refresh token is configured and the user expects real API access.
+
+Automated regression tests should mock Pixiv and file download boundaries.
+
+PixivDownloader-SQLite verification is limited to explicit `pixiv.db` import behavior.
 
 ## Dependency Audit
 

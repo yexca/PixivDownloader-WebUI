@@ -92,7 +92,23 @@ frontend/src/api/
 
 Avoid scattering raw `fetch()` calls inside pages.
 
-Legacy PyQt compatibility is limited to explicit old `pixiv.db` import paths. Do not add PyQt runtime code or default verification requirements for the old desktop application.
+Current top-level WebUI pages are:
+
+```text
+Dashboard
+Library
+Workflows
+Artists
+Runs
+Queue
+Events
+Settings
+About
+```
+
+The route labels are owned by `frontend/src/components/AppShell.tsx`, and the browser routes are owned by `frontend/src/main.tsx`.
+
+PixivDownloader-SQLite compatibility is limited to explicit `pixiv.db` import paths. Do not add runtime code or default verification requirements for [yexca/PixivDownloader-SQLite](https://github.com/yexca/PixivDownloader-SQLite).
 
 ## Python Standards
 
