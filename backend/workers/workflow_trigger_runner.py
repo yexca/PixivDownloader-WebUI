@@ -28,6 +28,7 @@ class WorkflowTriggerRunner:
         self._stop_event = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._startup_scan = True
+        self.last_error: str | None = None
 
     async def start(self) -> None:
         if self._task is None or self._task.done():
@@ -42,20 +43,27 @@ class WorkflowTriggerRunner:
         self._stop_event.set()
         self._wake_event.set()
         if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+            await self._task
 
     def wake(self) -> None:
         self._wake_event.set()
 
+    @property
+    def healthy(self) -> bool:
+        return self._task is not None and not self._task.done() and self.last_error is None
+
     async def _run(self) -> None:
         while not self._stop_event.is_set():
             created_any = await asyncio.to_thread(self._run_due_once, self._startup_scan)
-            self._startup_scan = False
+            if self.last_error is None:
+                self._startup_scan = False
             if created_any:
                 self.queue.wake()
+            if self._stop_event.is_set():
+                break
             self._wake_event.clear()
+            if self._stop_event.is_set():
+                break
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._wake_event.wait(),
@@ -63,16 +71,19 @@ class WorkflowTriggerRunner:
                 )
 
     def _run_due_once(self, startup_scan: bool) -> bool:
-        workflow_service = WorkflowScheduleService(
-            self.db_path,
-            settings_json_path=self.settings_json_path,
-        )
+        workflow_service = None
         try:
-            _ = startup_scan
-            workflow_results = workflow_service.run_due_triggers()
-        except Exception:
+            workflow_service = WorkflowScheduleService(
+                self.db_path,
+                settings_json_path=self.settings_json_path,
+            )
+            workflow_results = workflow_service.run_due_triggers(startup_scan=startup_scan)
+            self.last_error = None
+        except Exception as exc:
+            self.last_error = type(exc).__name__
             logger.exception("workflow trigger scan failed")
             return False
         finally:
-            workflow_service.close()
+            if workflow_service is not None:
+                workflow_service.close()
         return any(result.created for result in workflow_results)

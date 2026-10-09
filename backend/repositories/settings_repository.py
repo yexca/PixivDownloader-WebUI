@@ -48,5 +48,18 @@ class SettingsRepository:
             raise DatabaseError("failed to list settings") from exc
         return {str(row["key"]): json.loads(row["value_json"]) for row in rows}
 
+    def set_many(self, values: dict[str, Any]) -> None:
+        try:
+            with self.conn:
+                self.conn.executemany(
+                    """INSERT INTO settings(key, value_json, updated_at) VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value_json = excluded.value_json,
+                        updated_at = excluded.updated_at
+                    WHERE settings.value_json != excluded.value_json""",
+                    [(key, json.dumps(value), utc_now()) for key, value in values.items()],
+                )
+        except sqlite3.Error as exc:
+            raise DatabaseError("failed to save settings") from exc
+
     def close(self) -> None:
         self.conn.close()

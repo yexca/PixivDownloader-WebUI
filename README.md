@@ -28,7 +28,13 @@ Open:
 http://127.0.0.1:7653
 ```
 
-Docker Compose also starts the `pixiv-auth-browser` sidecar and exposes noVNC:
+Both published ports bind to localhost. Browser authentication uses an optional sidecar. First create private random callback/VNC secrets in `.env` following [Deployment](docs/deployment.md#browser-authentication), then start it:
+
+```bat
+docker compose --profile auth up -d pixiv-auth-browser
+```
+
+Open noVNC and enter its VNC password:
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
@@ -42,7 +48,7 @@ Stop:
 docker compose down
 ```
 
-The compose file can build `yexca/pixivdownloader:v0.2.0`, maps `7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
+The compose file can build `yexca/pixivdownloader:v0.2.0`, maps `127.0.0.1:7653:7653`, and mounts local `config/`, `resources/`, and `downloads/` for persistence.
 
 ## Local Windows Runtime
 
@@ -128,6 +134,7 @@ env\python\python.exe -m pytest
 cd frontend
 npm run lint
 npm run typecheck
+npm run test
 npm run build
 ```
 
@@ -154,3 +161,5 @@ For a packaged executable, resources should be placed beside the executable with
 ## Disclaimer
 
 This tool is intended for personal learning, research, or backup purposes only. Use it responsibly and follow Pixiv's Terms of Service. Do not use it for mass downloading or redistribution of content.
+
+The current verification baseline and repair compatibility notes are in [Verification](docs/verification.md) and [Repair Report](docs/repair-report.md).

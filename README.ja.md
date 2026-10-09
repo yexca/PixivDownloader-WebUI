@@ -28,7 +28,13 @@ docker compose up -d
 http://127.0.0.1:7653
 ```
 
-Docker Compose は `pixiv-auth-browser` サイドカーも起動し、noVNC を公開します:
+公開ポートは localhost のみにバインドされます。ブラウザー認証には任意のサイドカーを使います。[デプロイ手順](docs/deployment.md#browser-authentication)に従って、非公開の `.env` にランダムな共有トークンと VNC パスワードを設定してから起動してください:
+
+```bat
+docker compose --profile auth up -d pixiv-auth-browser
+```
+
+noVNC を開き、VNC パスワードを入力します:
 
 ```text
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
@@ -42,7 +48,7 @@ WebUI の Settings で Pixiv サインインを開始し、noVNC ブラウザー
 docker compose down
 ```
 
-Compose ファイルは `yexca/pixivdownloader:v0.2.0` をビルドでき、`7653:7653` を公開し、永続化のためにローカルの `config/`、`resources/`、`downloads/` をマウントします。
+Compose ファイルは `yexca/pixivdownloader:v0.2.0` をビルドでき、`127.0.0.1:7653:7653` を公開し、永続化のためにローカルの `config/`、`resources/`、`downloads/` をマウントします。
 
 ## Windows ローカル実行
 
@@ -128,6 +134,7 @@ env\python\python.exe -m pytest
 cd frontend
 npm run lint
 npm run typecheck
+npm run test
 npm run build
 ```
 
@@ -154,3 +161,5 @@ npm run build
 ## 免責事項
 
 本ツールは個人的な学習、研究、バックアップ目的でのみ使用してください。Pixiv の利用規約を遵守し、大量ダウンロードやコンテンツ再配布には使用しないでください。
+
+検証結果と互換性の詳細は [Verification](docs/verification.md) と [Repair Report](docs/repair-report.md) を参照してください。リモートアクセスには SSH トンネルを利用してください。

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from backend.domain.entities import Artist
@@ -10,6 +11,7 @@ from backend.repositories.artwork_repository import ArtworkRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.services.avatar_cache_service import AvatarCacheService
 from backend.services.pixiv_client import PixivClient, PixivClientProtocol
+from backend.services.pixiv_rate_policy import raise_if_cancelled
 from backend.services.unavailable_artist_policy import confirm_unavailable_artist
 
 
@@ -45,7 +47,9 @@ class LibrarySyncService:
         *,
         source: str | None = "library_shortcut",
         full_sync: bool = False,
+        cancel_callback: Callable[[], bool] | None = None,
     ) -> LibrarySyncSummary:
+        raise_if_cancelled(cancel_callback)
         existing_artist = self.artist_repository.get_by_id(artist_id)
         now = utc_now()
         artist = self.pixiv_client.get_artist_by_user_id(artist_id)
@@ -54,18 +58,17 @@ class LibrarySyncService:
             fetched_artist=artist,
             source=source,
         )
-        artworks = (
-            []
-            if artist.account_status == "unavailable"
-            else list(
-                self.pixiv_client.get_artworks_by_user_id(
-                    artist.id,
-                    stop_at_artwork_id=None
-                    if full_sync
-                    else self.artwork_repository.max_artwork_id_by_artist(artist.id),
-                )
-            )
-        )
+        artworks = []
+        if artist.account_status != "unavailable":
+            for artwork in self.pixiv_client.get_artworks_by_user_id(
+                artist.id,
+                stop_at_artwork_id=None
+                if full_sync
+                else self.artwork_repository.max_artwork_id_by_artist(artist.id),
+            ):
+                raise_if_cancelled(cancel_callback)
+                artworks.append(artwork)
+        raise_if_cancelled(cancel_callback)
         remote_latest_artwork_id = latest_artwork_id(artworks)
         record_name_change(
             self.name_history_repository,
@@ -109,11 +112,14 @@ class LibrarySyncService:
         self.artist_repository.upsert(synced_artist)
         self.avatar_cache_service.cache_artist_avatar(synced_artist)
         file_count = 0
+        # Finish persisting the fetched snapshot before observing cancellation;
+        # interrupting this loop could make the next incremental fetch skip holes.
         for artwork in artworks:
             self.artwork_repository.upsert(artwork)
             for file in artwork.files:
                 self.file_repository.upsert_remote(file)
                 file_count += 1
+        raise_if_cancelled(cancel_callback)
         return LibrarySyncSummary(
             artist=synced_artist,
             artwork_count=len(artworks),

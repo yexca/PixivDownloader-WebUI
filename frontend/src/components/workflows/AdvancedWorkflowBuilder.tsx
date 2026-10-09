@@ -60,6 +60,7 @@ type WorkflowDraft = {
   intervalEvery: string;
   intervalUnit: IntervalUnit;
   scheduleTime: string;
+  scheduleTimezone: string;
   weeklyDays: number[];
   monthlyDay: string;
   targetScope: TargetScope;
@@ -102,6 +103,7 @@ const initialDraft: WorkflowDraft = {
   intervalEvery: "6",
   intervalUnit: "hours",
   scheduleTime: "03:00",
+  scheduleTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   weeklyDays: [1, 3, 5],
   monthlyDay: "1",
   targetScope: "selected",
@@ -434,6 +436,9 @@ function StageEditor({
                 onChange={(value) => update("saveIntent", value)}
               />
             </Field>
+            <Field label="Time zone (IANA)">
+              <Input value={draft.scheduleTimezone} onChange={(event) => update("scheduleTimezone", event.target.value)} />
+            </Field>
             <Field label="Schedule type">
               <Select value={draft.scheduleType} onChange={(event) => update("scheduleType", event.target.value as ScheduleType)} className="w-full">
                 <option value="interval">Interval</option>
@@ -703,6 +708,7 @@ function StageEditor({
       </EditorPanel>
     );
   }
+  throw new Error(`Unknown workflow stage: ${stage}`);
 }
 
 function StageButton({
@@ -1154,20 +1160,20 @@ function buildAdvancedRequest(draft: WorkflowDraft): AdvancedWorkflowRunRequest 
 
 function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
   if (draft.scheduleType === "daily") {
-    return { type: "daily", time: draft.scheduleTime || "00:00" };
+    return { type: "daily", time: draft.scheduleTime || "00:00", timezone: draft.scheduleTimezone };
   }
   if (draft.scheduleType === "weekly") {
     return {
       type: "weekly",
       days_of_week: draft.weeklyDays.length ? draft.weeklyDays : [1],
-      time: draft.scheduleTime || "00:00"
+      time: draft.scheduleTime || "00:00", timezone: draft.scheduleTimezone
     };
   }
   if (draft.scheduleType === "monthly") {
     return {
       type: "monthly",
       day: draft.monthlyDay === "last" ? "last" : Math.max(1, Number(draft.monthlyDay) || 1),
-      time: draft.scheduleTime || "00:00"
+      time: draft.scheduleTime || "00:00", timezone: draft.scheduleTimezone
     };
   }
   return {
@@ -1264,12 +1270,14 @@ function scheduleDraftFromTrigger(schedule?: Record<string, unknown>): Partial<W
   if (type === "daily") {
     return {
       scheduleType: "daily",
+      scheduleTimezone: stringOption(schedule.timezone, "UTC"),
       scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime)
     };
   }
   if (type === "weekly") {
     return {
       scheduleType: "weekly",
+      scheduleTimezone: stringOption(schedule.timezone, "UTC"),
       scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime),
       weeklyDays: numberArray(schedule.days_of_week, initialDraft.weeklyDays)
     };
@@ -1278,6 +1286,7 @@ function scheduleDraftFromTrigger(schedule?: Record<string, unknown>): Partial<W
     const day = schedule.day;
     return {
       scheduleType: "monthly",
+      scheduleTimezone: stringOption(schedule.timezone, "UTC"),
       scheduleTime: stringOption(schedule.time, initialDraft.scheduleTime),
       monthlyDay: day === "last" ? "last" : numberText(day) || initialDraft.monthlyDay
     };

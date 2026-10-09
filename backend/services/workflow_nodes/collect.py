@@ -53,6 +53,11 @@ class CollectArtworksNodeExecutor(WorkflowNodeExecutorBase):
                     workflow_run_id=node_run.workflow_run_id,
                     workflow_node_run_id=node_run.id,
                     artist_ids=artist_ids,
+                    artwork_ids=(
+                        string_list(context.values.get("input_artwork_ids"))
+                        if context.values.get("target_scope") in {"artworks", "single_artwork"}
+                        else None
+                    ),
                     source=source,
                     sort_order=sort_order,
                     limit=limit,

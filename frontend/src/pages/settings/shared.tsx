@@ -1,12 +1,12 @@
 import type React from "react";
 
-import type { PixivBrowserAuthServiceStatusResponse, SettingsResponse, SettingsUpdateRequest } from "@/api/settings";
+import type { PixivBrowserAuthServiceStatusResponse, SettingsResponse } from "@/api/settings";
 import { Input } from "@/components/ui/input";
 
 export type SettingsTab = "basic" | "pixiv" | "appearance" | "maintenance";
 
 export type BasicForm = Pick<
-  SettingsUpdateRequest,
+  SettingsResponse,
   | "download_path"
   | "request_base_delay_seconds"
   | "request_random_delay_seconds"

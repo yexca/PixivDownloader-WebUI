@@ -695,7 +695,7 @@ def test_pending_only_downloads_known_pending_files(tmp_path):
     assert file_repository.get_by_id(failed_file_id).status == "failed"
 
 
-def test_cancellation_marks_active_file_failed(tmp_path):
+def test_cancellation_preserves_pending_file(tmp_path):
     db_path = tmp_path / "pixiv.sqlite3"
     migrate_database(db_path, settings_json_path=tmp_path / "missing.json")
     repository = ArtistRepository(db_path)
@@ -703,12 +703,12 @@ def test_cancellation_marks_active_file_failed(tmp_path):
     file_repository = ArtworkFileRepository(db_path)
     pixiv_client = FakePixivClient()
     file_downloader = FakeFileDownloader(tmp_path)
-    callbacks = 0
+    cancelled = False
 
-    def cancel_after_file_selected() -> bool:
-        nonlocal callbacks
-        callbacks += 1
-        return callbacks >= 3
+    def cancel_when_file_selected(progress):
+        nonlocal cancelled
+        if not isinstance(progress, str):
+            cancelled = True
 
     service = DownloadService(
         pixiv_client=pixiv_client,
@@ -721,13 +721,17 @@ def test_cancellation_marks_active_file_failed(tmp_path):
     )
 
     with pytest.raises(JobCancelledError):
-        service.download(user_id="123", cancel_callback=cancel_after_file_selected)
+        service.download(
+            user_id="123",
+            cancel_callback=lambda: cancelled,
+            progress_callback=cancel_when_file_selected,
+        )
 
     files = [
         file
         for artwork_id in ("100", "101")
         for file in file_repository.list_by_artwork(artwork_id)
     ]
-    failed_files = [file for file in files if file.status == "failed"]
-    assert len(failed_files) == 1
-    assert failed_files[0].error_message == "Download cancelled before this file completed."
+    assert len(files) == 2
+    assert all(file.status in {"pending", "remote_only"} for file in files)
+    assert not file_downloader.calls

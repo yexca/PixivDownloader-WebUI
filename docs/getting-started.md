@@ -16,6 +16,8 @@ Open:
 http://127.0.0.1:7653
 ```
 
+Both published ports bind to localhost. Before using browser authentication, create private callback/VNC secrets as described in [Deployment](deployment.md#browser-authentication).
+
 The default Compose startup only runs the WebUI. When Pixiv browser authentication is needed, the Settings page prompts you to start the auth sidecar:
 
 ```bat

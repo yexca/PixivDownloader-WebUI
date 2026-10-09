@@ -133,9 +133,7 @@ class AvatarCacheService:
 def safe_artist_id(artist_id: str) -> str:
     return (
         "".join(
-            character
-            for character in artist_id
-            if character.isalnum() or character in {"-", "_"}
+            character for character in artist_id if character.isalnum() or character in {"-", "_"}
         )
         or "unknown"
     )

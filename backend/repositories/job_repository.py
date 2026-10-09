@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 from backend.core.errors import DatabaseError
@@ -13,6 +14,57 @@ from backend.repositories._time import utc_now
 class JobRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.conn = connect(db_path)
+
+    def create_node_job(self, job: Job, *, activation_limit: int | None = None) -> Job:
+        if job.workflow_node_run_id is None and activation_limit is None:
+            self.create(job)
+            return job
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+            row = self.conn.execute(
+                """SELECT * FROM jobs WHERE workflow_node_run_id = ? AND type = ?
+                AND input_user_id IS ? AND input_artwork_id IS ?
+                AND json_extract(options_json, '$.source_job_id') IS ?
+                ORDER BY created_at LIMIT 1""",
+                (
+                    job.workflow_node_run_id,
+                    job.type,
+                    job.input_user_id,
+                    job.input_artwork_id,
+                    job.options.get("source_job_id"),
+                ),
+            ).fetchone()
+            if row is not None:
+                self.conn.commit()
+                return job_from_row(row)
+            if activation_limit is not None and job.options.get("activation_scope") == "one_time":
+                job = replace(
+                    job,
+                    status="queued"
+                    if self.count_active_one_time() < activation_limit
+                    else "inactive",
+                )
+            self.create(job)
+            return job
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def activate_one_time(self, limit: int) -> list[Job]:
+        try:
+            self.conn.execute("BEGIN IMMEDIATE")
+            capacity = max(0, limit - self.count_active_one_time())
+            activated = []
+            for job in self.list_inactive_one_time(limit=capacity):
+                self.conn.execute(
+                    "UPDATE jobs SET status='queued' WHERE id=? AND status='inactive'", (job.id,)
+                )
+                activated.append(replace(job, status="queued"))
+            self.conn.commit()
+            return activated
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def create(self, job: Job) -> None:
         created_at = job.created_at or utc_now()
@@ -81,13 +133,14 @@ class JobRepository:
                 self.conn.execute(
                     """
                     UPDATE jobs
-                    SET status = ?,
+                    SET status = CASE WHEN cancel_requested = 1 AND ? = 'completed'
+                                      THEN 'cancelled' ELSE ? END,
                         artist_id = ?,
                         total_files = ?,
                         completed_files = ?,
                         skipped_files = ?,
                         failed_files = ?,
-                        cancel_requested = ?,
+                        cancel_requested = MAX(cancel_requested, ?),
                         error_message = ?,
                         workflow_run_id = ?,
                         workflow_node_run_id = ?,
@@ -97,6 +150,7 @@ class JobRepository:
                     WHERE id = ?
                     """,
                     (
+                        job.status,
                         job.status,
                         job.artist_id,
                         job.total_files,

@@ -34,6 +34,7 @@ from backend.core.errors import (
     PixivAuthError,
 )
 from backend.core.paths import project_root
+from backend.core.request_limits import LegacyUploadLimit
 from backend.db.migrate import migrate_database
 from backend.schemas.failure_reasons import failure_detail
 from backend.services.pixiv_browser_auth import PixivBrowserAuthStore
@@ -74,7 +75,9 @@ def create_app(
                 await queue.stop()
 
     app = FastAPI(title="PixivDownloader API", version="0.2.0", lifespan=lifespan)
+    app.add_middleware(LegacyUploadLimit)
     app.state.db_path = Path(db_path) if db_path is not None else None
+    app.state.executors_enabled = start_queue
     app.state.settings_json_path = (
         Path(settings_json_path) if settings_json_path is not None else None
     )
@@ -133,7 +136,12 @@ def register_exception_handlers(app: FastAPI) -> None:
             "validation_error",
             "Request validation failed.",
             status_code=422,
-            details={"errors": exc.errors()},
+            details={
+                "errors": [
+                    {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+                    for error in exc.errors()
+                ]
+            },
         )
 
     @app.exception_handler(ConfigError)

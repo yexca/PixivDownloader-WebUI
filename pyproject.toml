@@ -12,6 +12,7 @@ dependencies = [
     "requests",
     "PyYAML",
     "uvicorn",
+    "tzdata",
 ]
 
 [project.optional-dependencies]

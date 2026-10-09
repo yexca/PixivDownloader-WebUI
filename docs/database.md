@@ -118,8 +118,7 @@ jobs.workflow_node_run_id -> workflow_node_runs.id
 jobs.workflow_source      -> workflow source label
 ```
 
-The canonical node-to-job link is `workflow_node_runs.job_ids_json`.
-`jobs.workflow_node_run_id` is a direct lookup aid for jobs created by a node.
+Node job IDs are persisted in `workflow_node_runs.job_ids_json`; recovery also checks `jobs.workflow_node_run_id` so it can reconnect a job created just before an interrupted node update. Creation uses a SQLite write transaction to reuse a node/target job on retry.
 
 Workflow definitions and triggers store reusable workflow configs and their
 schedule rules. A due trigger creates a workflow run; the run then progresses
@@ -144,6 +143,7 @@ completed
 failed
 partial
 skipped
+cancelled
 ```
 
 Workflow run status is derived from node runs. A run remains `running` while any
@@ -159,6 +159,16 @@ downloaded
 skipped
 failed
 ```
+
+## Integrity Upgrade (022–023)
+
+Migration SQL and its version record now execute in one explicit transaction; a mid-script failure rolls back both. Existing migration scripts remain unchanged.
+
+022 adds execution and scheduler claims. These serialize competing progression calls and schedule scans; recovery releases abandoned claims before starting the single application process. GET endpoints only read state. The queue progresses workflows independently of browser polling. Failed/cancelled/partial predecessor nodes terminate pending descendants as skipped, with completion timestamps.
+
+023 repairs generated `scheduled-task:*` definitions produced by 017, using their preserved compatibility snapshot. Sync-only actions stay sync-only, retry actions select failed pages, and targets, filters and download options are recompiled with their original intent. Trigger status, next execution time and success/error history are preserved; the migration creates no jobs and does not execute a workflow. Definitions edited after 017 are left untouched and require a deliberate review; it is unsafe to overwrite a user's later workflow design from its old snapshot.
+
+No migration deletes user downloads or resets historic watermarks. Already present incomplete records below a historic watermark are accessible through pending/failed collection. New download progress advances the watermark only across a complete prefix of the known library.
 
 ## Adding A Migration
 

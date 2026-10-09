@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from backend.core.config import ExistingFileBehavior
-from backend.domain.entities import Artist, ArtworkFile
+from backend.core.errors import JobCancelledError
+from backend.domain.entities import ArtworkFile, DownloadProgress
 from backend.repositories._time import utc_now
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.file_repository import ArtworkFileRepository
 from backend.repositories.workflow_candidate_repository import WorkflowCandidateRepository
-from backend.services.download_service import artwork_id_from_url, render_naming_rule
+from backend.services.download_service import (
+    DownloadOptions,
+    matching_tag_variant,
+    render_naming_rule,
+)
 from backend.services.file_downloader import FileDownloader
+from backend.services.pixiv_rate_policy import raise_if_cancelled
 
 
 @dataclass(frozen=True)
@@ -41,30 +48,54 @@ class CandidateDownloadService:
         candidate_set_id: str,
         artist_id: str | None = None,
         naming_rule: str | None = None,
+        candidate_source: str | None = None,
+        options: DownloadOptions | None = None,
+        cancel_callback: Callable[[], bool] | None = None,
+        progress_callback: Callable[[DownloadProgress], None] | None = None,
     ) -> CandidateDownloadSummary:
-        source = self._candidate_source(candidate_set_id)
+        source = candidate_source or self._candidate_source(candidate_set_id)
+        options = options or DownloadOptions()
         artworks = self.candidate_repository.list_artworks(
             candidate_set_id,
             artist_id=artist_id,
         )
-        downloaded_files = 0
-        skipped_files = 0
-        failed_files = 0
-        total_files = 0
-        latest_download_id_by_artist: dict[str, int] = {}
-        touched_artist_ids: list[str] = []
+        selected = []
         for artwork in artworks:
+            raise_if_cancelled(cancel_callback)
             artist = self.artist_repository.get_by_id(artwork.artist_id)
             if artist is None:
                 continue
-            if artist.id not in touched_artist_ids:
-                touched_artist_ids.append(artist.id)
+            if options.only_new_artworks and int(artwork.id) <= int(artist.last_download_id or 0):
+                continue
             files = self.candidate_repository.list_files_for_artwork(
                 artwork.id,
                 candidate_source=source,
             )
-            total_files += len(files)
+            selected.append((artist, artwork, files))
+        downloaded_files = 0
+        skipped_files = 0
+        failed_files = 0
+        total_files = sum(len(files) for _, _, files in selected)
+        touched_artist_ids: list[str] = []
+        for artist, artwork, files in selected:
+            raise_if_cancelled(cancel_callback)
+            if artist.id not in touched_artist_ids:
+                touched_artist_ids.append(artist.id)
             for file in files:
+                raise_if_cancelled(cancel_callback)
+                behavior = matching_tag_variant(artwork, options).get("behavior", "download")
+                if behavior == "skip" or (behavior == "retry_failed" and file.status != "failed"):
+                    skipped_files += 1
+                    if behavior == "skip":
+                        self.file_repository.update_status(file.id or 0, status="skipped")
+                    self._progress(
+                        progress_callback,
+                        total_files,
+                        downloaded_files,
+                        skipped_files,
+                        failed_files,
+                    )
+                    continue
                 try:
                     self.file_repository.update_status(
                         file.id or 0,
@@ -76,16 +107,37 @@ class CandidateDownloadService:
                         artist=artist,
                         artwork=artwork,
                         file=file,
+                        variants=options.naming_tag_variants,
+                        tag_variants=options.tag_variants,
+                    )
+                    extra = (
+                        {
+                            "cancel_callback": cancel_callback,
+                            "retry_incomplete": file.status in {"failed", "downloading"},
+                        }
+                        if isinstance(self.file_downloader, FileDownloader)
+                        else {}
                     )
                     result = self.file_downloader.download(
                         artist.name,
                         artist.id,
                         file.original_url,
                         relative_path=relative_path,
+                        **extra,
                     )
+                except JobCancelledError:
+                    self.file_repository.update_status(file.id or 0, status=file.status)
+                    raise
                 except Exception as exc:
                     failed_files += 1
                     self._mark_failed(file, str(exc))
+                    self._progress(
+                        progress_callback,
+                        total_files,
+                        downloaded_files,
+                        skipped_files,
+                        failed_files,
+                    )
                     continue
                 if result.skipped:
                     skipped_files += 1
@@ -93,15 +145,14 @@ class CandidateDownloadService:
                 else:
                     downloaded_files += 1
                     self._mark_downloaded(file, result.local_path, result.size_bytes)
-                current_id = artwork_id_from_url(file.original_url)
-                previous_id = latest_download_id_by_artist.get(
-                    artist.id,
-                    int(artist.last_download_id or 0),
+                self.artist_repository.advance_download_cursor(artist.id)
+                self._progress(
+                    progress_callback, total_files, downloaded_files, skipped_files, failed_files
                 )
-                if current_id > previous_id:
-                    latest_download_id_by_artist[artist.id] = current_id
 
-        self._update_artist_cursors(latest_download_id_by_artist)
+        for touched_id in touched_artist_ids:
+            self.artist_repository.advance_download_cursor(touched_id)
+        raise_if_cancelled(cancel_callback)
         return CandidateDownloadSummary(
             total_files=total_files,
             downloaded_files=downloaded_files,
@@ -114,7 +165,9 @@ class CandidateDownloadService:
         candidate_set = self.candidate_repository.get_candidate_set(candidate_set_id)
         if candidate_set is None:
             raise ValueError(f"candidate set not found: {candidate_set_id}")
-        config_source = candidate_set.config.get("collect_mode")
+        config_source = candidate_set.config.get("candidate_source") or candidate_set.config.get(
+            "collect_mode"
+        )
         return str(config_source or candidate_set.source)
 
     def _mark_downloaded(
@@ -141,18 +194,11 @@ class CandidateDownloadService:
             return
         self.file_repository.update_status(file.id, status="failed", error_message=message)
 
-    def _update_artist_cursors(self, latest_download_id_by_artist: dict[str, int]) -> None:
-        for artist_id, latest_download_id in latest_download_id_by_artist.items():
-            artist = self.artist_repository.get_by_id(artist_id)
-            if artist is None:
-                continue
-            self.artist_repository.upsert(
-                Artist(
-                    **{
-                        **artist.__dict__,
-                        "last_download_id": str(latest_download_id),
-                    }
-                )
+    @staticmethod
+    def _progress(callback, total, downloaded, skipped, failed) -> None:
+        if callback is not None:
+            callback(
+                DownloadProgress("Downloading candidate files", total, downloaded, skipped, failed)
             )
 
 

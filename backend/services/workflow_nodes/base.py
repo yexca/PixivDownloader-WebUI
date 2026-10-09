@@ -30,16 +30,14 @@ class WorkflowNodeExecutor(Protocol):
         node_run: WorkflowNodeRun,
         config: dict[str, object],
         context: WorkflowNodeContext,
-    ) -> WorkflowNodeResult:
-        ...
+    ) -> WorkflowNodeResult: ...
 
     def complete_from_jobs(
         self,
         node_run: WorkflowNodeRun,
         jobs: list[Job],
         context: WorkflowNodeContext,
-    ) -> WorkflowNodeResult:
-        ...
+    ) -> WorkflowNodeResult: ...
 
 
 class WorkflowNodeExecutorBase:

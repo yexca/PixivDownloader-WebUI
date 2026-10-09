@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
@@ -37,6 +38,7 @@ from backend.services.pixiv_client import PixivClient, PixivClientProtocol
 from backend.services.pixiv_rate_policy import (
     file_download_request_policy,
     metadata_request_policy,
+    raise_if_cancelled,
 )
 from backend.services.settings_service import AppSettingsService
 
@@ -68,6 +70,8 @@ class DownloadWorker:
         file_downloader_factory: FileDownloaderFactory | None = None,
     ) -> None:
         self.db_path = db_path
+        self.stop_event = threading.Event()
+        self._local = threading.local()
         self.settings_json_path = settings_json_path
         self.pixiv_client_factory = pixiv_client_factory or self._create_pixiv_client
         self._custom_file_downloader_factory = file_downloader_factory is not None
@@ -75,6 +79,7 @@ class DownloadWorker:
 
     def run_job(self, job_id: str) -> Job:
         repository = JobRepository(self.db_path)
+        self._local.cancel_callback = lambda: self._is_cancel_requested(repository, job_id)
         result: Job | None = None
         try:
             job = repository.get_by_id(job_id)
@@ -113,8 +118,10 @@ class DownloadWorker:
                 sleeper=lambda: None,
             )
             options = DownloadOptions(
-                force_rescan=job.type == "rescan_artist",
-                retry_failed=job.type in {"retry_failed", "retry_failed_artist"},
+                force_rescan=job.type == "rescan_artist"
+                or bool(job.options.get("force_rescan", False)),
+                retry_failed=job.type in {"retry_failed", "retry_failed_artist"}
+                or job.options.get("job_action") == "retry",
                 full_download=bool(job.options.get("full_download", False)),
                 pending_only=bool(job.options.get("pending_only", False)),
                 source=job_source(job),
@@ -133,20 +140,36 @@ class DownloadWorker:
                     legacy_action=job.options.get("tag_variant_action"),
                 ),
             )
-            summary = service.download(
-                user_id=job.input_user_id,
-                artwork_id=job.input_artwork_id,
-                options=options,
-                progress_callback=lambda progress: self._record_progress(
-                    repository,
-                    job.id,
-                    progress,
-                ),
-                cancel_callback=lambda: self._is_cancel_requested(repository, job.id),
-            )
+            try:
+                summary = service.download(
+                    user_id=job.input_user_id,
+                    artwork_id=job.input_artwork_id,
+                    options=options,
+                    progress_callback=lambda progress: self._record_progress(
+                        repository,
+                        job.id,
+                        progress,
+                    ),
+                    cancel_callback=lambda: self._is_cancel_requested(repository, job.id),
+                )
+            finally:
+                service.close()
             finished = replace(
                 repository.get_by_id(job.id) or job,
-                status="completed",
+                status="failed" if summary.failed_files else "completed",
+                error_message=f"{summary.failed_files} file(s) failed"
+                if summary.failed_files
+                else None,
+                options={
+                    **job.options,
+                    "error_code": "download_error" if summary.failed_files else None,
+                    "error_retryable": bool(summary.failed_files),
+                    "result": "partial"
+                    if summary.failed_files and (summary.downloaded_files or summary.skipped_files)
+                    else "failed"
+                    if summary.failed_files
+                    else "completed",
+                },
                 artist_id=summary.artist.id,
                 total_files=summary.total_files,
                 completed_files=summary.downloaded_files,
@@ -154,8 +177,15 @@ class DownloadWorker:
                 failed_files=summary.failed_files,
                 finished_at=utc_now(),
             )
+            repository.update_options(job.id, finished.options)
             repository.update(finished)
-            repository.add_event(JobEvent(job_id=job.id, level="info", message="Job completed"))
+            repository.add_event(
+                JobEvent(
+                    job_id=job.id,
+                    level="error" if summary.failed_files else "info",
+                    message="Job failed" if summary.failed_files else "Job completed",
+                )
+            )
             result = repository.get_by_id(job.id) or finished
             return result
         except JobCancelledError:
@@ -362,8 +392,22 @@ class DownloadWorker:
         try:
             summary = service.download(
                 candidate_set_id=candidate_set_id,
+                candidate_source=string_option(job.options.get("candidate_source")),
                 artist_id=job.input_user_id if job.type == "download_candidate_artist" else None,
                 naming_rule=string_option(job.options.get("naming_rule")),
+                options=DownloadOptions(
+                    only_new_artworks=bool(job.options.get("only_new_artworks", False)),
+                    naming_tag_variants=tuple_dict_option(job.options.get("naming_tag_variants")),
+                    tag_variants=tuple_tag_variant_option(
+                        job.options.get("tag_variants"),
+                        legacy_variants=job.options.get("naming_tag_variants"),
+                        legacy_action=job.options.get("tag_variant_action"),
+                    ),
+                ),
+                cancel_callback=lambda: self._is_cancel_requested(repository, job.id),
+                progress_callback=lambda progress: self._record_progress(
+                    repository, job.id, progress
+                ),
             )
         finally:
             candidate_repository.close()
@@ -372,14 +416,28 @@ class DownloadWorker:
         latest = repository.get_by_id(job.id) or job
         finished = replace(
             latest,
-            status="completed",
+            status="failed" if summary.failed_files else "completed",
             artist_id=job.input_user_id,
             total_files=summary.total_files,
             completed_files=summary.downloaded_files,
             skipped_files=summary.skipped_files,
             failed_files=summary.failed_files,
             finished_at=utc_now(),
+            error_message=(
+                f"{summary.failed_files} candidate file(s) failed" if summary.failed_files else None
+            ),
+            options={
+                **latest.options,
+                "error_code": "download_error" if summary.failed_files else None,
+                "error_retryable": bool(summary.failed_files),
+                "result": "partial"
+                if summary.failed_files and (summary.downloaded_files or summary.skipped_files)
+                else "failed"
+                if summary.failed_files
+                else "completed",
+            },
         )
+        repository.update_options(job.id, finished.options)
         repository.update(finished)
         repository.add_event(
             JobEvent(
@@ -441,6 +499,7 @@ class DownloadWorker:
         resolved_artist_ids = list(artist_ids)
         resolved_from_artworks: list[dict[str, str]] = []
         for artwork_id in artwork_ids:
+            raise_if_cancelled(getattr(self._local, "cancel_callback", None))
             artist = pixiv_client.get_artist_by_artwork_id(artwork_id)
             resolved_artist_ids.append(artist.id)
             resolved_from_artworks.append(
@@ -467,6 +526,7 @@ class DownloadWorker:
             jobs: list[Job] = []
             workflow_link = workflow_link_from_job(source_job)
             for artist_id in artist_ids:
+                raise_if_cancelled(getattr(self._local, "cancel_callback", None))
                 for action in actions:
                     job = service.create_download_job(
                         user_id=artist_id,
@@ -563,6 +623,7 @@ class DownloadWorker:
                 job.input_user_id,
                 source=job_source(job),
                 full_sync=bool(job.options.get("full_sync", False)),
+                cancel_callback=lambda: self._is_cancel_requested(repository, job.id),
             )
         finally:
             service.close()
@@ -667,7 +728,7 @@ class DownloadWorker:
 
     def _is_cancel_requested(self, repository: JobRepository, job_id: str) -> bool:
         job = repository.get_by_id(job_id)
-        return job.cancel_requested if job is not None else True
+        return self.stop_event.is_set() or (job.cancel_requested if job is not None else True)
 
     def _create_pixiv_client(self) -> PixivClient:
         settings_service = AppSettingsService(
@@ -683,6 +744,7 @@ class DownloadWorker:
             request_policy=metadata_request_policy(
                 min_interval_seconds=settings.request_base_delay_seconds,
                 random_delay_seconds=settings.request_random_delay_seconds,
+                cancel_callback=getattr(self._local, "cancel_callback", None),
             ),
         )
 
@@ -719,7 +781,9 @@ class DownloadWorker:
             settings.download_path,
             existing_file_behavior=existing_file_behavior_from_conflict_mode(
                 job.options.get("conflict_mode")
-            ),
+            )
+            if job.options.get("conflict_mode") is not None
+            else settings.existing_file_behavior,
             request_policy=file_download_request_policy(
                 min_interval_seconds=settings.file_download_base_delay_seconds,
                 random_delay_seconds=settings.file_download_random_delay_seconds,

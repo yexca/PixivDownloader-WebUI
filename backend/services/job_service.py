@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -71,13 +71,15 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
                 level="info",
                 message=(
-                    "Job queued" if status == "queued" else "Job waiting for one-time task capacity"
+                    "Job queued"
+                    if job.status == "queued"
+                    else "Job waiting for one-time task capacity"
                 ),
                 payload={
                     "force_rescan": force_rescan,
@@ -120,7 +122,7 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
@@ -171,7 +173,7 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
@@ -208,7 +210,7 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
@@ -255,7 +257,7 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
@@ -300,7 +302,7 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,
@@ -339,7 +341,9 @@ class JobService:
         return self._create_from_source(
             source,
             action="retry",
-            options=source.options,
+            options={**source.options, "candidate_source": "failed_files"}
+            if source.type in {"download_candidate_artist", "download_candidate_set"}
+            else source.options,
             workflow_link=workflow_link,
         )
 
@@ -368,25 +372,8 @@ class JobService:
         if job.status in TERMINAL_STATUSES:
             raise JobNotCancellableError(f"job {job_id} is already {job.status}")
         if job.status in {"inactive", "queued"}:
-            cancelled = Job(
-                id=job.id,
-                type=job.type,
-                status="cancelled",
-                input_user_id=job.input_user_id,
-                input_artwork_id=job.input_artwork_id,
-                options=job.options,
-                workflow_run_id=job.workflow_run_id,
-                workflow_source=job.workflow_source,
-                artist_id=job.artist_id,
-                total_files=job.total_files,
-                completed_files=job.completed_files,
-                skipped_files=job.skipped_files,
-                failed_files=job.failed_files,
-                cancel_requested=True,
-                error_message=job.error_message,
-                created_at=job.created_at,
-                started_at=job.started_at,
-                finished_at=utc_now(),
+            cancelled = replace(
+                job, status="cancelled", cancel_requested=True, finished_at=utc_now()
             )
             self.repository.update(cancelled)
             self.repository.add_event(
@@ -422,36 +409,11 @@ class JobService:
         self.repository.close()
 
     def activate_inactive_one_time_jobs(self) -> list[Job]:
-        capacity = self._one_time_activation_capacity()
-        if capacity <= 0:
-            return []
-        activated: list[Job] = []
-        for job in self.repository.list_inactive_one_time(limit=capacity):
-            updated = Job(
-                id=job.id,
-                type=job.type,
-                status="queued",
-                input_user_id=job.input_user_id,
-                input_artwork_id=job.input_artwork_id,
-                options=job.options,
-                workflow_run_id=job.workflow_run_id,
-                workflow_source=job.workflow_source,
-                artist_id=job.artist_id,
-                total_files=job.total_files,
-                completed_files=job.completed_files,
-                skipped_files=job.skipped_files,
-                failed_files=job.failed_files,
-                cancel_requested=job.cancel_requested,
-                error_message=job.error_message,
-                created_at=job.created_at,
-                started_at=job.started_at,
-                finished_at=job.finished_at,
-            )
-            self.repository.update(updated)
+        activated = self.repository.activate_one_time(self._max_active_run_jobs())
+        for job in activated:
             self.repository.add_event(
                 JobEvent(job_id=job.id, level="info", message="Job activated")
             )
-            activated.append(self.repository.get_by_id(job.id) or updated)
         return activated
 
     def requeue_interrupted_running_jobs(self) -> list[Job]:
@@ -535,7 +497,7 @@ class JobService:
             workflow_node_run_id=link.node_run_id,
             workflow_source=link.source,
         )
-        self.repository.create(job)
+        job = self.repository.create_node_job(job, activation_limit=self._max_active_run_jobs())
         self.repository.add_event(
             JobEvent(
                 job_id=job.id,

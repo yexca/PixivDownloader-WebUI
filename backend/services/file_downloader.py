@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
+import tempfile
+import threading
+from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -8,7 +13,7 @@ from typing import Protocol
 import requests
 
 from backend.core.config import ExistingFileBehavior, SettingsService
-from backend.core.errors import DownloadError
+from backend.core.errors import DownloadError, JobCancelledError
 from backend.services.pixiv_rate_policy import PixivRequestPolicy, file_download_request_policy
 
 
@@ -39,6 +44,9 @@ class FileDownloadResult:
 
 
 class FileDownloader:
+    # Serialize path allocation and replacement, including save_duplicate.
+    _path_locks = tuple(threading.RLock() for _ in range(64))
+
     def __init__(
         self,
         download_path: Path | str | None = None,
@@ -76,7 +84,42 @@ class FileDownloader:
         url: str,
         *,
         relative_path: str | None = None,
+        cancel_callback: Callable[[], bool] | None = None,
+        retry_incomplete: bool = False,
     ) -> FileDownloadResult:
+        path = (
+            safe_download_path(self.download_path, relative_path)
+            if relative_path
+            else self.download_path
+            / f"{clean_path(artist_name)} - {artist_id}"
+            / url.split("/")[-1]
+        )
+        lock = self._path_locks[hash(str(path.resolve()).casefold()) % 64]
+        while not lock.acquire(timeout=0.2):
+            check_cancel(cancel_callback)
+        try:
+            return self._download(
+                artist_name,
+                artist_id,
+                url,
+                relative_path=relative_path,
+                cancel_callback=cancel_callback,
+                retry_incomplete=retry_incomplete,
+            )
+        finally:
+            lock.release()
+
+    def _download(
+        self,
+        artist_name: str,
+        artist_id: str,
+        url: str,
+        *,
+        relative_path: str | None,
+        cancel_callback: Callable[[], bool] | None,
+        retry_incomplete: bool,
+    ) -> FileDownloadResult:
+        check_cancel(cancel_callback)
         if relative_path:
             local_path = safe_download_path(self.download_path, relative_path)
             file_name = local_path.name
@@ -90,7 +133,7 @@ class FileDownloader:
         except OSError as exc:
             raise DownloadError(f"download path is not writable: {parent_dir}") from exc
 
-        if self.existing_file_behavior == "skip" and local_path.exists():
+        if self.existing_file_behavior == "skip" and local_path.exists() and not retry_incomplete:
             return FileDownloadResult(
                 url=url,
                 file_name=file_name,
@@ -98,7 +141,7 @@ class FileDownloader:
                 size_bytes=local_path.stat().st_size,
                 skipped=True,
             )
-        if self.existing_file_behavior == "save_duplicate":
+        if self.existing_file_behavior == "save_duplicate" and not retry_incomplete:
             local_path = unique_download_path(local_path)
             file_name = local_path.name
 
@@ -110,18 +153,40 @@ class FileDownloader:
             ),
         }
 
+        response = None
+        temporary_path = None
         try:
-            response = self._get(url, headers=headers)
+            response = self._get(url, headers=headers, cancel_callback=cancel_callback)
             size_bytes = 0
-            with local_path.open("wb") as file:
+            with tempfile.NamedTemporaryFile(
+                mode="wb", dir=parent_dir, prefix=f".{file_name}.", suffix=".part", delete=False
+            ) as file:
+                temporary_path = Path(file.name)
                 for chunk in response.iter_content(chunk_size=8192):
+                    check_cancel(cancel_callback)
                     if chunk:
                         file.write(chunk)
                         size_bytes += len(chunk)
+                file.flush()
+                os.fsync(file.fileno())
+            check_cancel(cancel_callback)
+            length = getattr(response, "headers", {}).get("Content-Length")
+            if size_bytes == 0 or (length is not None and size_bytes != int(length)):
+                raise DownloadError(f"incomplete response for {url}")
+            temporary_path.replace(local_path)
         except requests.exceptions.RequestException as exc:
             raise DownloadError(f"failed to download {url}") from exc
         except OSError as exc:
             raise DownloadError(f"failed to write {local_path}") from exc
+        finally:
+            if response is not None:
+                close = getattr(response, "close", None)
+                if close is not None:
+                    with suppress(Exception):
+                        close()
+            if temporary_path is not None:
+                with suppress(FileNotFoundError):
+                    temporary_path.unlink()
 
         return FileDownloadResult(
             url=url,
@@ -130,15 +195,32 @@ class FileDownloader:
             size_bytes=size_bytes,
         )
 
-    def _get(self, url: str, *, headers: dict[str, str]) -> HttpResponse:
+    def _get(
+        self,
+        url: str,
+        *,
+        headers: dict[str, str],
+        cancel_callback: Callable[[], bool] | None = None,
+    ) -> HttpResponse:
         def request() -> HttpResponse:
             response = self.http_client.get(url, headers=headers, stream=True, timeout=60)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except Exception:
+                close = getattr(response, "close", None)
+                if close is not None:
+                    close()
+                raise
             return response
 
         if self.request_policy is None:
             return request()
-        return self.request_policy.run("file download", request)
+        return self.request_policy.run("file download", request, cancel_callback=cancel_callback)
+
+
+def check_cancel(callback: Callable[[], bool] | None) -> None:
+    if callback is not None and callback():
+        raise JobCancelledError("Job cancelled")
 
 
 def clean_path(path: str) -> str:

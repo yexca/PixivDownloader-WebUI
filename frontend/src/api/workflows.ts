@@ -8,7 +8,7 @@ export type WorkflowNodeRun = {
   node_type: string;
   title: string;
   position: number;
-  status: "pending" | "completed" | "failed" | "skipped" | "running";
+  status: "pending" | "completed" | "failed" | "skipped" | "running" | "partial" | "cancelled";
   input: Record<string, unknown>;
   output: Record<string, unknown>;
   job_ids: string[];
@@ -23,7 +23,7 @@ export type WorkflowNodeRun = {
 export type WorkflowRun = {
   id: string;
   name: string;
-  status: "running" | "completed" | "failed" | "partial" | "skipped";
+  status: "running" | "completed" | "failed" | "partial" | "skipped" | "cancelled";
   total: number;
   completed: number;
   failed: number;
@@ -65,9 +65,9 @@ export type AdvancedWorkflowRunRequest = {
 
 export type WorkflowScheduleRule =
   | { type: "interval"; every: number; unit: "minutes" | "hours" | "days" }
-  | { type: "daily"; time: string }
-  | { type: "weekly"; days_of_week: number[]; time: string }
-  | { type: "monthly"; day: number | "last"; time: string };
+  | { type: "daily"; time: string; timezone?: string }
+  | { type: "weekly"; days_of_week: number[]; time: string; timezone?: string }
+  | { type: "monthly"; day: number | "last"; time: string; timezone?: string };
 
 export type WorkflowTrigger = {
   id: number;

@@ -96,6 +96,7 @@ class DownloadService:
             user_id=user_id,
             artwork_id=artwork_id,
             options=resolved_options,
+            cancel_callback=cancel_callback,
         )
         self._check_cancelled(cancel_callback)
 
@@ -131,7 +132,6 @@ class DownloadService:
         skipped_files = 0
         failed_files = 0
         total_files = len(files)
-        last_download_id = int(artist.last_download_id or 0)
         active_file: ArtworkFile | None = None
 
         try:
@@ -154,17 +154,11 @@ class DownloadService:
                 if behavior == "skip":
                     skipped_files += 1
                     self._mark_file(file, status="skipped", error_message=None)
-                    current_download_id = artwork_id_from_url(file.original_url)
-                    if last_download_id < current_download_id:
-                        last_download_id = current_download_id
+                    self.artist_repository.advance_download_cursor(artist.id)
                     active_file = None
                     continue
                 if behavior == "retry_failed" and file.status != "failed":
                     skipped_files += 1
-                    self._mark_file(file, status="skipped", error_message=None)
-                    current_download_id = artwork_id_from_url(file.original_url)
-                    if last_download_id < current_download_id:
-                        last_download_id = current_download_id
                     active_file = None
                     continue
                 current_download_id = artwork_id_from_url(file.original_url)
@@ -199,11 +193,20 @@ class DownloadService:
                         variants=resolved_options.naming_tag_variants,
                         tag_variants=resolved_options.tag_variants,
                     )
+                    extra = (
+                        {
+                            "cancel_callback": cancel_callback,
+                            "retry_incomplete": file.status in {"failed", "downloading"},
+                        }
+                        if isinstance(self.file_downloader, FileDownloader)
+                        else {}
+                    )
                     if relative_path is None:
                         result = self.file_downloader.download(
                             artist.name,
                             artist.id,
                             file.original_url,
+                            **extra,
                         )
                     else:
                         result = self.file_downloader.download(
@@ -211,7 +214,12 @@ class DownloadService:
                             artist.id,
                             file.original_url,
                             relative_path=relative_path,
+                            **extra,
                         )
+                except JobCancelledError:
+                    self._mark_file(file, status=file.status)
+                    active_file = None
+                    raise
                 except Exception as exc:
                     failed_files += 1
                     self._mark_file(file, status="failed", error_message=str(exc))
@@ -231,17 +239,22 @@ class DownloadService:
                         downloaded_at=utc_now() if not result.skipped else None,
                         error_message=None,
                     )
-                    if last_download_id < current_download_id:
-                        last_download_id = current_download_id
+                    self.artist_repository.advance_download_cursor(artist.id)
                 active_file = None
+                self._report(
+                    progress_callback,
+                    DownloadProgress(
+                        "Downloading files",
+                        total_files,
+                        downloaded_files,
+                        skipped_files,
+                        failed_files,
+                    ),
+                )
+            self._check_cancelled(cancel_callback)
         except JobCancelledError:
             if active_file is not None:
-                failed_files += 1
-                self._mark_file(
-                    active_file,
-                    status="failed",
-                    error_message="Download cancelled before this file completed.",
-                )
+                self._mark_file(active_file, status=active_file.status)
             self._report(
                 progress_callback,
                 DownloadProgress(
@@ -254,17 +267,10 @@ class DownloadService:
             )
             raise
 
-        self._report(progress_callback, "Download completed, Inserting database...")
-        latest_artist = self.artist_repository.get_by_id(artist.id) or artist
-        updated_artist = Artist(
-            **{
-                **latest_artist.__dict__,
-                "last_download_id": str(last_download_id),
-            }
-        )
-        self.artist_repository.upsert(updated_artist)
+        self.artist_repository.advance_download_cursor(artist.id)
+        updated_artist = self.artist_repository.get_by_id(artist.id) or artist
+        last_download_id = updated_artist.last_download_id or "0"
         self.avatar_cache_service.cache_artist_avatar(updated_artist)
-        self._report(progress_callback, "Inserted database")
 
         return DownloadSummary(
             artist=artist,
@@ -281,7 +287,9 @@ class DownloadService:
         user_id: str | None,
         artwork_id: str | None,
         options: DownloadOptions,
+        cancel_callback: CancelCallback | None = None,
     ) -> Artist:
+        self._check_cancelled(cancel_callback)
         resolved_artist_id = user_id
         if resolved_artist_id is None:
             if artwork_id is None:
@@ -299,6 +307,7 @@ class DownloadService:
             resolved_artist_id,
             source=options.source,
             full_sync=options.full_download or options.force_rescan,
+            cancel_callback=cancel_callback,
         )
         return summary.artist
 

@@ -19,3 +19,7 @@ config/settings.json
 # CodeGraph local indexes
 .codegraph/
 .codegraph-*/
+
+.venv/
+.env
+*.tsbuildinfo

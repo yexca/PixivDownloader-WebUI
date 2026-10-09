@@ -6,7 +6,7 @@ services:
     image: yexca/pixivdownloader:v0.2.0
     container_name: pixivdownloader
     ports:
-      - "7653:7653"
+      - "127.0.0.1:7653:7653"
     environment:
       PIXIVDOWNLOADER_HOST: "0.0.0.0"
       PIXIVDOWNLOADER_PORT: "7653"
@@ -14,7 +14,7 @@ services:
       PIXIV_AUTH_BROWSER_INTERNAL_URL: "http://pixiv-auth-browser:7654"
       PIXIV_AUTH_BROWSER_PUBLIC_URL: "http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale"
       PIXIV_AUTH_BROWSER_CALLBACK_URL: "http://pixivdownloader:7653/api/settings/pixiv-auth/browser/callback"
-      PIXIV_AUTH_BROWSER_TOKEN: "pixivdownloader-local-auth-browser"
+      PIXIV_AUTH_BROWSER_TOKEN: "${PIXIV_AUTH_BROWSER_TOKEN:-}"
     volumes:
       - ./config:/app/config
       - ./resources:/app/resources
@@ -30,8 +30,9 @@ services:
     image: yexca/pixivdownloader-auth-browser:v0.2.0
     container_name: pixiv-auth-browser
     ports:
-      - "6080:6080"
+      - "127.0.0.1:6080:6080"
     environment:
       PIXIV_AUTH_BROWSER_PORT: "7654"
-      PIXIV_AUTH_BROWSER_TOKEN: "pixivdownloader-local-auth-browser"
+      PIXIV_AUTH_BROWSER_VNC_PASSWORD: "${PIXIV_AUTH_BROWSER_VNC_PASSWORD:-}"
+      PIXIV_AUTH_BROWSER_TOKEN: "${PIXIV_AUTH_BROWSER_TOKEN:-}"
     restart: unless-stopped

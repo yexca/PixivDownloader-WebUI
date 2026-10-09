@@ -67,9 +67,7 @@ class PixivOAuthFlowStore:
 
     def cleanup(self) -> None:
         now = datetime.now(UTC)
-        expired_ids = [
-            flow_id for flow_id, flow in self._flows.items() if flow.expires_at <= now
-        ]
+        expired_ids = [flow_id for flow_id, flow in self._flows.items() if flow.expires_at <= now]
         for flow_id in expired_ids:
             self._flows.pop(flow_id, None)
 
@@ -112,6 +110,7 @@ class PixivOAuthService:
                 "redirect_uri": REDIRECT_URI,
             },
             headers={"User-Agent": USER_AGENT},
+            timeout=30,
         )
         return _parse_token_response(response)
 
@@ -126,6 +125,7 @@ class PixivOAuthService:
                 "refresh_token": refresh_token,
             },
             headers={"User-Agent": USER_AGENT},
+            timeout=30,
         )
         return _parse_token_response(response)
 
@@ -201,10 +201,7 @@ def extract_pixiv_intermediate_auth_url(url: str) -> str | None:
 
 def is_pixiv_auth_start_url(url: str) -> bool:
     parsed = urlparse(url.strip())
-    return (
-        parsed.netloc == "app-api.pixiv.net"
-        and parsed.path == "/web/v1/users/auth/pixiv/start"
-    )
+    return parsed.netloc == "app-api.pixiv.net" and parsed.path == "/web/v1/users/auth/pixiv/start"
 
 
 def _first_query_value(query_or_text: str, key: str) -> str | None:

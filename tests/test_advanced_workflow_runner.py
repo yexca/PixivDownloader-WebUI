@@ -588,7 +588,7 @@ def test_collect_candidate_sources_separate_new_and_pending(tmp_path):
     finally:
         repository.close()
 
-    assert new_artwork_ids == ["103", "102", "101"]
+    assert new_artwork_ids == ["103", "102"]
     assert pending_artwork_ids == ["103", "102", "090"]
 
 

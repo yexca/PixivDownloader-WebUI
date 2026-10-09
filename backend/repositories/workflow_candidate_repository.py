@@ -37,6 +37,7 @@ class CollectArtworkCandidatesRequest:
     min_artwork_id: str | None = None
     max_artwork_id: str | None = None
     config: dict[str, object] = field(default_factory=dict)
+    artwork_ids: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,11 @@ class WorkflowCandidateRepository:
     ) -> FilterArtworkCandidatesResult:
         source_set = self.get_candidate_set(request.source_set_id)
         candidate_source = (
-            str(source_set.config.get("candidate_source") or source_set.config.get("collect_mode"))
+            str(
+                source_set.config.get("candidate_source")
+                or source_set.config.get("collect_mode")
+                or source_set.source
+            )
             if source_set is not None
             else "filtered_artworks"
         )
@@ -354,6 +359,11 @@ class WorkflowCandidateRepository:
             return []
         where = ["artworks.artist_id IN (" + ",".join("?" for _ in request.artist_ids) + ")"]
         params: list[object] = [*request.artist_ids]
+        if request.artwork_ids is not None:
+            if not request.artwork_ids:
+                return []
+            where.append("artworks.id IN (" + ",".join("?" for _ in request.artwork_ids) + ")")
+            params.extend(request.artwork_ids)
         self._add_source_filter(where, request.source)
         if request.min_artwork_id:
             where.append("artworks.id GLOB '[0-9]*' AND CAST(artworks.id AS INTEGER) >= ?")
@@ -427,6 +437,9 @@ class WorkflowCandidateRepository:
                 artworks.id GLOB '[0-9]*'
                 AND CAST(artworks.id AS INTEGER) >
                     CAST(COALESCE(artists.latest_downloaded_artwork_id, '0') AS INTEGER)
+                AND (NOT EXISTS (SELECT 1 FROM artwork_files WHERE artwork_id = artworks.id)
+                     OR EXISTS (SELECT 1 FROM artwork_files WHERE artwork_id = artworks.id
+                                AND status NOT IN ('downloaded', 'skipped')))
                 """
             )
             return
@@ -506,5 +519,9 @@ def file_statuses_for_candidate_source(source: str) -> tuple[str, ...] | None:
     if source == "failed_files":
         return ("failed",)
     if source in {"pending_files", "new_since_last_download"}:
-        return ("remote_only", "pending")
+        return (
+            ("remote_only", "pending", "failed", "downloading")
+            if source == "new_since_last_download"
+            else ("remote_only", "pending")
+        )
     return None

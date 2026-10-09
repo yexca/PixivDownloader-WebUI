@@ -123,7 +123,11 @@ def download_artist_definition(
                     "id": "sync",
                     "type": "sync_metadata",
                     "title": "Sync metadata",
-                    "config": {"mode": "full" if options.get("full_download") else "incremental"},
+                    "config": {
+                        "mode": "full"
+                        if options.get("full_download") or options.get("force_rescan")
+                        else "incremental"
+                    },
                 },
                 {
                     "id": "collect",
@@ -151,6 +155,7 @@ def download_artist_definition(
                     "config": {
                         "download": True,
                         "execution_unit": "artist",
+                        **options,
                         "naming_rule": options.get("naming_rule"),
                     },
                 },
@@ -170,7 +175,7 @@ def target_node(
         "type": "artist_target",
         "title": "Target artists",
         "config": {
-            "scope": "selected",
+            "scope": "artworks" if artwork_ids and not artist_ids else "selected",
             "artist_ids": artist_ids,
             "artwork_ids": artwork_ids,
             "max_artists": max_artists,
@@ -181,10 +186,10 @@ def target_node(
 def download_collect_mode(request: DownloadCreateRequest) -> str:
     if request.retry_failed:
         return "failed_files"
-    if request.full_download:
-        return "all_synced"
     if request.pending_only:
         return "pending_files"
+    if request.full_download or request.force_rescan:
+        return "all_synced"
     return "new_since_last_download"
 
 

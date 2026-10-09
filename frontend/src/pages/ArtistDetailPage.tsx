@@ -84,7 +84,7 @@ export function ArtistDetailPage(): JSX.Element {
         }
       />
       <div className="space-y-4 p-4 sm:p-6">
-        {artist.isLoading ? (
+        {artist.isPending ? (
           <DataState title="Loading artist" variant="loading" />
         ) : artist.isError ? (
           <DataState title="Could not load artist" description={artist.error.message} variant="error" />
@@ -102,7 +102,7 @@ export function ArtistDetailPage(): JSX.Element {
 
         <section className="space-y-3">
           <h2 className="text-sm font-semibold">Artworks</h2>
-          {artworks.isLoading ? (
+          {artworks.isPending ? (
             <DataState title="Loading artworks" variant="loading" />
           ) : artworks.isError ? (
             <DataState title="Could not load artworks" description={artworks.error.message} variant="error" />

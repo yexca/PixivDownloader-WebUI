@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 from datetime import UTC, datetime, timedelta
 
-from backend.domain.entities import Job
+from backend.domain.entities import Artist, Job
 from backend.repositories.artist_repository import ArtistRepository
 from backend.repositories.job_repository import JobRepository
 from backend.repositories.workflow_run_repository import WorkflowNodeRun
@@ -109,18 +109,25 @@ def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
     explicit_ids = string_list(config.get("artist_ids"))
     scope = str(config.get("scope") or "selected")
     single_artist = config.get("artist_id")
+    if scope in {"single_artwork", "artworks"} or (
+        scope == "artists" and config.get("artist_source") == "artwork_ids"
+    ):
+        return []
     if isinstance(single_artist, str) and single_artist.strip():
-        explicit_ids = [single_artist.strip(), *explicit_ids]
-    if explicit_ids and scope in {"selected", "artists", "single_artist"}:
-        return explicit_ids[: max_targets(config, len(explicit_ids))]
-    if scope == "artists":
-        return explicit_ids[: max_targets(config, len(explicit_ids))]
-    if scope not in {"all_artists", "artists_with_tag", "artists_not_checked"}:
-        return explicit_ids[: max_targets(config, len(explicit_ids))]
-
+        explicit_ids = (
+            [single_artist.strip()]
+            if scope == "single_artist"
+            else [single_artist.strip(), *explicit_ids]
+        )
     repository = ArtistRepository(db_path)
     try:
-        artists = repository.list(limit=1000)
+        if scope in {"all_artists", "artists_with_tag", "artists_not_checked"}:
+            artists = repository.list(limit=max(1, repository.count()))
+        else:
+            artists = [
+                repository.get_by_id(item) or Artist(id=item, name=item)
+                for item in dict.fromkeys(explicit_ids)
+            ]
     finally:
         repository.close()
     if scope == "artists_with_tag":
@@ -128,13 +135,17 @@ def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
         tag = config.get("tag")
         if isinstance(tag, str) and tag.strip():
             tags = [*tags, tag.strip()]
+        if not tags:
+            return []
         if tags:
             repository = ArtistRepository(db_path)
             try:
                 artists = []
                 seen: set[str] = set()
                 for item in tags:
-                    for artist in repository.list(limit=1000, local_tag=item):
+                    for artist in repository.list(
+                        limit=max(1, repository.count(local_tag=item)), local_tag=item
+                    ):
                         if artist.id in seen:
                             continue
                         artists.append(artist)
@@ -152,6 +163,13 @@ def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
             if item.get("type") == "last_checked_before_days":
                 days = positive_int(item.get("days")) or 30
                 artists = [artist for artist in artists if artist_is_stale(artist, days)]
+    if (
+        scope not in {"all_artists", "artists_with_tag", "artists_not_checked"}
+        and "artist_selection" not in config
+    ):
+        if bool(config.get("skip_unavailable_artists", True)):
+            artists = [artist for artist in artists if artist.account_status != "unavailable"]
+        return [artist.id for artist in artists[: max_targets(config, len(artists))]]
     scheduled_config = scheduled_config_for_selection(config)
     return [
         artist.id
@@ -160,10 +178,19 @@ def resolve_artist_ids(config: dict[str, object], db_path: object) -> list[str]:
 
 
 def resolve_artwork_ids(config: dict[str, object]) -> list[str]:
+    scope = str(config.get("scope") or "selected")
+    if scope not in {"selected", "single_artwork", "artworks"} and not (
+        scope == "artists" and config.get("artist_source") == "artwork_ids"
+    ):
+        return []
     artwork_ids = string_list(config.get("artwork_ids"))
     artwork_id = config.get("artwork_id")
     if isinstance(artwork_id, str) and artwork_id.strip():
-        return [artwork_id.strip(), *artwork_ids]
+        return (
+            [artwork_id.strip()]
+            if scope == "single_artwork"
+            else [artwork_id.strip(), *artwork_ids]
+        )
     return artwork_ids
 
 

@@ -19,9 +19,12 @@ Response:
 ```json
 {
   "status": "ok",
-  "version": "0.2.0"
+  "version": "0.2.0",
+  "executors": {"enabled": true, "queue": true, "scheduler": true}
 }
 ```
+
+Enabled executor faults return HTTP 503 with `status="degraded"`. Explicitly disabled executors report `enabled=false`.
 
 ## Settings
 
@@ -205,3 +208,9 @@ Common codes:
 - `job_not_cancellable`
 - `database_error`
 - `internal_error`
+
+## Execution and Validation Contracts
+
+Workflow list/detail GETs only read persisted state; background executors progress runs. Download failures propagate through job/node/run failure details, and workflow nodes may end partial or cancelled. Explicit null settings values are rejected while omitted fields are retained. Validation responses are HTTP 422 with JSON-safe `error.details.errors` entries containing `loc`, `msg` and `type`.
+
+Legacy database import accepts at most 64 MiB per file and 65 MiB for the total multipart request, returning HTTP 413 for excess input before unbounded parsing.

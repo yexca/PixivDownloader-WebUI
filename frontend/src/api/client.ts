@@ -24,7 +24,7 @@ const API_BASE = "/api";
 
 export async function apiRequest<T>(
   path: string,
-  init: RequestInit & { body?: BodyInit | object | null } = {}
+  init: Omit<RequestInit, "body"> & { body?: BodyInit | object | null } = {}
 ): Promise<T> {
   const headers = new Headers(init.headers);
   let body = init.body;
@@ -43,8 +43,14 @@ export async function apiRequest<T>(
   if (!response.ok) {
     const payload = (await safeJson(response)) as ApiErrorPayload;
     const error = payload.error;
+    const errors = error?.details?.errors;
+    const validationMessage = Array.isArray(errors)
+      ? errors.map((item: unknown) => {
+          if (typeof item !== "object" || item === null || !("msg" in item)) return "";
+          return String(item.msg);
+        }).filter(Boolean).join("; ") : "";
     throw new ApiError(
-      error?.message ?? `Request failed with status ${response.status}`,
+      validationMessage || error?.message || `Request failed with status ${response.status}`,
       error?.code ?? "request_failed",
       response.status,
       error?.details

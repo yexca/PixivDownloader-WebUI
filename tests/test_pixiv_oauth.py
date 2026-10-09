@@ -26,7 +26,8 @@ class FakeHttpClient:
         self.data = data
         self.posts = []
 
-    def post(self, url, *, data, headers):
+    def post(self, url, *, data, headers, timeout):
+        assert timeout == 30
         self.posts.append({"url": url, "data": data, "headers": headers})
         return FakeResponse(self.data)
 

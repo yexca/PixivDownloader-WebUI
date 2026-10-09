@@ -30,10 +30,17 @@ class AppSettingsService:
     def load(self) -> Settings:
         settings = self.json_settings.load()
         settings = enforce_runtime_settings(settings)
-        self._sync_repository(settings)
         return settings
 
     def update(self, values: dict[str, object]) -> Settings:
+        self.repository.conn.execute("BEGIN IMMEDIATE")
+        try:
+            return self._update_locked(values)
+        except Exception:
+            self.repository.conn.rollback()
+            raise
+
+    def _update_locked(self, values: dict[str, object]) -> Settings:
         current = self.load().to_dict()
         refresh_token_value = values.get("refresh_token", "")
         refresh_token = refresh_token_value.strip() if isinstance(refresh_token_value, str) else ""
@@ -102,9 +109,7 @@ class AppSettingsService:
         self._sync_repository(settings)
 
     def _sync_repository(self, settings: Settings) -> None:
-        values = settings.to_dict()
-        for key, value in values.items():
-            self.repository.set(key, value)
+        self.repository.set_many(settings.to_dict())
 
     def close(self) -> None:
         self.repository.close()

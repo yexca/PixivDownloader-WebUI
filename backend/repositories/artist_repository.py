@@ -44,7 +44,13 @@ class ArtistRepository:
                         profile_url = excluded.profile_url,
                         avatar_url = excluded.avatar_url,
                         comment = excluded.comment,
-                        latest_downloaded_artwork_id = excluded.latest_downloaded_artwork_id,
+                        latest_downloaded_artwork_id = CASE
+                            WHEN CAST(COALESCE(excluded.latest_downloaded_artwork_id,
+                                              '0') AS INTEGER)
+                                 > CAST(COALESCE(artists.latest_downloaded_artwork_id,
+                                                '0') AS INTEGER)
+                            THEN excluded.latest_downloaded_artwork_id
+                            ELSE artists.latest_downloaded_artwork_id END,
                         last_checked_at = excluded.last_checked_at,
                         account_status = excluded.account_status,
                         account_status_checked_at = excluded.account_status_checked_at,
@@ -81,6 +87,31 @@ class ArtistRepository:
             raise DatabaseError(f"failed to fetch artist {artist_id}") from exc
 
         return artist_from_row(row) if row is not None else None
+
+    def advance_download_cursor(self, artist_id: str) -> None:
+        # Advance only through a complete prefix of the synced library. A filter,
+        # limit, failed page or cancellation must leave the watermark below its gap.
+        with self.conn:
+            self.conn.execute(
+                """
+                UPDATE artists SET latest_downloaded_artwork_id = CAST(COALESCE((
+                    SELECT MAX(CAST(a.id AS INTEGER)) FROM artworks a
+                    WHERE a.artist_id = artists.id
+                    AND CAST(a.id AS INTEGER) > CAST(COALESCE(
+                        latest_downloaded_artwork_id,'0') AS INTEGER)
+                    AND NOT EXISTS (
+                        SELECT 1 FROM artworks gap WHERE gap.artist_id = artists.id
+                        AND CAST(gap.id AS INTEGER) > CAST(COALESCE(
+                            latest_downloaded_artwork_id,'0') AS INTEGER)
+                        AND CAST(gap.id AS INTEGER) <= CAST(a.id AS INTEGER)
+                        AND (NOT EXISTS (SELECT 1 FROM artwork_files WHERE artwork_id = gap.id)
+                             OR EXISTS (SELECT 1 FROM artwork_files WHERE artwork_id = gap.id
+                                        AND status NOT IN ('downloaded','skipped')))
+                    )
+                ), latest_downloaded_artwork_id) AS TEXT) WHERE id = ?
+                """,
+                (artist_id,),
+            )
 
     def list(
         self,

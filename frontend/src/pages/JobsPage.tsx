@@ -320,7 +320,7 @@ export function JobsPage(): JSX.Element {
               </div>
             </div>
           ) : null}
-          {jobs.isLoading ? (
+          {jobs.isPending ? (
             <DataState title="Loading jobs" variant="loading" />
           ) : jobs.isError ? (
             <DataState title="Could not load jobs" description={jobs.error.message} variant="error" />

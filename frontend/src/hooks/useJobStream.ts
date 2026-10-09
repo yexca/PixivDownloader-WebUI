@@ -18,6 +18,9 @@ export function useJobStream(jobId: string | null | undefined): UseJobStreamResu
   const lastStatusRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
+    setConnected(false);
+    setLastMessage(null);
+    lastStatusRef.current = null;
     if (!jobId) {
       return;
     }
@@ -31,11 +34,13 @@ export function useJobStream(jobId: string | null | undefined): UseJobStreamResu
       socket = new WebSocket(websocketUrl(`/jobs/${jobId}/stream`));
 
       socket.onopen = () => {
+        if (closedByHook) return;
         attempts = 0;
         setConnected(true);
       };
 
       socket.onmessage = (event) => {
+        if (closedByHook) return;
         const message = JSON.parse(event.data as string) as JobStreamMessage;
         lastStatusRef.current = message.status;
         setLastMessage(message);
@@ -51,7 +56,7 @@ export function useJobStream(jobId: string | null | undefined): UseJobStreamResu
               }
             : current
         );
-        queryClient.setQueryData<JobListResponse>(["jobs", "all", 50], (current) =>
+        queryClient.setQueriesData<JobListResponse>({ queryKey: ["jobs"] }, (current) =>
           current
             ? {
                 ...current,
@@ -78,6 +83,7 @@ export function useJobStream(jobId: string | null | undefined): UseJobStreamResu
       };
 
       socket.onclose = () => {
+        if (closedByHook) return;
         setConnected(false);
         if (!closedByHook && !terminalStatuses.has(lastStatusRef.current ?? "")) {
           attempts += 1;

@@ -1,7 +1,7 @@
 import { Save, Undo2 } from "lucide-react";
 
 import type { BasicForm } from "@/pages/settings/shared";
-import type { SettingsResponse, SettingsUpdateRequest } from "@/api/settings";
+import type { SettingsResponse } from "@/api/settings";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsActions, SettingsSection, Field, NumberField } from "@/pages/settings/shared";
@@ -65,7 +65,7 @@ export function BasicSettingsTab({
                 onClick={() =>
                   onChange({
                     ...form,
-                    existing_file_behavior: item.value as SettingsUpdateRequest["existing_file_behavior"]
+                    existing_file_behavior: item.value as SettingsResponse["existing_file_behavior"]
                   })
                 }
               >

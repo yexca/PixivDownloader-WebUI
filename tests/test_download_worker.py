@@ -301,7 +301,9 @@ def test_worker_persists_failed_file_and_job_event(tmp_path):
 
     job = worker.run_job("job-1")
 
-    assert job.status == "completed"
+    assert job.status == "failed"
+    assert job.options["error_retryable"] is True
+    assert job.options["result"] == "failed"
     assert job.failed_files == 1
     file_repository = ArtworkFileRepository(db_path)
     job_repository = JobRepository(db_path)
@@ -310,7 +312,7 @@ def test_worker_persists_failed_file_and_job_event(tmp_path):
         events = job_repository.list_events("job-1")
         assert files[0].status == "failed"
         assert files[0].error_message == "disk write failed"
-        assert any(event.message == "Job completed" for event in events)
+        assert any(event.message == "Job failed" for event in events)
     finally:
         file_repository.close()
         job_repository.close()

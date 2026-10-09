@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from dataclasses import replace
 
 import requests
 from fastapi import APIRouter, Header, status
@@ -147,8 +146,8 @@ def get_pixiv_browser_auth_status(
 def get_pixiv_browser_auth_service_status() -> PixivBrowserAuthServiceStatusResponse:
     internal_url = _auth_browser_internal_url_or_none()
     running = False
-    configured = internal_url is not None
-    if internal_url:
+    configured = internal_url is not None and bool(_auth_browser_token())
+    if configured:
         try:
             response = requests.get(f"{internal_url}/health", timeout=2)
             running = response.status_code < 400
@@ -222,8 +221,7 @@ def complete_pixiv_auth(
             flow_id=request.flow_id,
             code_or_callback_url=request.code_or_callback_url,
         )
-        settings = settings_service.load()
-        settings_service.save(replace(settings, refresh_token=token.refresh_token))
+        settings_service.update({"refresh_token": token.refresh_token})
         return {
             **settings_service.get_masked(),
             "message": "Pixiv refresh token saved.",
@@ -246,8 +244,7 @@ def _save_callback_refresh_token(
             flow_id=flow_id,
             code_or_callback_url=callback_url,
         )
-        settings = settings_service.load()
-        settings_service.save(replace(settings, refresh_token=token.refresh_token))
+        settings_service.update({"refresh_token": token.refresh_token})
     finally:
         settings_service.close()
 
@@ -277,6 +274,10 @@ def _auth_browser_token() -> str:
 
 def _start_auth_browser(*, flow_id: str, login_url: str) -> None:
     token = _auth_browser_token()
+    if not token:
+        raise ConfigError(
+            "Set a random PIXIV_AUTH_BROWSER_TOKEN before starting browser authentication."
+        )
     headers = {"X-Pixiv-Auth-Browser-Token": token} if token else {}
     try:
         response = requests.post(
@@ -297,7 +298,7 @@ def _start_auth_browser(*, flow_id: str, login_url: str) -> None:
 
 def _verify_auth_browser_token(received_token: str | None) -> None:
     expected_token = _auth_browser_token()
-    if expected_token and received_token != expected_token:
+    if not expected_token or received_token != expected_token:
         raise ConfigError("Pixiv browser authentication callback token is invalid.")
 
 
@@ -318,7 +319,7 @@ def refresh_pixiv_auth(
     try:
         settings = settings_service.load()
         token = PixivOAuthService(store=flow_store).refresh(settings.refresh_token)
-        settings_service.save(replace(settings, refresh_token=token.refresh_token))
+        settings_service.update({"refresh_token": token.refresh_token})
         return {
             **settings_service.get_masked(),
             "message": "Pixiv refresh token refreshed.",

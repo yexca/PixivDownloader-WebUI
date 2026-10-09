@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from backend.domain.types import FailureReason
 from backend.repositories.workflow_definition_repository import (
@@ -50,6 +51,36 @@ class WorkflowTriggerRequest(BaseModel):
     enabled: bool = True
     schedule: dict[str, object] = Field(default_factory=dict)
     run_now: bool = False
+
+    @field_validator("schedule")
+    @classmethod
+    def validate_schedule(cls, value: dict[str, object]) -> dict[str, object]:
+        schedule_type = value.get("type", "interval")
+        if not isinstance(schedule_type, str) or schedule_type not in {
+            "interval",
+            "daily",
+            "weekly",
+            "monthly",
+        }:
+            raise ValueError("unsupported schedule type")
+        if "timezone" in value:
+            timezone = value["timezone"]
+            if not isinstance(timezone, str) or not timezone:
+                raise ValueError("timezone must be an IANA timezone name")
+            try:
+                ZoneInfo(timezone)
+            except (ValueError, ZoneInfoNotFoundError) as exc:
+                raise ValueError("timezone must be an IANA timezone name") from exc
+        if schedule_type in {"daily", "weekly", "monthly"} and "time" in value:
+            parts = str(value["time"]).split(":")
+            if (
+                len(parts) != 2
+                or not all(len(part) == 2 and part.isdigit() for part in parts)
+                or not 0 <= int(parts[0]) <= 23
+                or not 0 <= int(parts[1]) <= 59
+            ):
+                raise ValueError("time must use HH:MM in the selected timezone")
+        return value
 
 
 class WorkflowDefinitionSaveRequest(BaseModel):
@@ -226,7 +257,7 @@ def workflow_run_failure_reason(run: WorkflowRun) -> FailureReason:
     if run.status not in {"failed", "partial"}:
         return "unknown"
     for node_run in run.node_runs:
-        if node_run.status != "failed":
+        if node_run.status not in {"failed", "partial", "cancelled"}:
             continue
         reason = classify_failure_reason(node_run.error_message, node_run.status)
         if reason != "unknown":
@@ -241,13 +272,13 @@ def workflow_run_failure_detail(
     if run.status not in {"failed", "partial", "cancelled"}:
         return None
     for node_run in node_runs:
-        if node_run.status == "failed" and node_run.failure is not None:
+        if node_run.status in {"failed", "partial", "cancelled"} and node_run.failure is not None:
             return node_run.failure
     return failure_detail(run.status, status=run.status)
 
 
 def workflow_node_failure_detail(node_run: WorkflowNodeRun) -> FailureDetail | None:
-    if node_run.status not in {"failed", "cancelled"}:
+    if node_run.status not in {"failed", "partial", "cancelled"}:
         return None
     return failure_detail(
         node_run.error_message,

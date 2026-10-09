@@ -55,9 +55,12 @@ def test_avatar_cache_ignores_missing_or_invalid_avatar(tmp_path):
     service = AvatarCacheService(tmp_path)
 
     assert service.cache_artist_avatar(Artist(id="123", name="Artist")) is False
-    assert service.cache_artist_avatar(
-        Artist(id="123", name="Artist", avatar_url="https://example.com/avatar.txt")
-    ) is False
+    assert (
+        service.cache_artist_avatar(
+            Artist(id="123", name="Artist", avatar_url="https://example.com/avatar.txt")
+        )
+        is False
+    )
     assert service.has_cached_avatar("123") is False
 
 

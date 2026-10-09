@@ -79,29 +79,53 @@ class AdvancedWorkflowRunner:
             definition_id=definition_id,
             created_at=now,
         )
-        self.repository.create_run(run)
-        for position, node in enumerate(definition.nodes):
-            self.repository.create_node_run(
-                WorkflowNodeRun(
-                    id=None,
-                    workflow_run_id=run.id,
-                    node_id=node.id,
-                    node_type=node.type,
-                    title=node.title or node.type.replace("_", " ").title(),
-                    position=position,
-                    status="pending",
-                    input={"config": node.config},
-                    created_at=now,
+        with self.repository.transaction():
+            self.repository.create_run(run)
+            for position, node in enumerate(definition.nodes):
+                self.repository.create_node_run(
+                    WorkflowNodeRun(
+                        id=None,
+                        workflow_run_id=run.id,
+                        node_id=node.id,
+                        node_type=node.type,
+                        title=node.title or node.type.replace("_", " ").title(),
+                        position=position,
+                        status="pending",
+                        input={"config": node.config},
+                        created_at=now,
+                    )
                 )
-            )
         run = self.repository.get_run(run.id) or run
         return self.process_run(run.id)
 
     def process_run(self, run_id: str) -> WorkflowRun:
+        if self.repository.get_run(run_id) is None:
+            raise ValueError(f"workflow run not found: {run_id}")
+        owner = str(uuid.uuid4())
+        with self.repository.conn:
+            claimed = self.repository.conn.execute(
+                "INSERT OR IGNORE INTO workflow_execution_claims VALUES (?, ?)",
+                (run_id, owner),
+            ).rowcount
+        if not claimed:
+            run = self.repository.get_run(run_id)
+            if run is None:
+                raise ValueError(f"workflow run not found: {run_id}")
+            return run
+        try:
+            return self._process_claimed_run(run_id)
+        finally:
+            with self.repository.conn:
+                self.repository.conn.execute(
+                    "DELETE FROM workflow_execution_claims WHERE workflow_run_id = ? AND owner = ?",
+                    (run_id, owner),
+                )
+
+    def _process_claimed_run(self, run_id: str) -> WorkflowRun:
         run = self.repository.get_run(run_id)
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
-        if not is_advanced_workflow_source(run.source):
+        if not is_advanced_workflow_source(run.source) or run.status != "running":
             return run
 
         context: dict[str, object] = {}
@@ -111,14 +135,24 @@ class AdvancedWorkflowRunner:
                 previous_output = node_run.output
                 context.update(node_run.output)
                 continue
-            if node_run.status == "failed":
+            if node_run.status in {"failed", "cancelled", "partial", "skipped"}:
+                self._stop_downstream(run.id, node_run.position)
                 break
             linked_job_ids = self._linked_job_ids(node_run)
-            if node_run.status == "running" and linked_job_ids:
+            if (
+                node_run.status == "running"
+                and linked_job_ids
+                and (
+                    node_run.output.get("jobs_initialized")
+                    or not node_run.input.get("execution_started")
+                )
+            ):
                 if linked_job_ids != node_run.job_ids:
                     node_run = replace(node_run, job_ids=linked_job_ids)
                 refreshed = self._refresh_node_jobs(node_run, context)
                 if refreshed.status != "completed":
+                    if refreshed.status in {"failed", "cancelled", "partial"}:
+                        self._stop_downstream(run.id, node_run.position)
                     break
                 node_run = refreshed
                 previous_output = node_run.output
@@ -128,7 +162,7 @@ class AdvancedWorkflowRunner:
                 node_run,
                 status="running",
                 started_at=node_run.started_at or utc_now(),
-                input={**node_run.input, "previous": previous_output},
+                input={**node_run.input, "previous": previous_output, "execution_started": True},
             )
             self.repository.update_node_run(node_run)
             try:
@@ -147,6 +181,7 @@ class AdvancedWorkflowRunner:
                     finished_at=utc_now(),
                 )
                 self.repository.update_node_run(failed)
+                self._stop_downstream(run.id, node_run.position)
                 break
             if node_run.status == "running":
                 break
@@ -157,6 +192,18 @@ class AdvancedWorkflowRunner:
 
     def close(self) -> None:
         self.repository.close()
+
+    def _stop_downstream(self, run_id: str, position: int) -> None:
+        for node in self.repository.list_node_runs(run_id):
+            if node.position > position and node.status == "pending":
+                self.repository.update_node_run(
+                    replace(
+                        node,
+                        status="skipped",
+                        finished_at=utc_now(),
+                        error_message="An upstream node did not complete successfully.",
+                    )
+                )
 
     def _execute_node(
         self,
@@ -182,10 +229,11 @@ class AdvancedWorkflowRunner:
         running = replace(
             node_run,
             status="running",
-            output=result.output,
+            output={**result.output, "jobs_initialized": True},
+            job_ids=result.job_ids,
         )
         self.repository.update_node_run(running)
-        return replace(running, job_ids=result.job_ids)
+        return running
 
     def _refresh_node_jobs(
         self,
@@ -208,12 +256,21 @@ class AdvancedWorkflowRunner:
             return failed
         if any(job.status in ACTIVE_JOB_STATUSES for job in jobs):
             return node_run
-        if any(job.status in FAILED_JOB_STATUSES for job in jobs):
-            failed_job = next((job for job in jobs if job.status in FAILED_JOB_STATUSES), jobs[0])
+        if any(job.status in FAILED_JOB_STATUSES or job.failed_files for job in jobs):
+            failed_job = next(
+                (job for job in jobs if job.status in FAILED_JOB_STATUSES or job.failed_files),
+                jobs[0],
+            )
             message = failed_job.error_message
             failed = replace(
                 node_run,
-                status="failed",
+                status=(
+                    "cancelled"
+                    if any(job.status == "cancelled" for job in jobs)
+                    else "partial"
+                    if any(job.completed_files or job.skipped_files for job in jobs)
+                    else "failed"
+                ),
                 error_message=message or node_run.error_message,
                 output={
                     **node_run.output,
@@ -274,12 +331,11 @@ class AdvancedWorkflowRunner:
         if run is None:
             raise ValueError(f"workflow run not found: {run_id}")
         node_runs = [
-            self._hydrate_node_run_jobs(node)
-            for node in self.repository.list_node_runs(run.id)
+            self._hydrate_node_run_jobs(node) for node in self.repository.list_node_runs(run.id)
         ]
         completed = sum(1 for node in node_runs if node.status == "completed")
-        failed = sum(1 for node in node_runs if node.status == "failed")
-        skipped = sum(1 for node in node_runs if node.status == "skipped")
+        failed = sum(1 for node in node_runs if node.status in {"failed", "partial"})
+        skipped = sum(1 for node in node_runs if node.status in {"skipped", "cancelled"})
         has_active = any(node.status in {"pending", "running"} for node in node_runs)
         status = advanced_run_status(
             completed=completed,
@@ -287,6 +343,10 @@ class AdvancedWorkflowRunner:
             skipped=skipped,
             running=has_active,
         )
+        if not has_active and any(node.status == "cancelled" for node in node_runs):
+            status = "cancelled"
+        elif not has_active and any(node.status == "partial" for node in node_runs):
+            status = "partial"
         refreshed = replace(
             run,
             status=status,

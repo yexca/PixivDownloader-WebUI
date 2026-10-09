@@ -168,7 +168,7 @@ export function ArtistsPage(): JSX.Element {
           <span>Showing {items.length}</span>
         </div>
 
-        {artists.isLoading ? (
+        {artists.isPending ? (
           <DataState title="Loading artists" variant="loading" />
         ) : artists.isError ? (
           <DataState title="Could not load artists" description={artists.error.message} variant="error" />

@@ -123,7 +123,8 @@ async function notifyBackend({ callbackUrl, flowId, payload }) {
   const response = await fetch(callbackUrl, {
     method: "POST",
     headers,
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000)
   });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -187,7 +188,7 @@ async function showResultPage(page, { title, message, tone }) {
 
 function authorized(request) {
   if (!TOKEN) {
-    return true;
+    return false;
   }
   return request.get("X-Pixiv-Auth-Browser-Token") === TOKEN;
 }

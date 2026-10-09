@@ -204,8 +204,10 @@ class WorkflowTriggerFacadeService:
         now = utc_now()
         updated_trigger = replace(
             trigger,
-            last_run_at=now,
-            last_success_at=now,
+            last_run_at=run.created_at or now,
+            last_success_at=run.finished_at
+            if run.status == "completed"
+            else trigger.last_success_at,
             last_error_code=None,
             last_error_message=None,
         )
@@ -353,10 +355,7 @@ def is_compat_schedule(definition: WorkflowDefinition, trigger: WorkflowTrigger)
         or trigger.schedule.get("compat_scheduled_task")
     ) or (
         isinstance(metadata, dict)
-        and bool(
-            metadata.get("compat_workflow_trigger")
-            or metadata.get("compat_scheduled_task")
-        )
+        and bool(metadata.get("compat_workflow_trigger") or metadata.get("compat_scheduled_task"))
     )
 
 
@@ -450,17 +449,19 @@ def config_from_meta(meta: dict[str, object]) -> WorkflowTriggerConfig:
     )
 
     raw = meta.get("config")
-    if not isinstance(raw, dict):
+    if not isinstance(raw, dict) or not raw:
         return legacy_config(
             WorkflowTriggerRuntime(
                 id=None,
                 name="",
-                action="download_artist",
+                action=meta.get("action", "download_artist"),
                 status="paused",
                 target_artist_id=str(meta.get("target_artist_id") or ""),
                 interval_days=interval_days_from_schedule({}),
             )
         )
+    raw = dict(raw)
+    raw.setdefault("actions", [meta.get("action", "download_artist")])
     return workflow_trigger_config_from_request(WorkflowTriggerConfigRequest.model_validate(raw))
 
 

@@ -31,8 +31,7 @@ def main() -> int:
         return 1
     if TARGET_PATH.exists() and not args.overwrite:
         print(
-            f"Target already exists: {TARGET_PATH}\n"
-            "Use --overwrite to replace it.",
+            f"Target already exists: {TARGET_PATH}\nUse --overwrite to replace it.",
             file=sys.stderr,
         )
         return 1

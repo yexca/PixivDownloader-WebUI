@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from backend.core.config import ExistingFileBehavior
 
@@ -26,6 +26,15 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsUpdateRequest(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_explicit_null(cls, value: object) -> object:
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key in cls.model_fields and item is None:
+                    raise ValueError(f"{key} cannot be null; omit the field to keep its value")
+        return value
+
     download_path: str | None = Field(default=None, min_length=1)
     refresh_token: str | None = None
     request_base_delay_seconds: float | None = Field(default=None, ge=0)

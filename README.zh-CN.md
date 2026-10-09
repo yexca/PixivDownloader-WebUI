@@ -28,7 +28,7 @@ docker compose up -d
 http://127.0.0.1:7653
 ```
 
-默认启动只包含 WebUI。需要通过浏览器登录 Pixiv 时，WebUI 会提示启动 `pixiv-auth-browser` 认证浏览器 sidecar：
+默认启动只包含 WebUI，两个端口均仅绑定本地回环地址。使用认证浏览器前，请按[部署文档](docs/deployment.md#browser-authentication)在私有 `.env` 中设置随机共享 token 和 VNC 密码，再启动 `pixiv-auth-browser`：
 
 ```bat
 docker compose --profile auth up -d pixiv-auth-browser
@@ -40,7 +40,7 @@ docker compose --profile auth up -d pixiv-auth-browser
 http://127.0.0.1:6080/vnc.html?autoconnect=true&resize=scale
 ```
 
-在 WebUI 设置页点击 Pixiv 登录后，在 noVNC 浏览器中完成 Pixiv 登录。后端会自动捕获回调并保存 `refresh_token`。配置完成并通过测试后，WebUI 会提示可以关闭认证浏览器：
+在 WebUI 设置页点击 Pixiv 登录后，输入 VNC 密码并在 noVNC 浏览器中完成 Pixiv 登录。后端会自动捕获回调并保存 `refresh_token`。配置完成并通过测试后，WebUI 会提示可以关闭认证浏览器：
 
 ```bat
 docker compose stop pixiv-auth-browser
@@ -52,7 +52,7 @@ docker compose stop pixiv-auth-browser
 docker compose down
 ```
 
-Compose 文件可构建 `yexca/pixivdownloader:v0.2.0`，映射 `7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。
+Compose 文件可构建 `yexca/pixivdownloader:v0.2.0`，映射 `127.0.0.1:7653:7653`，并挂载本地 `config/`、`resources/` 和 `downloads/` 目录用于持久化。
 
 ## 本地 Windows 运行
 
@@ -68,7 +68,7 @@ run-install.bat
 run-webui.bat
 ```
 
-脚本会检查 `env\python.exe` 和 `frontend\dist\index.html` 是否存在，然后启动后端并打开 <http://127.0.0.1:7653>。
+脚本会检查 `env\python\python.exe` 和 `frontend\dist\index.html` 是否存在，然后启动后端并打开 <http://127.0.0.1:7653>。
 
 如果需要使用其他本地端口，可以在运行脚本前设置 `PIXIVDOWNLOADER_PORT`。
 
@@ -106,7 +106,7 @@ config\settings.json
 旧版 `resources\conf\settings.json` 不会自动读取。如需显式迁移：
 
 ```bat
-env\python.exe tools\migrate_settings_to_config.py
+env\python\python.exe tools\migrate_settings_to_config.py
 ```
 
 如果 `config\settings.json` 已存在，可以使用 `--overwrite`。
@@ -116,7 +116,7 @@ env\python.exe tools\migrate_settings_to_config.py
 后端开发服务：
 
 ```bat
-env\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
+env\python\python.exe -m uvicorn backend.app:create_app --factory --reload --host 127.0.0.1 --port 7653
 ```
 
 前端开发服务：
@@ -129,15 +129,16 @@ npm run dev
 检查命令：
 
 ```bat
-env\python.exe -m ruff format --check .
-env\python.exe -m ruff check .
-env\python.exe -m pytest
+env\python\python.exe -m ruff format --check .
+env\python\python.exe -m ruff check .
+env\python\python.exe -m pytest
 ```
 
 ```bat
 cd frontend
 npm run lint
 npm run typecheck
+npm run test
 npm run build
 ```
 
@@ -164,3 +165,5 @@ npm run build
 ## 重要声明
 
 本工具仅供个人学习、研究或数据备份使用。请遵守 Pixiv 的服务条款，不要将本工具用于批量下载或内容再分发。
+
+当前测试基线、兼容性处理和依赖审计见[验证文档](docs/verification.md)与[修复交付报告](docs/repair-report.md)。远程访问请使用部署文档中的 SSH 隧道。

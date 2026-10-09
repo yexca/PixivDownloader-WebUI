@@ -5,6 +5,7 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from backend.repositories._time import utc_now
 from backend.repositories.workflow_definition_repository import (
@@ -17,6 +18,7 @@ from backend.repositories.workflow_run_repository import WorkflowRun
 from backend.schemas.failure_reasons import failure_detail_from_exception
 from backend.schemas.workflows import AdvancedWorkflowDefinitionRequest
 from backend.services.advanced_workflow_runner import AdvancedWorkflowRunner
+from backend.services.settings_service import AppSettingsService
 
 
 class WorkflowScheduleService:
@@ -56,8 +58,9 @@ class WorkflowScheduleService:
         definition_id: str | None = None,
         trigger_id: int | None = None,
     ) -> tuple[WorkflowDefinition, WorkflowTrigger]:
-        saved = self.save_definition(definition, definition_id=definition_id)
         now = utc_now()
+        next_run_at = next_run_time(schedule, from_time=now)
+        saved = self.save_definition(definition, definition_id=definition_id)
         if trigger_id is not None:
             current = self.repository.get_trigger(trigger_id)
             if current is None:
@@ -70,7 +73,7 @@ class WorkflowScheduleService:
                 current,
                 status="active" if enabled else "paused",
                 schedule=schedule,
-                next_run_at=next_run_time(schedule, from_time=now) if enabled else None,
+                next_run_at=next_run_at if enabled else None,
                 last_error_code=None if enabled else current.last_error_code,
                 last_error_message=None if enabled else current.last_error_message,
             )
@@ -85,7 +88,7 @@ class WorkflowScheduleService:
                 workflow_definition_id=saved.id,
                 status="active" if enabled else "paused",
                 schedule=schedule,
-                next_run_at=next_run_time(schedule, from_time=now) if enabled else None,
+                next_run_at=next_run_at if enabled else None,
             )
         )
         return saved, trigger
@@ -144,11 +147,59 @@ class WorkflowScheduleService:
         finally:
             runner.close()
 
-    def run_due_triggers(self) -> list[WorkflowTriggerRunResult]:
+    def run_due_triggers(self, *, startup_scan: bool = False) -> list[WorkflowTriggerRunResult]:
+        owner = str(uuid.uuid4())
+        with self.repository.conn:
+            claimed = self.repository.conn.execute(
+                "INSERT OR IGNORE INTO workflow_scheduler_claim VALUES (1, ?)",
+                (owner,),
+            ).rowcount
+        if not claimed:
+            return []
+        try:
+            return self._run_due_claimed(startup_scan=startup_scan)
+        finally:
+            with self.repository.conn:
+                self.repository.conn.execute(
+                    "DELETE FROM workflow_scheduler_claim WHERE owner = ?", (owner,)
+                )
+
+    def _run_due_claimed(self, *, startup_scan: bool) -> list[WorkflowTriggerRunResult]:
         now = utc_now()
+        self._reconcile_results()
+        settings = AppSettingsService(
+            db_path=self.db_path, settings_json_path=self.settings_json_path
+        )
+        try:
+            limit = settings.load().max_active_workflow_triggers
+        finally:
+            settings.close()
         results: list[WorkflowTriggerRunResult] = []
-        for trigger in self.repository.due_triggers(now):
+        triggers = self.repository.due_triggers(now)
+        if startup_scan:
+            seen = {trigger.id for trigger in triggers}
+            for item in self.repository.list_definitions():
+                for trigger in item.triggers:
+                    compat = (
+                        trigger.schedule.get("compat_scheduled_task")
+                        or trigger.schedule.get("compat_workflow_trigger")
+                        or {}
+                    )
+                    startup = trigger.schedule.get(
+                        "run_after_startup", compat.get("run_after_startup", False)
+                    )
+                    if startup and trigger.status == "active" and trigger.id not in seen:
+                        triggers.append(trigger)
+        for trigger in triggers:
             if trigger.id is None:
+                continue
+            active = self.repository.conn.execute(
+                "SELECT schedule_id FROM workflow_runs "
+                "WHERE status = 'running' AND schedule_id IS NOT NULL"
+            ).fetchall()
+            if len(active) >= limit:
+                break
+            if any(row["schedule_id"] == trigger.id for row in active):
                 continue
             try:
                 run = self.run_definition(
@@ -174,13 +225,44 @@ class WorkflowScheduleService:
                 trigger,
                 next_run_at=next_run_at,
                 last_run_at=now,
-                last_success_at=now,
                 last_error_code=None,
                 last_error_message=None,
             )
             self.repository.update_trigger(updated)
             results.append(WorkflowTriggerRunResult(trigger=updated, run=run, created=True))
+        self._reconcile_results()
         return results
+
+    def _reconcile_results(self) -> None:
+        for item in self.repository.list_definitions():
+            for trigger in item.triggers:
+                row = self.repository.conn.execute(
+                    "SELECT * FROM workflow_runs WHERE schedule_id = ? "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    (trigger.id,),
+                ).fetchone()
+                if row is None or row["status"] == "running" or row["finished_at"] is None:
+                    continue
+                if trigger.last_run_at and parse_time(row["created_at"]) < parse_time(
+                    trigger.last_run_at
+                ):
+                    # An older success must not erase a newer dispatch failure.
+                    continue
+                if row["status"] == "completed":
+                    updated = replace(
+                        trigger,
+                        last_success_at=row["finished_at"],
+                        last_error_code=None,
+                        last_error_message=None,
+                    )
+                else:
+                    updated = replace(
+                        trigger,
+                        last_error_code="workflow_" + row["status"],
+                        last_error_message=f"Workflow execution ended as {row['status']}",
+                    )
+                if updated != trigger:
+                    self.repository.update_trigger(updated)
 
     def close(self) -> None:
         self.repository.close()
@@ -202,8 +284,10 @@ class WorkflowTriggerRunResult:
 def next_run_time(schedule: dict[str, object], *, from_time: str) -> str:
     base = parse_time(from_time)
     schedule_type = str(schedule.get("type") or "interval")
+    if schedule_type in {"daily", "weekly", "monthly"}:
+        base = base.astimezone(ZoneInfo(str(schedule.get("timezone") or "UTC")))
     if schedule_type == "daily":
-        return next_daily(base, time_text(schedule.get("time"))).isoformat().replace("+00:00", "Z")
+        return isoformat_utc(next_daily(base, time_text(schedule.get("time"))))
     if schedule_type == "weekly":
         days = schedule.get("days_of_week")
         if not isinstance(days, list):
@@ -227,8 +311,8 @@ def next_run_time(schedule: dict[str, object], *, from_time: str) -> str:
 
 
 def next_daily(base: datetime, time: tuple[int, int]) -> datetime:
-    candidate = base.replace(hour=time[0], minute=time[1], second=0, microsecond=0)
-    if candidate <= base:
+    candidate = base.replace(hour=time[0], minute=time[1], second=0, microsecond=0, fold=0)
+    if candidate.astimezone(UTC) <= base.astimezone(UTC):
         candidate += timedelta(days=1)
     return candidate
 
@@ -238,10 +322,12 @@ def next_weekly(base: datetime, weekdays: list[int], time: tuple[int, int]) -> d
         day = base + timedelta(days=offset)
         if day.isoweekday() not in weekdays:
             continue
-        candidate = day.replace(hour=time[0], minute=time[1], second=0, microsecond=0)
-        if candidate > base:
+        candidate = day.replace(hour=time[0], minute=time[1], second=0, microsecond=0, fold=0)
+        if candidate.astimezone(UTC) > base.astimezone(UTC):
             return candidate
-    return (base + timedelta(days=7)).replace(hour=time[0], minute=time[1], second=0, microsecond=0)
+    return (base + timedelta(days=7)).replace(
+        hour=time[0], minute=time[1], second=0, microsecond=0, fold=0
+    )
 
 
 def next_monthly(base: datetime, day_value: object, time: tuple[int, int]) -> datetime:
@@ -261,8 +347,9 @@ def next_monthly(base: datetime, day_value: object, time: tuple[int, int]) -> da
             minute=time[1],
             second=0,
             microsecond=0,
+            fold=0,
         )
-        if candidate > base:
+        if candidate.astimezone(UTC) > base.astimezone(UTC):
             return candidate
         month += 1
         if month > 12:
@@ -296,4 +383,4 @@ def parse_time(value: str) -> datetime:
 
 
 def isoformat_utc(value: datetime) -> str:
-    return value.isoformat().replace("+00:00", "Z")
+    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")

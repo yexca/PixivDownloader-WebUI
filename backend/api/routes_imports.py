@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, File, UploadFile
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from backend.api.dependencies import DbPath, Queue, SettingsJsonPath
 from backend.core.paths import resources_dir
@@ -29,7 +28,17 @@ def import_legacy_database(
     legacy_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with legacy_path.open("wb") as target:
-            shutil.copyfileobj(file.file, target)
+            size = 0
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > 64 * 1024 * 1024:
+                    raise HTTPException(
+                        status_code=413, detail="Legacy database upload exceeds 64 MiB"
+                    )
+                target.write(chunk)
+    except Exception:
+        legacy_path.unlink(missing_ok=True)
+        raise
     finally:
         file.file.close()
     legacy_repository = LegacyImportRepository(db_path)

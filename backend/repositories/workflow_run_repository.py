@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -51,10 +51,23 @@ class WorkflowRunRepository:
     def __init__(self, db_path: Path | str | None = None) -> None:
         self.conn = connect(db_path)
 
+    @contextmanager
+    def transaction(self):
+        if self.conn.in_transaction:
+            yield
+            return
+        self.conn.execute("BEGIN IMMEDIATE")
+        try:
+            yield
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def create_run(self, run: WorkflowRun) -> None:
         created_at = run.created_at or utc_now()
         try:
-            with self.conn:
+            with self.transaction():
                 self.conn.execute(
                     """
                     INSERT INTO workflow_runs(
@@ -84,7 +97,7 @@ class WorkflowRunRepository:
 
     def update_run(self, run: WorkflowRun) -> None:
         try:
-            with self.conn:
+            with self.transaction():
                 self.conn.execute(
                     """
                     UPDATE workflow_runs
@@ -181,7 +194,7 @@ class WorkflowRunRepository:
     def create_node_run(self, node_run: WorkflowNodeRun) -> int:
         created_at = node_run.created_at or utc_now()
         try:
-            with self.conn:
+            with self.transaction():
                 cursor = self.conn.execute(
                     """
                     INSERT INTO workflow_node_runs(
@@ -217,7 +230,7 @@ class WorkflowRunRepository:
         if node_run.id is None:
             raise ValueError("workflow node run id is required")
         try:
-            with self.conn:
+            with self.transaction():
                 self.conn.execute(
                     """
                     UPDATE workflow_node_runs

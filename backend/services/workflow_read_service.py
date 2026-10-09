@@ -1,11 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from backend.repositories.workflow_run_repository import WorkflowRun, WorkflowRunRepository
-from backend.services.advanced_workflow_runner import (
-    AdvancedWorkflowRunner,
-)
 
 
 class WorkflowReadService:
@@ -31,14 +29,12 @@ class WorkflowReadService:
         return self.refresh_run(run)
 
     def refresh_run(self, run: WorkflowRun) -> WorkflowRun:
-        runner = AdvancedWorkflowRunner(
-            self.db_path,
-            settings_json_path=self.settings_json_path,
+        return replace(
+            run,
+            completed=sum(node.status == "completed" for node in run.node_runs),
+            failed=sum(node.status in {"failed", "partial"} for node in run.node_runs),
+            skipped=sum(node.status in {"skipped", "cancelled"} for node in run.node_runs),
         )
-        try:
-            return runner.process_run(run.id)
-        finally:
-            runner.close()
 
     def close(self) -> None:
         self.repository.close()

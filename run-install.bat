@@ -14,7 +14,7 @@ set "MINICONDA_URL=https://repo.anaconda.com/miniconda/Miniconda3-py312_25.11.1-
 set "CONDA_EXE=%MINICONDA_DIR%\Scripts\conda.exe"
 set "CONDA_BAT=%MINICONDA_DIR%\condabin\conda.bat"
 set "ENV_PYTHON=%PYTHON_DIR%\python.exe"
-set "NODE_VERSION=v22.12.0"
+set "NODE_VERSION=v22.23.1"
 set "NODE_DIR=%ENV_DIR%\node"
 set "NODE_ZIP=%ENV_DIR%\node.zip"
 set "NODE_URL=https://nodejs.org/dist/%NODE_VERSION%/node-%NODE_VERSION%-win-x64.zip"
@@ -146,7 +146,7 @@ echo Installing backend dependencies into the local Python runtime...
 "%ENV_PYTHON%" -m pip install --upgrade pip
 if errorlevel 1 exit /b 1
 
-"%ENV_PYTHON%" -m pip install -e ".[dev]"
+"%ENV_PYTHON%" -m pip install -c requirements.lock -e ".[dev]"
 if errorlevel 1 exit /b 1
 
 echo Backend dependencies installation complete.

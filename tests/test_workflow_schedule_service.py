@@ -135,18 +135,27 @@ def test_delete_definition_removes_triggers(tmp_path):
 def test_next_run_time_supports_interval_daily_weekly_monthly():
     base = "2026-07-01T02:30:00Z"
 
-    assert next_run_time(
-        {"type": "interval", "every": 6, "unit": "hours"},
-        from_time=base,
-    ) == "2026-07-01T08:30:00Z"
+    assert (
+        next_run_time(
+            {"type": "interval", "every": 6, "unit": "hours"},
+            from_time=base,
+        )
+        == "2026-07-01T08:30:00Z"
+    )
     assert next_run_time({"type": "daily", "time": "03:00"}, from_time=base) == (
         "2026-07-01T03:00:00Z"
     )
-    assert next_run_time(
-        {"type": "weekly", "days_of_week": [3], "time": "02:00"},
-        from_time=base,
-    ) == "2026-07-08T02:00:00Z"
-    assert next_run_time(
-        {"type": "monthly", "day": "last", "time": "04:00"},
-        from_time=base,
-    ) == "2026-07-31T04:00:00Z"
+    assert (
+        next_run_time(
+            {"type": "weekly", "days_of_week": [3], "time": "02:00"},
+            from_time=base,
+        )
+        == "2026-07-08T02:00:00Z"
+    )
+    assert (
+        next_run_time(
+            {"type": "monthly", "day": "last", "time": "04:00"},
+            from_time=base,
+        )
+        == "2026-07-31T04:00:00Z"
+    )

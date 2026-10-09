@@ -22,8 +22,12 @@ export function WorkflowRunDetail({
   const selectedNode = run.node_runs.find((node) => node.node_id === selectedNodeId) ?? run.node_runs[0] ?? null;
   const selectedNodeJobs = selectedNode ? jobs.filter((job) => selectedNode.job_ids.includes(job.id)) : [];
 
+  const previousRunId = React.useRef(run.id);
   React.useEffect(() => {
-    setSelectedNodeId(run.node_runs[0]?.node_id ?? null);
+    const changedRun = previousRunId.current !== run.id;
+    previousRunId.current = run.id;
+    setSelectedNodeId((current) => !changedRun && run.node_runs.some((node) => node.node_id === current)
+      ? current : run.node_runs[0]?.node_id ?? null);
   }, [run.id, run.node_runs]);
 
   return (

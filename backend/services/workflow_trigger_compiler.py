@@ -22,7 +22,7 @@ def workflow_trigger_definition(
             "id": "target",
             "type": "artist_target",
             "title": "Target artists",
-                "config": workflow_trigger_target_config(
+            "config": workflow_trigger_target_config(
                 config,
                 artist_ids=artist_ids,
                 artwork_ids=artwork_ids,
@@ -30,8 +30,7 @@ def workflow_trigger_definition(
         }
     ]
     if any(
-        action in {"sync_artist", "download_artist", "retry_failed_artist"}
-        for action in actions
+        action in {"sync_artist", "download_artist", "retry_failed_artist"} for action in actions
     ):
         nodes.append(
             {
@@ -41,6 +40,7 @@ def workflow_trigger_definition(
                 "config": {
                     "mode": "full"
                     if config.download_options.get("full_download")
+                    or config.download_options.get("force_rescan")
                     else "incremental"
                 },
             }
@@ -98,10 +98,7 @@ def workflow_trigger_target_config(
         "tag": config.target.tag,
         "tags": list(config.target.tags),
         "days": config.target.days,
-        "filters": [
-            {"type": item.type, "days": item.days}
-            for item in config.filters
-        ],
+        "filters": [{"type": item.type, "days": item.days} for item in config.filters],
         "artist_selection": config.artist_selection,
         "skip_unavailable_artists": config.skip_unavailable_artists,
         "max_artists": config.max_artists_per_run,
@@ -120,10 +117,10 @@ def workflow_trigger_downloads(config: WorkflowTriggerConfig) -> bool:
 
 
 def workflow_trigger_download_collect_mode(download_options: dict[str, object]) -> str:
-    if download_options.get("full_download"):
-        return "all_synced"
     if download_options.get("pending_only"):
         return "pending_files"
+    if download_options.get("full_download") or download_options.get("force_rescan"):
+        return "all_synced"
     return "new_since_last_download"
 
 
@@ -161,6 +158,7 @@ def workflow_trigger_download_nodes(
             "config": {
                 "download": True,
                 "execution_unit": "artist",
+                **download_options,
                 "naming_rule": download_options.get("naming_rule"),
             },
         },

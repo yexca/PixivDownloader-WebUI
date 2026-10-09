@@ -51,6 +51,7 @@ class DownloadCreateResponse(BaseModel):
 def download_request_options(request: DownloadCreateRequest) -> dict[str, object]:
     return {
         "full_download": request.full_download,
+        "force_rescan": request.force_rescan,
         "pending_only": request.pending_only,
         "max_artworks": request.max_artworks,
         "min_artwork_id": request.min_artwork_id.strip() if request.min_artwork_id else None,

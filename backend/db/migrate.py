@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -30,7 +31,7 @@ def migrate_database(
     _ = settings_json_path
     path = Path(db_path) if db_path is not None else default_database_path()
 
-    with connect(path) as conn:
+    with closing(connect(path)) as conn:
         ensure_migration_table(conn)
         applied_versions = get_applied_versions(conn)
         applied_migrations: list[Migration] = []
@@ -81,8 +82,13 @@ def discover_migrations() -> list[Migration]:
 def apply_migration(conn: sqlite3.Connection, migration: Migration) -> None:
     sql = migration.path.read_text(encoding="utf-8")
     try:
-        conn.execute("BEGIN")
-        conn.executescript(sql)
+        # executescript commits a pending transaction in sqlite3's legacy mode.
+        # Start the transaction inside the script so DDL and the version share it.
+        conn.executescript("BEGIN IMMEDIATE;\n" + sql)
+        if migration.version == "023":
+            from backend.db.legacy_workflows import repair_legacy_workflows
+
+            repair_legacy_workflows(conn)
         conn.execute(
             """
             INSERT INTO schema_migrations(version, name, applied_at)
@@ -91,7 +97,7 @@ def apply_migration(conn: sqlite3.Connection, migration: Migration) -> None:
             (migration.version, migration.name, utc_now()),
         )
         conn.commit()
-    except sqlite3.Error as exc:
+    except Exception as exc:
         conn.rollback()
         raise DatabaseError(f"failed to apply migration {migration.path.name}") from exc
 

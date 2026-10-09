@@ -22,3 +22,5 @@ This documentation is organized for three common readers:
 
 - [Development Guide](development.md): local dev servers, checks, project conventions, and troubleshooting.
 - [Verification](verification.md): automated checks, smoke tests, Docker checks, and manual UI checklist.
+
+- [Repair Report](repair-report.md): integrity fixes, compatibility decisions, regression evidence and dependency audit.

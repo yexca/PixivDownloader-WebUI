@@ -1,6 +1,6 @@
 import type { Job } from "@/api/jobs";
 import type { WorkflowTriggerRuntime } from "@/api/workflowTriggers";
-import type { WorkflowRun } from "@/api/workflows";
+import type { WorkflowNodeRun, WorkflowRun } from "@/api/workflows";
 
 export type WorkflowRunGroups = {
   active: WorkflowRun[];
@@ -35,7 +35,7 @@ export function workflowRunGroups(runs: WorkflowRun[]): WorkflowRunGroups {
   return {
     active: runs.filter((run) => run.status === "running"),
     failed: runs.filter((run) => run.status === "failed" || run.status === "partial"),
-    completed: runs.filter((run) => run.status === "completed" || run.status === "skipped")
+    completed: runs.filter((run) => run.status === "completed" || run.status === "skipped" || run.status === "cancelled")
   };
 }
 
@@ -221,7 +221,7 @@ export function workflowTriggerSummary(task: WorkflowTriggerRuntime): string {
   return `${target} · ${actions} · every ${task.interval_days} days`;
 }
 
-export function workflowRunTone(status: WorkflowRun["status"]): "default" | "success" | "danger" | "warning" | "muted" {
+export function workflowRunTone(status: WorkflowRun["status"] | WorkflowNodeRun["status"]): "default" | "success" | "danger" | "warning" | "muted" {
   if (status === "completed") {
     return "success";
   }

@@ -68,7 +68,7 @@ export function LogsPage(): JSX.Element {
         }
       />
       <div className="space-y-3 p-4 sm:p-6">
-        {logs.isLoading ? (
+        {logs.isPending ? (
           <DataState title="Loading events" variant="loading" />
         ) : logs.isError ? (
           <DataState title="Could not load events" description={logs.error.message} variant="error" />

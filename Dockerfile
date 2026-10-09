@@ -19,14 +19,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml requirements.lock README.md ./
 COPY backend ./backend
 COPY config ./config
 COPY resources ./resources
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir -c requirements.lock .
 
 EXPOSE 7653
 

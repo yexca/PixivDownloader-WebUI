@@ -10,6 +10,17 @@ run-install.bat
 
 This creates local runtimes under `env/`, installs Python dependencies into `env/python`, installs frontend dependencies with `env/node`, and builds `frontend/dist`.
 
+Alternatively, with an existing Python 3.12 and Node 22.12 or newer:
+
+```bat
+py -3.12 -m venv .venv
+.venv\Scripts\python.exe -m pip install -c requirements.lock -e ".[dev]"
+cd frontend
+npm ci
+```
+
+Use `.venv\Scripts\python.exe` instead of `env\python\python.exe` in the commands below when using this alternative. Keep application dependencies pinned with `requirements.lock`; regenerate it only in a clean Python 3.12 environment and verify both Windows and Linux installation. Frontend and auth-browser dependencies have independent npm lockfiles.
+
 ## Backend Development
 
 ```bat
@@ -47,6 +58,7 @@ Frontend:
 cd frontend
 npm run lint
 npm run typecheck
+npm run test
 npm run build
 ```
 
@@ -55,6 +67,10 @@ Database migration tests:
 ```bat
 env\python\python.exe -m pytest tests\test_database_migrations.py
 ```
+
+`typecheck` explicitly checks `tsconfig.app.json` and `tsconfig.node.json`, including application, tests and build configuration. `build` runs that check before Vite. CI also runs frontend lint and behavior tests, Ruff lint/format, backend tests, and sidecar syntax/lockfile checks.
+
+Tests redirect all default runtime paths into temporary folders and reject unmocked requests. Do not point a development smoke test at a user's database or run real scheduled triggers without their authorization. See [Verification](verification.md) for the current baseline.
 
 ## Code Organization
 

@@ -49,7 +49,8 @@ def test_health_endpoint(tmp_path):
     response = client.get("/api/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": "0.2.0"}
+    assert response.json()["status"] == "ok"
+    assert response.json()["executors"]["enabled"] is False
 
 
 def test_dashboard_summary_endpoint_returns_runtime_and_library_counts(tmp_path):
@@ -382,6 +383,7 @@ def test_pixiv_browser_auth_start_calls_sidecar(tmp_path, monkeypatch):
     calls = []
 
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "test-only-secret")
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_PUBLIC_URL", "http://127.0.0.1:6080/vnc.html")
 
     def fake_post(url, *, json, headers, timeout):
@@ -405,6 +407,7 @@ def test_pixiv_browser_auth_service_status_reports_running(tmp_path, monkeypatch
     client = make_client(tmp_path)
 
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "test-only-secret")
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_PUBLIC_URL", "http://127.0.0.1:6080/vnc.html")
 
     def fake_get(url, *, timeout):
@@ -429,6 +432,7 @@ def test_pixiv_browser_auth_service_status_reports_stopped(tmp_path, monkeypatch
     client = make_client(tmp_path)
 
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "test-only-secret")
 
     def fake_get(url, *, timeout):
         _ = (url, timeout)
@@ -447,6 +451,7 @@ def test_pixiv_browser_auth_callback_saves_token(tmp_path, monkeypatch):
     client = make_client(tmp_path)
 
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_INTERNAL_URL", "http://auth-browser.test")
+    monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "test-only-secret")
     monkeypatch.setenv("PIXIV_AUTH_BROWSER_TOKEN", "shared-secret")
 
     def fake_sidecar_post(_url, *, json: object, headers: object, timeout: object):

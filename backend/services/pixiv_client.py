@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from backend.core.config import SettingsService
-from backend.core.errors import PixivApiError, PixivAuthError
+from backend.core.errors import JobCancelledError, PixivApiError, PixivAuthError
 from backend.domain.entities import Artist, Artwork, ArtworkFile
 from backend.domain.types import ArtistAccountStatus
 from backend.services.pixiv_rate_policy import PixivRequestPolicy, metadata_request_policy
@@ -51,7 +51,7 @@ class PixivClient:
         if api is None:
             from pixivpy3 import AppPixivAPI
 
-            api = AppPixivAPI()
+            api = AppPixivAPI(timeout=(10, 30))
         self.api = api
         self.sleeper = sleeper
         if request_policy is None and sleeper is None and not api_was_injected:
@@ -70,6 +70,8 @@ class PixivClient:
     def get_artist_by_user_id(self, user_id: str) -> Artist:
         try:
             result = self._request(lambda: self.api.user_detail(user_id))
+        except JobCancelledError:
+            raise
         except Exception as exc:
             raise PixivApiError(f"failed to fetch Pixiv user {user_id}") from exc
         status, reason = account_status_from_user_detail(result)
@@ -94,6 +96,8 @@ class PixivClient:
     def get_artist_by_artwork_id(self, artwork_id: str) -> Artist:
         try:
             illust = self._request(lambda: self.api.illust_detail(artwork_id)).illust
+        except JobCancelledError:
+            raise
         except Exception as exc:
             raise PixivApiError(f"failed to fetch Pixiv artwork {artwork_id}") from exc
         return artist_from_pixiv_user(illust.user)
@@ -120,6 +124,8 @@ class PixivClient:
                     json_result = self._request(
                         lambda page_qs=page_qs: self.api.user_illusts(**page_qs)
                     )
+            except JobCancelledError:
+                raise
             except Exception as exc:
                 raise PixivApiError(f"failed to fetch artworks for Pixiv user {user_id}") from exc
 

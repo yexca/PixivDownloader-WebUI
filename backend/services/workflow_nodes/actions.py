@@ -36,6 +36,11 @@ class ExecuteActionsNodeExecutor(WorkflowNodeExecutorBase):
             )
 
         options = {
+            **{
+                key: config[key]
+                for key in ("naming_tag_variants", "tag_variants", "only_new_artworks")
+                if key in config
+            },
             "candidate_set_id": candidate_set_id,
             "candidate_source": context.values.get("candidate_source"),
             "execution_unit": execution_unit,

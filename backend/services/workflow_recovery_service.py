@@ -30,6 +30,10 @@ class WorkflowRecoveryService:
         self.repository = WorkflowRunRepository(db_path)
 
     def recover_startup(self) -> list[WorkflowRun]:
+        # Startup runs before executors start; abandoned process claims are safe to release.
+        with self.repository.conn:
+            self.repository.conn.execute("DELETE FROM workflow_execution_claims")
+            self.repository.conn.execute("DELETE FROM workflow_scheduler_claim")
         recovered: list[WorkflowRun] = []
         for run in self.repository.list_runs_by_status("running"):
             recovered.append(self._recover_running_run(run))
@@ -57,9 +61,7 @@ class WorkflowRecoveryService:
 
     def _requeue_interrupted_node_jobs(self, run: WorkflowRun) -> None:
         running_job_ids = [
-            job.id
-            for job in self._jobs_for_node_runs(run.node_runs)
-            if job.status == "running"
+            job.id for job in self._jobs_for_node_runs(run.node_runs) if job.status == "running"
         ]
         self._requeue_jobs(running_job_ids)
 

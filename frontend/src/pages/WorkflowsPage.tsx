@@ -764,7 +764,7 @@ function WorkflowGraph({
 
   React.useEffect(() => {
     if (nodes[0] && selectedNodeId !== resolvedSelectedNodeId) {
-      onSelectNode(resolvedSelectedNodeId);
+      onSelectNode(resolvedSelectedNodeId ?? nodes[0].id);
     }
   }, [nodes, onSelectNode, resolvedSelectedNodeId, selectedNodeId]);
 
@@ -1210,7 +1210,7 @@ function jobTarget(job: Job): string {
   return "No target";
 }
 
-function nodeIcon(type: string): React.ComponentType<{ className?: string; "aria-hidden"?: boolean }> {
+function nodeIcon(type: string): typeof Activity {
   if (type === "artist_target") {
     return UserRoundSearch;
   }

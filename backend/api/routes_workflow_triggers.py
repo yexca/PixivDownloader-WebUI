@@ -44,9 +44,7 @@ def create_workflow_trigger(
 ) -> WorkflowTriggerResponse:
     service = WorkflowTriggerFacadeService(db_path, settings_json_path=settings_json_path)
     config = (
-        workflow_trigger_config_from_request(request.config)
-        if request.config is not None
-        else None
+        workflow_trigger_config_from_request(request.config) if request.config is not None else None
     )
     action = request.action or (config.actions[0] if config is not None else "download_artist")
     target_artist_id = request.target_artist_id or (
@@ -79,9 +77,7 @@ def update_workflow_trigger(
 ) -> WorkflowTriggerResponse:
     service = WorkflowTriggerFacadeService(db_path, settings_json_path=settings_json_path)
     config = (
-        workflow_trigger_config_from_request(request.config)
-        if request.config is not None
-        else None
+        workflow_trigger_config_from_request(request.config) if request.config is not None else None
     )
     try:
         trigger = service.update_trigger(

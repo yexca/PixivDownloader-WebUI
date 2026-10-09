@@ -251,9 +251,13 @@ def normalize_artist_source(value: object) -> str:
 
 def clean_download_options(options: dict[str, object]) -> dict[str, object]:
     cleaned: dict[str, object] = {}
-    full_download = options.get("full_download")
-    if isinstance(full_download, bool):
-        cleaned["full_download"] = full_download
+    for key in ("full_download", "force_rescan", "pending_only"):
+        value = options.get(key)
+        if isinstance(value, bool):
+            cleaned[key] = value
+    conflict_mode = options.get("conflict_mode")
+    if isinstance(conflict_mode, str) and conflict_mode in {"skip", "overwrite", "rename"}:
+        cleaned["conflict_mode"] = conflict_mode
     for key in ("max_artworks", "min_artwork_id", "max_artwork_id"):
         value = options.get(key)
         if value is None or value == "":

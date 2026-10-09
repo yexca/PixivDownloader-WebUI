@@ -252,7 +252,7 @@ export function SettingsPage(): JSX.Element {
       setAuthFlow(response);
       setAuthCode("");
       window.open(response.login_url, "_blank", "noopener,noreferrer");
-      pushToast({ title: "Pixiv sign-in opened", description: "Paste the callback URL or code after logging in." });
+      pushToast({ tone: "success", title: "Pixiv sign-in opened", description: "Paste the callback URL or code after logging in." });
     },
     onError: (error) => pushToast({ title: "Could not start Pixiv sign-in", description: error.message, tone: "error" })
   });
@@ -274,7 +274,7 @@ export function SettingsPage(): JSX.Element {
       setAuthFlow(null);
       setAuthCode("");
       window.open(response.novnc_url, "_blank", "noopener,noreferrer");
-      pushToast({ title: "Pixiv browser sign-in opened", description: "Complete login in the remote browser window." });
+      pushToast({ tone: "success", title: "Pixiv browser sign-in opened", description: "Complete login in the remote browser window." });
     },
     onError: (error) => {
       if (error instanceof AuthBrowserNotConfiguredError) {
@@ -350,10 +350,10 @@ export function SettingsPage(): JSX.Element {
     <>
       <PageHeader title="Settings" description="Configure local download and Pixiv request behavior." />
       <div className="p-4 sm:p-6">
-        {settings.isLoading || !basicForm ? (
-          <DataState title="Loading settings" variant="loading" />
-        ) : settings.isError ? (
+        {settings.isError ? (
           <DataState title="Could not load settings" description={settings.error.message} variant="error" />
+        ) : settings.isPending || !basicForm ? (
+          <DataState title="Loading settings" variant="loading" />
         ) : (
           <div className="surface max-w-4xl p-4">
             <Tabs

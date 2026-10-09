@@ -193,7 +193,7 @@ export function LibraryPage(): JSX.Element {
 
         <div className="grid gap-4 xl:grid-cols-[minmax(680px,1fr)_360px]">
           <section className="space-y-3">
-            {artists.isLoading ? (
+            {artists.isPending ? (
               <DataState title="Loading artists" variant="loading" />
             ) : artists.isError ? (
               <DataState title="Could not load artists" description={artists.error.message} variant="error" />

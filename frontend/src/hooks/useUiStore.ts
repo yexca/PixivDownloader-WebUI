@@ -69,7 +69,7 @@ export const useUiStore = create<UiState>((set) => ({
     }),
   updateThemePreset: (preset) =>
     set((state) => {
-      const customPresets = state.customThemePresets.map((item) => (item.id === preset.id ? { ...preset, source: "user", readonly: false } : item));
+      const customPresets = state.customThemePresets.map((item) => (item.id === preset.id ? { ...preset, source: "user" as const, readonly: false } : item));
       return persistAndApply(state.appearanceSettings, customPresets);
     }),
   deleteThemePreset: (presetId) =>
