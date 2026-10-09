@@ -59,6 +59,14 @@ Use `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` for dependency-only verification. The s
 
 Frontend behavior tests cover the first settings request failing, selection retained across workflow polling, reset on a different workflow, job stream switching/stale events, updating actual jobs cache keys, and displaying the specific server validation reason.
 
+### Advanced workflow editor follow-up (2026-10-09)
+
+The editor uses one selected trigger for schedule hydration, draft initialization, change comparison, configuration merging and submission. An omitted or null trigger ID selects the first trigger in the definition's list; an explicit missing ID blocks saving and running. The editor displays the selected trigger ID and status. Switching triggers refreshes the draft and comparison baseline, and Reset restores the current selection.
+
+Ordinary target/node edits send no trigger update, preserving every schedule, pause state, next-run time and other trigger. Explicit schedule edits write the displayed rule and retain the selected trigger's compatibility options and pause state. Rule-type changes remove old fields that the new rule does not use, including calendar time/timezone fields when switching to an interval. Interval timezones already stored as compatibility options remain intact on interval-only edits; the timezone input is shown only for daily, weekly and monthly rules.
+
+`frontend/src/test/advancedWorkflowTriggers.test.tsx` adds 27 mocked behavior cases, including the WorkflowsPage entry point, different rules on multiple triggers, default/missing IDs, trigger switches/Reset, ordinary target/node edits, all 12 rule-type conversions, and Run + schedule with a paused trigger. Together with the existing target and state regressions, all 84 frontend tests pass. Frontend lint, both TypeScript projects and the production build are checked without starting the backend, accessing user runtime data or dispatching real workflows.
+
 ## Docker Checks
 
 To build without starting any application/scheduler or attaching user volumes:

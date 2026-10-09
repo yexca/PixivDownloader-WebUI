@@ -25,7 +25,8 @@ import {
   type AdvancedWorkflowNode,
   type AdvancedWorkflowRunRequest,
   type WorkflowDefinition,
-  type WorkflowScheduleRule
+  type WorkflowScheduleRule,
+  type WorkflowTrigger
 } from "@/api/workflows";
 import { cn } from "@/lib/utils";
 
@@ -177,9 +178,19 @@ export function AdvancedWorkflowBuilder({
 }: AdvancedWorkflowBuilderProps): JSX.Element {
   const queryClient = useQueryClient();
   const { pushToast } = useToast();
+  // An omitted ID consistently selects the first trigger; an explicit ID never falls back.
+  const selectedTrigger = React.useMemo(
+    () => triggerId == null
+      ? definition?.triggers[0]
+      : definition?.triggers.find((trigger) => trigger.id === triggerId),
+    [definition, triggerId]
+  );
+  const triggerError = triggerId != null && !selectedTrigger
+    ? `Trigger #${triggerId} is no longer available in this workflow. Reopen the editor from an existing trigger.`
+    : null;
   const hydratedDraft = React.useMemo(
-    () => draftFromDefinition(definition, initialTriggerMode, initialName),
-    [definition, initialName, initialTriggerMode]
+    () => draftFromDefinition(definition, selectedTrigger, initialTriggerMode, initialName),
+    [definition, selectedTrigger, initialName, initialTriggerMode]
   );
   const [draft, setDraft] = React.useState<WorkflowDraft>(hydratedDraft);
   const [selectedStage, setSelectedStage] = React.useState<StageKey>(initialStage);
@@ -275,6 +286,11 @@ export function AdvancedWorkflowBuilder({
 
   const submitting = runMutation.isPending || saveMutation.isPending;
   const submitAdvanced = () => {
+    if (triggerError) {
+      pushToast({ title: "Trigger cannot be edited", description: triggerError, tone: "error" });
+      setSelectedStage("trigger");
+      return;
+    }
     if (draft.targetError) {
       pushToast({ title: "Target cannot be edited safely", description: draft.targetError, tone: "error" });
       setSelectedStage("target");
@@ -293,12 +309,11 @@ export function AdvancedWorkflowBuilder({
       runMutation.mutate(workflowJson);
       return;
     }
-    const existingTrigger = definition?.triggers.find((trigger) => trigger.id === triggerId) ?? definition?.triggers[0];
     const schedule = buildScheduleRule(draft);
     const originalSchedule = buildScheduleRule(hydratedDraft);
     // Saving target edits must not resume paused triggers or reschedule their next run.
     const shouldSchedule = draft.triggerMode === "schedule" && (
-      !existingTrigger || hydratedDraft.triggerMode !== "schedule" ||
+      !selectedTrigger || hydratedDraft.triggerMode !== "schedule" ||
       JSON.stringify(schedule) !== JSON.stringify(originalSchedule) || draft.saveIntent === "run_and_schedule"
     );
     saveMutation.mutate({
@@ -306,10 +321,10 @@ export function AdvancedWorkflowBuilder({
       definition: workflowJson.definition,
       trigger: shouldSchedule
         ? {
-            trigger_id: triggerId ?? existingTrigger?.id ?? null,
-            enabled: existingTrigger ? existingTrigger.status === "active" : true,
-            schedule: existingTrigger && schedule.type === originalSchedule.type
-              ? mergeConfigChanges(existingTrigger.schedule, schedule, originalSchedule) as WorkflowScheduleRule
+            trigger_id: selectedTrigger?.id ?? null,
+            enabled: selectedTrigger ? selectedTrigger.status === "active" : true,
+            schedule: selectedTrigger
+              ? mergeScheduleRule(selectedTrigger.schedule, schedule)
               : schedule,
             run_now: draft.saveIntent === "run_and_schedule"
           }
@@ -329,6 +344,11 @@ export function AdvancedWorkflowBuilder({
               <p className="mt-1 text-sm text-muted-foreground">
                 Build the real workflow nodes that the backend will execute.
               </p>
+              {selectedTrigger ? (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Editing trigger #{selectedTrigger.id} · {selectedTrigger.status}
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="outline" onClick={() => setDraft(hydratedDraft)}>
@@ -337,7 +357,7 @@ export function AdvancedWorkflowBuilder({
             </Button>
             <Button
               type="button"
-              disabled={submitting || Boolean(draft.targetError)}
+              disabled={submitting || Boolean(draft.targetError) || Boolean(triggerError)}
               onClick={submitAdvanced}
             >
               <Save className="h-4 w-4" aria-hidden="true" />
@@ -345,6 +365,11 @@ export function AdvancedWorkflowBuilder({
             </Button>
             </div>
           </div>
+          {triggerError ? (
+            <p role="alert" className="mt-3 text-sm text-destructive">
+              {triggerError} Saving and running are disabled.
+            </p>
+          ) : null}
           {draft.targetError ? (
             <p role="alert" className="mt-3 text-sm text-destructive">
               {draft.targetError} The original configuration is preserved. Saving and running are disabled;
@@ -481,9 +506,11 @@ function StageEditor({
                 onChange={(value) => update("saveIntent", value)}
               />
             </Field>
-            <Field label="Time zone (IANA)">
-              <Input value={draft.scheduleTimezone} onChange={(event) => update("scheduleTimezone", event.target.value)} />
-            </Field>
+            {draft.scheduleType !== "interval" ? (
+              <Field label="Time zone (IANA)">
+                <Input value={draft.scheduleTimezone} onChange={(event) => update("scheduleTimezone", event.target.value)} />
+              </Field>
+            ) : null}
             <Field label="Schedule type">
               <Select value={draft.scheduleType} onChange={(event) => update("scheduleType", event.target.value as ScheduleType)} className="w-full">
                 <option value="interval">Interval</option>
@@ -1338,8 +1365,20 @@ function buildScheduleRule(draft: WorkflowDraft): WorkflowScheduleRule {
   };
 }
 
+function mergeScheduleRule(original: Record<string, unknown>, edited: WorkflowScheduleRule): WorkflowScheduleRule {
+  // Write the displayed rule in full when explicitly edited, retaining compatibility options.
+  const schedule: Record<string, unknown> = { ...original, ...edited };
+  if ((original.type ?? "interval") !== edited.type) {
+    for (const key of ["every", "unit", "time", "timezone", "days_of_week", "day"]) {
+      if (!(key in edited)) delete schedule[key];
+    }
+  }
+  return schedule as WorkflowScheduleRule;
+}
+
 function draftFromDefinition(
   definition?: WorkflowDefinition | null,
+  selectedTrigger?: WorkflowTrigger,
   initialTriggerMode: TriggerMode = "manual",
   initialName = defaultWorkflowName()
 ): WorkflowDraft {
@@ -1352,7 +1391,7 @@ function draftFromDefinition(
     };
   }
   const nodes = workflowNodesFromDefinition(definition);
-  const scheduleDraft = scheduleDraftFromTrigger(definition.triggers[0]?.schedule);
+  const scheduleDraft = scheduleDraftFromTrigger(selectedTrigger?.schedule);
   const target = findNode(nodes, "artist_target");
   const sync = findNode(nodes, "sync_metadata");
   const collect = findNode(nodes, "collect_artworks");
@@ -1371,8 +1410,8 @@ function draftFromDefinition(
     ...initialDraft,
     ...scheduleDraft,
     name: definition.name,
-    triggerMode: definition.triggers.length ? "schedule" : "manual",
-    saveIntent: definition.triggers.length ? "save_and_schedule" : "save_only",
+    triggerMode: selectedTrigger ? "schedule" : "manual",
+    saveIntent: selectedTrigger ? "save_and_schedule" : "save_only",
     modules: {
       sync: Boolean(sync),
       collect: Boolean(collect),
@@ -1454,6 +1493,7 @@ function scheduleDraftFromTrigger(schedule?: Record<string, unknown>): Partial<W
   }
   return {
     scheduleType: "interval",
+    scheduleTimezone: stringOption(schedule.timezone, "UTC"),
     intervalEvery: numberText(schedule.every) || initialDraft.intervalEvery,
     intervalUnit: intervalUnitOption(schedule.unit)
   };
